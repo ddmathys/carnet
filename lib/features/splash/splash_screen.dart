@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/services/migration_service.dart';
+import '../../core/services/user_service.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
   const SplashScreen({super.key});
@@ -37,7 +40,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (!mounted) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
-      context.go('/home');
+      try { await MigrationService.runIfNeeded(); } catch (_) {}
+      try { await UserService.onLogin(); } catch (_) {}
+      if (mounted) context.go('/home');
     } else {
       context.go('/auth');
     }
@@ -61,24 +66,26 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Text(
-                  '🌱',
-                  style: TextStyle(fontSize: 80),
+                SvgPicture.asset(
+                  'assets/images/bloom_logo_v3.svg',
+                  width: 160,
+                  height: 160,
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'Bloom',
+                  'carnet',
                   style: TextStyle(
                     fontFamily: 'PlayfairDisplay',
                     fontSize: 48,
                     fontWeight: FontWeight.bold,
                     color: AppColors.cream,
                     letterSpacing: 2,
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'Chaque enfant mérite un livre.',
+                  'Chaque histoire mérite d\'être racontée.',
                   style: TextStyle(
                     fontFamily: 'DMSans',
                     fontSize: 14,

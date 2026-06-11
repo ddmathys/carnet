@@ -17,6 +17,9 @@ dependencies:
   firebase_storage: ^12.3.3
   google_sign_in: ^6.2.1
 
+  # SVG
+  flutter_svg: ^2.0.10+1
+
   # Navigation
   go_router: ^14.3.0
 
@@ -36,17 +39,33 @@ dependencies:
   shared_preferences: ^2.3.2
   uuid: ^4.5.1
 
+  # PDF export
+  pdf: ^3.10.8
+  printing: ^5.12.0
+
+  exif: ^3.3.0
+  google_mlkit_text_recognition: ^0.13.1
+  speech_to_text: ^7.0.0
   cupertino_icons: ^1.0.8
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
+  flutter_launcher_icons: ^0.14.3
+
+flutter_launcher_icons:
+  android: true
+  ios: false
+  image_path: "assets/images/launcher_icon.png"
+  adaptive_icon_background: "#3A6648"
+  adaptive_icon_foreground: "assets/images/launcher_icon.png"
 
 flutter:
   uses-material-design: true
   assets:
     - assets/images/
+    - assets/images/animals/
     - assets/icons/
   fonts:
     - family: PlayfairDisplay

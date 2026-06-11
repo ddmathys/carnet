@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/animals.dart';
+import '../../core/widgets/date_mask_field.dart';
 
 class AddChildScreen extends StatefulWidget {
   const AddChildScreen({super.key});
@@ -20,12 +20,19 @@ class _AddChildScreenState extends State<AddChildScreen> {
   DateTime? _birthDate;
   String _selectedAnimalId = 'fox';
   String _selectedColor = '#7A9E7E';
+  String _gender = 'boy'; // 'boy' | 'girl'
   bool _loading = false;
-  int _step = 0; // 0=animal, 1=infos
+  int _step = 0; // 0=genre, 1=animal, 2=infos
 
-  final List<String> _coverColors = [
-    '#7A9E7E', '#C4956A', '#F5ECD7', '#B5C4D0', '#D4A5A5', '#A8B8A8',
+  final List<String> _coverColorsBoy = [
+    '#B5C4D0', '#7A9E7E', '#A8B8A8', '#6B8E9F', '#4A7A8A', '#5A8A7A',
   ];
+  final List<String> _coverColorsGirl = [
+    '#D4A5A5', '#C4956A', '#E8C4B8', '#D4A0A0', '#C49090', '#B88080',
+  ];
+
+  List<String> get _coverColors =>
+      _gender == 'boy' ? _coverColorsBoy : _coverColorsGirl;
 
   @override
   void initState() {
@@ -38,6 +45,13 @@ class _AddChildScreenState extends State<AddChildScreen> {
     _nameController.dispose();
     _animalNameController.dispose();
     super.dispose();
+  }
+
+  void _selectGender(String gender) {
+    setState(() {
+      _gender = gender;
+      _selectedColor = gender == 'boy' ? '#B5C4D0' : '#D4A5A5';
+    });
   }
 
   void _selectAnimal(Animal animal) {
@@ -76,10 +90,11 @@ class _AddChildScreenState extends State<AddChildScreen> {
         'animalId': _selectedAnimalId,
         'animalName': _animalNameController.text.trim(),
         'coverColor': _selectedColor,
+        'gender': _gender,
         'createdAt': FieldValue.serverTimestamp(),
       });
       if (mounted) context.go('/home');
-    } catch (e) {
+    } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Erreur lors de la sauvegarde')),
@@ -90,19 +105,81 @@ class _AddChildScreenState extends State<AddChildScreen> {
     }
   }
 
+  String get _appBarTitle {
+    switch (_step) {
+      case 0: return 'Garçon ou fille ?';
+      case 1: return 'Choisis un compagnon';
+      default: return 'Ton enfant';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(_step == 0 ? 'Choisis un compagnon' : 'Ton enfant'),
-        leading: _step == 1
+        title: Text(_appBarTitle),
+        leading: _step > 0
             ? IconButton(
                 icon: const Icon(Icons.arrow_back),
-                onPressed: () => setState(() => _step = 0),
+                onPressed: () => setState(() => _step--),
               )
             : null,
       ),
-      body: _step == 0 ? _buildAnimalStep() : _buildInfoStep(),
+      body: switch (_step) {
+        0 => _buildGenderStep(),
+        1 => _buildAnimalStep(),
+        _ => _buildInfoStep(),
+      },
+    );
+  }
+
+  Widget _buildGenderStep() {
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'C\'est un garçon\nou une fille ?',
+            style: TextStyle(
+              fontFamily: 'PlayfairDisplay',
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: AppColors.textDark,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Cette info personnalise la courbe de croissance.',
+            style: TextStyle(color: AppColors.textMedium),
+          ),
+          const SizedBox(height: 40),
+          Row(
+            children: [
+              Expanded(child: _GenderCard(
+                emoji: '👦',
+                label: 'Garçon',
+                color: const Color(0xFFB5C4D0),
+                selected: _gender == 'boy',
+                onTap: () => _selectGender('boy'),
+              )),
+              const SizedBox(width: 16),
+              Expanded(child: _GenderCard(
+                emoji: '👧',
+                label: 'Fille',
+                color: const Color(0xFFD4A5A5),
+                selected: _gender == 'girl',
+                onTap: () => _selectGender('girl'),
+              )),
+            ],
+          ),
+          const Spacer(),
+          ElevatedButton(
+            onPressed: () => setState(() => _step = 1),
+            child: const Text('Continuer'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -167,9 +244,7 @@ class _AddChildScreenState extends State<AddChildScreen> {
                           '"${animal.defaultCompanionName}"',
                           style: TextStyle(
                             fontSize: 12,
-                            color: selected
-                                ? AppColors.cream
-                                : AppColors.textMedium,
+                            color: selected ? AppColors.cream : AppColors.textMedium,
                           ),
                         ),
                       ],
@@ -181,7 +256,7 @@ class _AddChildScreenState extends State<AddChildScreen> {
           ),
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: () => setState(() => _step = 1),
+            onPressed: () => setState(() => _step = 2),
             child: const Text('Continuer'),
           ),
         ],
@@ -202,15 +277,13 @@ class _AddChildScreenState extends State<AddChildScreen> {
               children: [
                 Text(animal.emoji, style: const TextStyle(fontSize: 40)),
                 const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Super choix !',
-                    style: const TextStyle(
-                      fontFamily: 'PlayfairDisplay',
-                      fontSize: 26,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textDark,
-                    ),
+                const Text(
+                  'Super choix !',
+                  style: TextStyle(
+                    fontFamily: 'PlayfairDisplay',
+                    fontSize: 26,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textDark,
                   ),
                 ),
               ],
@@ -223,32 +296,12 @@ class _AddChildScreenState extends State<AddChildScreen> {
               validator: (v) => v == null || v.isEmpty ? 'Champs requis' : null,
             ),
             const SizedBox(height: 12),
-            GestureDetector(
-              onTap: _pickDate,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                decoration: BoxDecoration(
-                  color: AppColors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.beige, width: 1.5),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.cake_outlined, color: AppColors.textMedium),
-                    const SizedBox(width: 12),
-                    Text(
-                      _birthDate == null
-                          ? 'Date de naissance'
-                          : DateFormat('d MMMM yyyy', 'fr').format(_birthDate!),
-                      style: TextStyle(
-                        color: _birthDate == null
-                            ? AppColors.softGray
-                            : AppColors.textDark,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            DateMaskField(
+              label: 'Date de naissance',
+              initialDate: _birthDate,
+              lastDate: DateTime.now(),
+              firstDate: DateTime(2015),
+              onChanged: (d) => setState(() => _birthDate = d),
             ),
             const SizedBox(height: 12),
             TextFormField(
@@ -297,6 +350,59 @@ class _AddChildScreenState extends State<AddChildScreen> {
                     onPressed: _save,
                     child: const Text('Créer le profil'),
                   ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GenderCard extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final Color color;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _GenderCard({
+    required this.emoji,
+    required this.label,
+    required this.color,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        height: 160,
+        decoration: BoxDecoration(
+          color: selected ? color : AppColors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: selected ? color : AppColors.beige,
+            width: 3,
+          ),
+          boxShadow: selected
+              ? [BoxShadow(color: color.withOpacity(0.3), blurRadius: 16, offset: const Offset(0, 4))]
+              : [],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(emoji, style: const TextStyle(fontSize: 56)),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 16,
+                color: selected ? AppColors.textDark : AppColors.textMedium,
+              ),
+            ),
           ],
         ),
       ),

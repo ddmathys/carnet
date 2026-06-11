@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <!-- Notebook body -->
+  <rect x="12" y="10" width="56" height="76" rx="7"
+        fill="white" stroke="#5E7A42" stroke-width="2.5"/>
+  <!-- Binding strip -->
+  <rect x="12" y="10" width="14" height="76" rx="7"
+        fill="#E8F0E4"/>
+  <line x1="26" y1="10" x2="26" y2="86"
+        stroke="#5E7A42" stroke-width="1.5"/>
+  <!-- Binding holes -->
+  <circle cx="19" cy="29" r="2.5" fill="#5E7A42" opacity="0.55"/>
+  <circle cx="19" cy="48" r="2.5" fill="#5E7A42" opacity="0.55"/>
+  <circle cx="19" cy="67" r="2.5" fill="#5E7A42" opacity="0.55"/>
+  <!-- Text lines -->
+  <rect x="32" y="31" width="28" height="3" rx="1.5" fill="#5E7A42" opacity="0.45"/>
+  <rect x="32" y="43" width="28" height="3" rx="1.5" fill="#5E7A42" opacity="0.45"/>
+  <rect x="32" y="55" width="18" height="3" rx="1.5" fill="#5E7A42" opacity="0.45"/>
+  <!-- Quill pen (overlapping top-right) -->
+  <path d="M72 6 C86 2, 97 18, 83 52 C79 63, 72 70, 66 74 L64 85 L68 72
+           C63 71, 61 65, 63 60 C66 50, 72 28, 72 6Z"
+        fill="white" stroke="#5E7A42" stroke-width="1.8" stroke-linejoin="round"/>
+  <!-- Quill centre vein -->
+  <path d="M73 13 C75 36, 71 57, 65 73"
+        stroke="#5E7A42" stroke-width="1.1" fill="none"
+        stroke-linecap="round" opacity="0.6"/>
+  <!-- Quill barbs (left) -->
+  <path d="M73 22 C68 26, 65 30, 64 34" stroke="#5E7A42" stroke-width="0.9" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <path d="M73 34 C68 38, 65 42, 64 46" stroke="#5E7A42" stroke-width="0.9" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <path d="M72 47 C68 51, 66 54, 65 58" stroke="#5E7A42" stroke-width="0.9" fill="none" stroke-linecap="round" opacity="0.5"/>
+  <!-- Nib tip -->
+  <path d="M64 85 L62 94 L68 87 Z"
+        fill="white" stroke="#5E7A42" stroke-width="1.5" stroke-linejoin="round"/>
+</svg>

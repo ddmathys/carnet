@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 240">
+  <!-- Dos avec pics -->
+  <polygon points="78,60 85,38 92,60" fill="#5A9E6E"/>
+  <polygon points="95,48 103,22 111,48" fill="#5A9E6E"/>
+  <polygon points="112,55 119,34 126,55" fill="#5A9E6E"/>
+  <!-- Corps -->
+  <ellipse cx="105" cy="168" rx="58" ry="50" fill="#7ABE8E"/>
+  <!-- Ventre -->
+  <ellipse cx="105" cy="175" rx="38" ry="32" fill="#A8D4B0"/>
+  <!-- Queue -->
+  <ellipse cx="52" cy="195" rx="38" ry="18" fill="#7ABE8E" transform="rotate(-25 52 195)"/>
+  <!-- Pattes avant -->
+  <ellipse cx="68" cy="210" rx="16" ry="22" fill="#7ABE8E" transform="rotate(10 68 210)"/>
+  <ellipse cx="142" cy="210" rx="16" ry="22" fill="#7ABE8E" transform="rotate(-10 142 210)"/>
+  <!-- Pattes arrière (petites) -->
+  <ellipse cx="78" cy="218" rx="14" ry="9" fill="#5A9E6E"/>
+  <ellipse cx="132" cy="218" rx="14" ry="9" fill="#5A9E6E"/>
+  <!-- Long cou -->
+  <ellipse cx="115" cy="100" rx="22" ry="55" fill="#7ABE8E" transform="rotate(12 115 100)"/>
+  <!-- Tête -->
+  <ellipse cx="130" cy="55" rx="32" ry="26" fill="#7ABE8E"/>
+  <!-- Yeux -->
+  <circle cx="140" cy="48" r="9" fill="#2D4A2D"/>
+  <circle cx="143" cy="45" r="3.5" fill="white"/>
+  <!-- Narine -->
+  <circle cx="155" cy="55" r="3" fill="#5A9E6E"/>
+  <!-- Sourire -->
+  <path d="M130 62 Q143 70 156 62" stroke="#2D4A2D" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <!-- Joue -->
+  <circle cx="127" cy="60" r="8" fill="#90C8A0" opacity="0.5"/>
+</svg>

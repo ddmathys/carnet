@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 230">
+  <!-- Corps -->
+  <ellipse cx="100" cy="165" rx="52" ry="62" fill="#2D3A4A"/>
+  <!-- Ventre blanc -->
+  <ellipse cx="100" cy="172" rx="34" ry="46" fill="#F5F5F5"/>
+  <!-- Ailes -->
+  <ellipse cx="45" cy="162" rx="18" ry="42" fill="#2D3A4A" transform="rotate(-8 45 162)"/>
+  <ellipse cx="155" cy="162" rx="18" ry="42" fill="#2D3A4A" transform="rotate(8 155 162)"/>
+  <!-- Pattes -->
+  <ellipse cx="78" cy="222" rx="18" ry="10" fill="#F5A020"/>
+  <ellipse cx="122" cy="222" rx="18" ry="10" fill="#F5A020"/>
+  <!-- Tête -->
+  <circle cx="100" cy="95" r="52" fill="#2D3A4A"/>
+  <!-- Face blanche -->
+  <ellipse cx="100" cy="102" rx="32" ry="36" fill="#F5F5F5"/>
+  <!-- Yeux -->
+  <circle cx="85" cy="88" r="12" fill="white"/>
+  <circle cx="115" cy="88" r="12" fill="white"/>
+  <circle cx="86" cy="89" r="7" fill="#1A1A2E"/>
+  <circle cx="116" cy="89" r="7" fill="#1A1A2E"/>
+  <circle cx="89" cy="86" r="2.5" fill="white"/>
+  <circle cx="119" cy="86" r="2.5" fill="white"/>
+  <!-- Bec -->
+  <polygon points="100,104 90,116 110,116" fill="#F5A020"/>
+  <!-- Joues -->
+  <circle cx="72" cy="108" r="9" fill="#FFB6C1" opacity="0.5"/>
+  <circle cx="128" cy="108" r="9" fill="#FFB6C1" opacity="0.5"/>
+  <!-- Echarpe -->
+  <rect x="62" y="130" width="76" height="14" rx="7" fill="#7A9E7E"/>
+  <circle cx="100" cy="137" r="5" fill="#5A7E5E"/>
+</svg>

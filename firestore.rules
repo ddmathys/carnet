@@ -1,0 +1,77 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isOwner(resource) {
+      return isAuth() && resource.data.userId == request.auth.uid;
+    }
+    function isCollaborator(resource) {
+      return isAuth() && request.auth.uid in resource.data.get('sharedWith', []);
+    }
+    function hasAccess(resource) {
+      return isOwner(resource) || isCollaborator(resource);
+    }
+
+    // ── Notebooks ──────────────────────────────────────────────────────────
+    match /notebooks/{notebookId} {
+      // Read: owner or collaborator
+      allow read: if isAuth() && hasAccess(resource);
+      // Create: authenticated, must set own userId
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      // Update: owner can update anything; collaborator can only add memories (memoriesCount)
+      allow update: if isAuth() && (
+        isOwner(resource) ||
+        // Collaborators can update memoriesCount and lastMemoryAt only
+        (isCollaborator(resource) &&
+         request.resource.data.diff(resource.data).affectedKeys()
+           .hasOnly(['memoriesCount', 'lastMemoryAt', 'updatedAt']))
+      );
+      // Delete: owner only
+      allow delete: if isOwner(resource);
+    }
+
+    // ── Memories ───────────────────────────────────────────────────────────
+    // Any authenticated user can read/write (notebookId scoped on client)
+    match /memories/{memoryId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Books ──────────────────────────────────────────────────────────────
+    match /books/{bookId} {
+      allow read, write: if isAuth() && (
+        resource == null ||
+        resource.data.userId == request.auth.uid
+      );
+    }
+
+    // ── Users (subscription + profile) ─────────────────────────────────────
+    // Users can read/write their own doc; email field readable for invite lookup
+    match /users/{userId} {
+      allow read, write: if isAuth() && request.auth.uid == userId;
+      // Allow finding users by email for sharing invites
+      allow read: if isAuth();
+    }
+
+    // ── Legacy: children (read for migration) ──────────────────────────────
+    match /children/{childId} {
+      allow read: if isAuth();
+      allow write: if isAuth() && (
+        resource == null || resource.data.parentId == request.auth.uid
+      );
+    }
+
+    // ── Legacy: milestones ─────────────────────────────────────────────────
+    match /milestones/{milestoneId} {
+      allow read, write: if isAuth();
+    }
+
+    // ── Orders ─────────────────────────────────────────────────────────────
+    match /orders/{orderId} {
+      allow read, write: if isAuth();
+    }
+  }
+}

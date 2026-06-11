@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 230">
+  <!-- Oreilles rondes -->
+  <circle cx="65" cy="68" r="30" fill="#B0A0B8"/>
+  <circle cx="135" cy="68" r="30" fill="#B0A0B8"/>
+  <circle cx="65" cy="68" r="20" fill="#F0C0D8"/>
+  <circle cx="135" cy="68" r="20" fill="#F0C0D8"/>
+  <!-- Corps -->
+  <ellipse cx="100" cy="175" rx="50" ry="50" fill="#C8B8D8"/>
+  <!-- Ventre -->
+  <ellipse cx="100" cy="182" rx="30" ry="34" fill="#F0E0F0"/>
+  <!-- Queue -->
+  <path d="M150 190 Q185 200 188 228" stroke="#B0A0B8" stroke-width="8" stroke-linecap="round" fill="none"/>
+  <!-- Pattes -->
+  <ellipse cx="74" cy="216" rx="18" ry="10" fill="#C8B8D8"/>
+  <ellipse cx="126" cy="216" rx="18" ry="10" fill="#C8B8D8"/>
+  <!-- Bras -->
+  <ellipse cx="46" cy="175" rx="14" ry="26" fill="#C8B8D8" transform="rotate(15 46 175)"/>
+  <ellipse cx="154" cy="175" rx="14" ry="26" fill="#C8B8D8" transform="rotate(-15 154 175)"/>
+  <!-- Tête -->
+  <circle cx="100" cy="108" r="54" fill="#C8B8D8"/>
+  <!-- Museau -->
+  <ellipse cx="100" cy="122" rx="22" ry="16" fill="#D8C8E8"/>
+  <!-- Yeux -->
+  <circle cx="82" cy="100" r="10" fill="#1A1A2E"/>
+  <circle cx="118" cy="100" r="10" fill="#1A1A2E"/>
+  <circle cx="86" cy="96" r="3.5" fill="white"/>
+  <circle cx="122" cy="96" r="3.5" fill="white"/>
+  <!-- Nez -->
+  <ellipse cx="100" cy="116" rx="6" ry="4" fill="#F090B0"/>
+  <!-- Sourire -->
+  <path d="M92 122 Q100 130 108 122" stroke="#A080B0" stroke-width="2" stroke-linecap="round" fill="none"/>
+  <!-- Moustaches -->
+  <line x1="60" y1="118" x2="88" y2="120" stroke="#A090B0" stroke-width="1.5"/>
+  <line x1="60" y1="124" x2="88" y2="124" stroke="#A090B0" stroke-width="1.5"/>
+  <line x1="112" y1="120" x2="140" y2="118" stroke="#A090B0" stroke-width="1.5"/>
+  <line x1="112" y1="124" x2="140" y2="124" stroke="#A090B0" stroke-width="1.5"/>
+  <!-- Joues -->
+  <circle cx="70" cy="114" r="9" fill="#F0A0C0" opacity="0.45"/>
+  <circle cx="130" cy="114" r="9" fill="#F0A0C0" opacity="0.45"/>
+</svg>

@@ -8,6 +8,7 @@ class ChildModel {
   final String animalId;
   final String animalName;
   final String coverColor;
+  final String gender; // 'boy' | 'girl'
 
   const ChildModel({
     required this.id,
@@ -17,6 +18,7 @@ class ChildModel {
     required this.animalId,
     required this.animalName,
     required this.coverColor,
+    required this.gender,
   });
 
   factory ChildModel.fromFirestore(DocumentSnapshot doc) {
@@ -29,6 +31,7 @@ class ChildModel {
       animalId: data['animalId'] ?? 'fox',
       animalName: data['animalName'] ?? 'Roux',
       coverColor: data['coverColor'] ?? '#7A9E7E',
+      gender: data['gender'] ?? 'boy',
     );
   }
 
@@ -39,6 +42,7 @@ class ChildModel {
         'animalId': animalId,
         'animalName': animalName,
         'coverColor': coverColor,
+        'gender': gender,
       };
 
   String get age {
@@ -49,5 +53,10 @@ class ChildModel {
     final remainingMonths = months % 12;
     if (remainingMonths == 0) return '$years an${years > 1 ? 's' : ''}';
     return '$years an${years > 1 ? 's' : ''} et $remainingMonths mois';
+  }
+
+  int get ageInMonths {
+    final now = DateTime.now();
+    return (now.year - birthDate.year) * 12 + now.month - birthDate.month;
   }
 }

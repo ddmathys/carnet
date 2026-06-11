@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200">
+
+  <!-- Soft ground shadow -->
+  <ellipse cx="105" cy="178" rx="56" ry="7" fill="#1A3828" opacity="0.22"/>
+
+  <!-- Pages stack — right edge, 3 thin strips -->
+  <rect x="150" y="37" width="6" height="124" rx="2.5" fill="#EDE0C4"/>
+  <rect x="154" y="37" width="4" height="124" rx="1.5" fill="#E4D4B4"/>
+  <rect x="156" y="39" width="3" height="120" rx="1"   fill="#D8C4A0" opacity="0.7"/>
+
+  <!-- Back cover (peeks right of spine) -->
+  <rect x="58" y="39" width="96" height="122" rx="9" fill="#C8874A" opacity="0.38"/>
+
+  <!-- Spine -->
+  <rect x="44" y="32" width="17" height="136" rx="7" fill="#5C3A1E"/>
+  <!-- Spine highlight strip -->
+  <rect x="57" y="32" width="4"  height="136" fill="#7A5230" opacity="0.45"/>
+  <!-- Spine stitching dots -->
+  <circle cx="52" cy="56"  r="2" fill="#3A2010" opacity="0.55"/>
+  <circle cx="52" cy="100" r="2" fill="#3A2010" opacity="0.55"/>
+  <circle cx="52" cy="144" r="2" fill="#3A2010" opacity="0.55"/>
+
+  <!-- Front cover — cream / ivory -->
+  <rect x="54" y="32" width="100" height="136" rx="9" fill="#FFF8E8"/>
+  <!-- Top edge slight shadow -->
+  <rect x="54" y="32" width="100" height="9" rx="9" fill="#EDD890" opacity="0.35"/>
+
+  <!-- Inner decorative border -->
+  <rect x="64" y="42" width="80" height="116" rx="5"
+        fill="none" stroke="#C8A040" stroke-width="1.3" opacity="0.42"/>
+
+  <!-- Title bar — short underline at top of cover -->
+  <rect x="79" y="62" width="42" height="2.5" rx="1.2" fill="#A07030" opacity="0.48"/>
+
+  <!-- Ruled lines -->
+  <line x1="71" y1="85"  x2="133" y2="85"  stroke="#C09038" stroke-width="1.1" opacity="0.28"/>
+  <line x1="71" y1="100" x2="133" y2="100" stroke="#C09038" stroke-width="1.1" opacity="0.28"/>
+  <line x1="71" y1="115" x2="133" y2="115" stroke="#C09038" stroke-width="1.1" opacity="0.28"/>
+  <line x1="71" y1="130" x2="133" y2="130" stroke="#C09038" stroke-width="1.1" opacity="0.28"/>
+
+  <!-- Bookmark ribbon — burgundy -->
+  <rect x="120" y="32" width="10" height="50" rx="1.5" fill="#7A2A1A"/>
+  <polygon points="120,82 125,93 130,82" fill="#7A2A1A"/>
+
+  <!-- Elastic closure band -->
+  <rect x="54" y="99" width="106" height="4" rx="2" fill="#7A4E2D" opacity="0.32"/>
+
+</svg>

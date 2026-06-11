@@ -30,6 +30,14 @@ lib/firebase_options.dart
 *.iml
 .vscode/
 
+# Node
+node_modules/
+
+# KMP
+kmp/.gradle/
+kmp/build/
+kmp/composeApp/build/
+
 # Secrets
 .env
 *.env

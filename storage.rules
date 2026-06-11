@@ -1,0 +1,25 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Photos des souvenirs et carnets — utilisateurs authentifiés
+    match /memories/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    match /notebooks/{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+
+    // PDFs des commandes — upload par l'utilisateur authentifié, lecture par tous les authentifiés
+    match /orders/{orderId}/{fileName} {
+      allow write: if request.auth != null;
+      allow read: if request.auth != null;
+    }
+
+    // Profil photos
+    match /users/{userId}/{allPaths=**} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+  }
+}
