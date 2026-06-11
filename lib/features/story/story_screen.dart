@@ -6,7 +6,6 @@ import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/config/app_config.dart';
 import '../../core/constants/animals.dart';
 import '../../core/models/child_model.dart';
 import '../../core/models/milestone_model.dart';
@@ -147,7 +146,7 @@ class _StoryScreenState extends State<StoryScreen> {
       }
     });
 
-    final text = await DeepSeekService(apiKey: AppConfig.deepseekApiKey)
+    final text = await DeepSeekService()
         .generateMemoryBook(
       childName: _child!.firstName,
       gender: _child!.gender,

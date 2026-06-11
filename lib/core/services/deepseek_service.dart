@@ -1,6 +1,5 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
 import '../models/notebook_model.dart';
@@ -9,6 +8,7 @@ import '../models/extracted_milestone.dart';
 import '../models/draft_milestone.dart';
 import '../constants/milestone_types.dart';
 import '../utils/date_precision.dart';
+import 'backend_client.dart';
 
 class GrowthAnalysis {
   final double? heightCm;
@@ -17,11 +17,38 @@ class GrowthAnalysis {
   const GrowthAnalysis({this.heightCm, this.weightKg, required this.notes});
 }
 
+/// Service de narration IA. Les appels passent par le backend Bloom
+/// (authentifié Firebase) qui détient la clé API — jamais l'app.
 class DeepSeekService {
-  static const _apiUrl = 'https://api.deepseek.com/v1/chat/completions';
-  final String apiKey;
+  DeepSeekService();
 
-  DeepSeekService({required this.apiKey});
+  /// Appel générique au proxy IA du backend.
+  Future<String?> _chat({
+    String? system,
+    required String user,
+    required int maxTokens,
+    double temperature = 0.7,
+    Duration timeout = const Duration(seconds: 60),
+  }) async {
+    try {
+      final data = await BackendClient.postJson(
+        '/api/ai/chat',
+        {
+          'messages': [
+            if (system != null) {'role': 'system', 'content': system},
+            {'role': 'user', 'content': user},
+          ],
+          'maxTokens': maxTokens,
+          'temperature': temperature,
+        },
+        timeout: timeout,
+      );
+      return data?['content'] as String?;
+    } catch (e) {
+      debugPrint('[AI] _chat ERROR: $e');
+      return null;
+    }
+  }
 
   Future<String?> generateMemoryBook({
     required String childName,
@@ -69,8 +96,6 @@ class DeepSeekService {
       _ => '400 à 500',
     };
 
-    const maxTokens = 1500;
-
     final system =
         'Tu es l\'auteur de Folio, une application qui crée le livre de souvenirs illustré des enfants.\n'
         'Ta réponse contient exactement $n sections organisées CHRONOLOGIQUEMENT.\n'
@@ -97,34 +122,13 @@ class DeepSeekService {
         'Texte $phrasesPerSection...\n\n'
         '(exactement $n sections au total)';
 
-    try {
-      final response = await http
-          .post(
-            Uri.parse(_apiUrl),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'deepseek-chat',
-              'messages': [
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user},
-              ],
-              'max_tokens': maxTokens,
-              'temperature': 0.75,
-            }),
-          )
-          .timeout(const Duration(seconds: 45));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['choices'][0]['message']['content'] as String?;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
+    return _chat(
+      system: system,
+      user: user,
+      maxTokens: 1500,
+      temperature: 0.75,
+      timeout: const Duration(seconds: 45),
+    );
   }
 
   Future<String?> generateMemoryBookForNotebook({
@@ -158,7 +162,6 @@ class DeepSeekService {
       'narrative' => 'récit narratif clair et factuel',
       _ => 'style poétique et littéraire',
     };
-    const maxTokens = 1500;
 
     final notebookContext = switch (notebook.type) {
       'voyage' => 'un carnet de voyage${notebook.destination != null ? " (${notebook.destination})" : ""}',
@@ -186,34 +189,13 @@ class DeepSeekService {
         'Format attendu ($n sections) :\n'
         '**Titre période 1**\nTexte...\n\n**Titre période 2**\nTexte...';
 
-    try {
-      final response = await http
-          .post(
-            Uri.parse(_apiUrl),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'deepseek-chat',
-              'messages': [
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user},
-              ],
-              'max_tokens': maxTokens,
-              'temperature': 0.75,
-            }),
-          )
-          .timeout(const Duration(seconds: 45));
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['choices'][0]['message']['content'] as String?;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
+    return _chat(
+      system: system,
+      user: user,
+      maxTokens: 1500,
+      temperature: 0.75,
+      timeout: const Duration(seconds: 45),
+    );
   }
 
   /// Génère une courte description de lieu pour chaque souvenir ayant un champ location.
@@ -249,42 +231,26 @@ class DeepSeekService {
 
     final user = 'Génère une courte description pour chaque lieu :\n$lines';
 
-    try {
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user},
-          ],
-          'max_tokens': withLocation.length * 120,
-          'temperature': 0.6,
-        }),
-      ).timeout(const Duration(seconds: 30));
+    final text = await _chat(
+      system: system,
+      user: user,
+      maxTokens: withLocation.length * 120,
+      temperature: 0.6,
+      timeout: const Duration(seconds: 30),
+    );
+    if (text == null) return {};
 
-      if (response.statusCode != 200) return {};
-      final data = jsonDecode(response.body);
-      final text = data['choices'][0]['message']['content'] as String? ?? '';
-
-      final result = <String, String>{};
-      for (final line in text.split('\n')) {
-        final match = RegExp(r'^\[(\d+)\]\s*(.+)$').firstMatch(line.trim());
-        if (match == null) continue;
-        final idx = int.tryParse(match.group(1) ?? '');
-        final desc = match.group(2)?.trim();
-        if (idx != null && desc != null && idx >= 1 && idx <= withLocation.length) {
-          result[withLocation[idx - 1].id] = desc;
-        }
+    final result = <String, String>{};
+    for (final line in text.split('\n')) {
+      final match = RegExp(r'^\[(\d+)\]\s*(.+)$').firstMatch(line.trim());
+      if (match == null) continue;
+      final idx = int.tryParse(match.group(1) ?? '');
+      final desc = match.group(2)?.trim();
+      if (idx != null && desc != null && idx >= 1 && idx <= withLocation.length) {
+        result[withLocation[idx - 1].id] = desc;
       }
-      return result;
-    } catch (_) {
-      return {};
     }
+    return result;
   }
 
   /// Enrichit les légendes des souvenirs photo avec du contexte (lieux, événements...).
@@ -319,45 +285,27 @@ class DeepSeekService {
 
     final user = 'Voici les légendes à enrichir :\n${lines.join('\n')}';
 
-    try {
-      final response = await http
-          .post(
-            Uri.parse(_apiUrl),
-            headers: {
-              'Authorization': 'Bearer $apiKey',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({
-              'model': 'deepseek-chat',
-              'messages': [
-                {'role': 'system', 'content': system},
-                {'role': 'user', 'content': user},
-              ],
-              'max_tokens': photoMemories.length * 150,
-              'temperature': 0.5,
-            }),
-          )
-          .timeout(const Duration(seconds: 45));
+    final text = await _chat(
+      system: system,
+      user: user,
+      maxTokens: photoMemories.length * 150,
+      temperature: 0.5,
+      timeout: const Duration(seconds: 45),
+    );
+    if (text == null) return {};
 
-      if (response.statusCode != 200) return {};
-      final data = jsonDecode(response.body);
-      final text = data['choices'][0]['message']['content'] as String? ?? '';
-
-      // Parse [N] enriched text lines
-      final result = <String, String>{};
-      for (final line in text.split('\n')) {
-        final match = RegExp(r'^\[(\d+)\]\s*(.+)$').firstMatch(line.trim());
-        if (match == null) continue;
-        final idx = int.tryParse(match.group(1) ?? '');
-        final enriched = match.group(2)?.trim();
-        if (idx != null && enriched != null && idx >= 1 && idx <= photoMemories.length) {
-          result[photoMemories[idx - 1].id] = enriched;
-        }
+    // Parse [N] enriched text lines
+    final result = <String, String>{};
+    for (final line in text.split('\n')) {
+      final match = RegExp(r'^\[(\d+)\]\s*(.+)$').firstMatch(line.trim());
+      if (match == null) continue;
+      final idx = int.tryParse(match.group(1) ?? '');
+      final enriched = match.group(2)?.trim();
+      if (idx != null && enriched != null && idx >= 1 && idx <= photoMemories.length) {
+        result[photoMemories[idx - 1].id] = enriched;
       }
-      return result;
-    } catch (_) {
-      return {};
     }
+    return result;
   }
 
   Future<String?> generateStory({
@@ -394,12 +342,15 @@ class DeepSeekService {
 
       if (m.type == 'taille_poids') {
         final parts = <String>[];
-        if (m.weightKg != null)
+        if (m.weightKg != null) {
           parts.add('${m.weightKg!.toStringAsFixed(1)} kg');
-        if (m.heightCm != null)
+        }
+        if (m.heightCm != null) {
           parts.add('${m.heightCm!.toStringAsFixed(1)} cm');
-        if (parts.isNotEmpty)
+        }
+        if (parts.isNotEmpty) {
           buffer.writeln('• [$dateStr] $label : ${parts.join(', ')}');
+        }
       } else {
         final content = m.rawContent.isNotEmpty ? ' : ${m.rawContent}' : '';
         buffer.writeln('• [$dateStr] $label$content');
@@ -434,32 +385,12 @@ $milestonesText
 
 Génère uniquement les 5 paragraphes, sans titre.''';
 
-    try {
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user},
-          ],
-          'max_tokens': 1500,
-          'temperature': 0.85,
-        }),
-      );
-
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        return data['choices'][0]['message']['content'] as String?;
-      }
-      return null;
-    } catch (_) {
-      return null;
-    }
+    return _chat(
+      system: system,
+      user: user,
+      maxTokens: 1500,
+      temperature: 0.85,
+    );
   }
 
   Future<GrowthAnalysis?> analyzeGrowthComment({
@@ -484,40 +415,26 @@ Extrais toute taille (en cm) et/ou poids (en kg) mentionnés dans ce message.
 Réponds UNIQUEMENT en JSON valide, sans markdown ni explication:
 {"heightCm": nombre ou null, "weightKg": nombre ou null, "notes": "résumé en 1 phrase de ce qui a été noté"}''';
 
-    try {
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {'role': 'user', 'content': prompt},
-          ],
-          'max_tokens': 150,
-          'temperature': 0.1,
-        }),
-      ).timeout(const Duration(seconds: 20));
+    final content = await _chat(
+      user: prompt,
+      maxTokens: 150,
+      temperature: 0.1,
+      timeout: const Duration(seconds: 20),
+    );
+    if (content == null) return null;
 
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final content =
-            (data['choices'][0]['message']['content'] as String).trim();
-        // Strip potential markdown code fences
-        final jsonStr = content
-            .replaceAll('```json', '')
-            .replaceAll('```', '')
-            .trim();
-        final parsed = jsonDecode(jsonStr) as Map<String, dynamic>;
-        return GrowthAnalysis(
-          heightCm: (parsed['heightCm'] as num?)?.toDouble(),
-          weightKg: (parsed['weightKg'] as num?)?.toDouble(),
-          notes: parsed['notes'] as String? ?? '',
-        );
-      }
-      return null;
+    try {
+      // Strip potential markdown code fences
+      final jsonStr = content
+          .replaceAll('```json', '')
+          .replaceAll('```', '')
+          .trim();
+      final parsed = _decodeJson(jsonStr) as Map<String, dynamic>;
+      return GrowthAnalysis(
+        heightCm: (parsed['heightCm'] as num?)?.toDouble(),
+        weightKg: (parsed['weightKg'] as num?)?.toDouble(),
+        notes: parsed['notes'] as String? ?? '',
+      );
     } catch (_) {
       return null;
     }
@@ -577,39 +494,27 @@ Extrais TOUS les souvenirs et retourne ce tableau JSON:
   }
 ]''';
 
+    final content = await _chat(
+      system: system,
+      user: user,
+      maxTokens: 6000,
+      temperature: 0.1,
+      timeout: const Duration(seconds: 60),
+    );
+    if (content == null) {
+      debugPrint('[AI extractAll] no content');
+      return null;
+    }
+
     try {
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user},
-          ],
-          'max_tokens': 6000,
-          'temperature': 0.1,
-        }),
-      ).timeout(const Duration(seconds: 60));
-
-      debugPrint('[DeepSeek extractAll] status=${response.statusCode}');
-      if (response.statusCode != 200) {
-        debugPrint('[DeepSeek extractAll] body=${response.body}');
-        return null;
-      }
-
-      final data = jsonDecode(response.body);
-      final raw = (data['choices'][0]['message']['content'] as String)
+      final raw = content
           .trim()
           .replaceAll('```json', '')
           .replaceAll('```', '')
           .trim();
-      debugPrint('[DeepSeek extractAll] content=$raw');
+      debugPrint('[AI extractAll] content=$raw');
 
-      final decoded = jsonDecode(raw);
+      final decoded = _decodeJson(raw);
       final list = (decoded is List) ? decoded : [decoded];
 
       return list.map((item) {
@@ -630,7 +535,7 @@ Extrais TOUS les souvenirs et retourne ce tableau JSON:
         );
       }).toList();
     } catch (e, st) {
-      debugPrint('[DeepSeek extractAll] ERROR: $e\n$st');
+      debugPrint('[AI extractAll] ERROR: $e\n$st');
       return null;
     }
   }
@@ -708,38 +613,27 @@ Extrais LE souvenir principal et retourne cet objet JSON (un seul objet, pas un 
   "heightCm": null
 }''';
 
+    final content = await _chat(
+      system: system,
+      user: user,
+      maxTokens: 600,
+      temperature: 0.1,
+      timeout: const Duration(seconds: 20),
+    );
+    if (content == null) {
+      debugPrint('[AI extract] no content');
+      return null;
+    }
+
     try {
-      final response = await http.post(
-        Uri.parse(_apiUrl),
-        headers: {
-          'Authorization': 'Bearer $apiKey',
-          'Content-Type': 'application/json',
-        },
-        body: jsonEncode({
-          'model': 'deepseek-chat',
-          'messages': [
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user},
-          ],
-          'max_tokens': 600,
-          'temperature': 0.1,
-        }),
-      ).timeout(const Duration(seconds: 20));
-
-      debugPrint('[DeepSeek extract] status=${response.statusCode}');
-      debugPrint('[DeepSeek extract] body=${response.body}');
-
-      if (response.statusCode != 200) return null;
-
-      final data = jsonDecode(response.body);
-      final raw = (data['choices'][0]['message']['content'] as String)
+      final raw = content
           .trim()
           .replaceAll('```json', '')
           .replaceAll('```', '')
           .trim();
-      debugPrint('[DeepSeek extract] parsed content=$raw');
-      final decoded = jsonDecode(raw);
-      // Si DeepSeek retourne un tableau malgré la consigne, on prend le premier élément
+      debugPrint('[AI extract] parsed content=$raw');
+      final decoded = _decodeJson(raw);
+      // Si le modèle retourne un tableau malgré la consigne, on prend le premier élément
       final parsed = (decoded is List)
           ? decoded.first as Map<String, dynamic>
           : decoded as Map<String, dynamic>;
@@ -791,10 +685,12 @@ Extrais LE souvenir principal et retourne cet objet JSON (un seul objet, pas un 
         heightCm: (parsed['heightCm'] as num?)?.toDouble(),
       );
     } catch (e, st) {
-      debugPrint('[DeepSeek extract] ERROR: $e\n$st');
+      debugPrint('[AI extract] ERROR: $e\n$st');
       return null;
     }
   }
+
+  dynamic _decodeJson(String raw) => jsonDecode(raw);
 
   String _formatAge(DateTime birth) {
     final now = DateTime.now();

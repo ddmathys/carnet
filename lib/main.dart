@@ -5,7 +5,6 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
-import 'core/services/migration_service.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/auth/auth_screen.dart';
 import 'features/children/add_child_screen.dart';

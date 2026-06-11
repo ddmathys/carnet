@@ -6,72 +6,118 @@ service cloud.firestore {
     function isAuth() {
       return request.auth != null;
     }
-    function isOwner(resource) {
-      return isAuth() && resource.data.userId == request.auth.uid;
+
+    function isAdmin() {
+      return isAuth()
+          && request.auth.token.email == 'david.mathys24@gmail.com'
+          && request.auth.token.email_verified;
     }
-    function isCollaborator(resource) {
-      return isAuth() && request.auth.uid in resource.data.get('sharedWith', []);
+
+    // Accès à un carnet : propriétaire ou collaborateur (sharedWith).
+    // Coûte une lecture supplémentaire par opération sur memories — acceptable.
+    function canAccessNotebook(notebookId) {
+      let nb = get(/databases/$(database)/documents/notebooks/$(notebookId)).data;
+      return nb.userId == request.auth.uid
+          || request.auth.uid in nb.get('sharedWith', []);
     }
-    function hasAccess(resource) {
-      return isOwner(resource) || isCollaborator(resource);
+
+    function ownsChild(childId) {
+      return get(/databases/$(database)/documents/children/$(childId)).data.parentId
+          == request.auth.uid;
     }
 
     // ── Notebooks ──────────────────────────────────────────────────────────
     match /notebooks/{notebookId} {
-      // Read: owner or collaborator
-      allow read: if isAuth() && hasAccess(resource);
-      // Create: authenticated, must set own userId
-      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
-      // Update: owner can update anything; collaborator can only add memories (memoriesCount)
-      allow update: if isAuth() && (
-        isOwner(resource) ||
-        // Collaborators can update memoriesCount and lastMemoryAt only
-        (isCollaborator(resource) &&
-         request.resource.data.diff(resource.data).affectedKeys()
-           .hasOnly(['memoriesCount', 'lastMemoryAt', 'updatedAt']))
-      );
-      // Delete: owner only
-      allow delete: if isOwner(resource);
-    }
-
-    // ── Memories ───────────────────────────────────────────────────────────
-    // Any authenticated user can read/write (notebookId scoped on client)
-    match /memories/{memoryId} {
-      allow read, write: if isAuth();
-    }
-
-    // ── Books ──────────────────────────────────────────────────────────────
-    match /books/{bookId} {
-      allow read, write: if isAuth() && (
-        resource == null ||
+      // Lecture : propriétaire, collaborateur, ou invité par email
+      // (l'invité doit pouvoir lister ses invitations pour les résoudre au login)
+      allow read: if isAuth() && (
         resource.data.userId == request.auth.uid
+        || request.auth.uid in resource.data.get('sharedWith', [])
+        || (request.auth.token.email != null
+            && request.auth.token.email in resource.data.get('invitedEmails', []))
       );
+
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAuth() && (
+        // Propriétaire : tout
+        resource.data.userId == request.auth.uid
+        // Collaborateur : compteurs uniquement
+        || (request.auth.uid in resource.data.get('sharedWith', [])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['memoriesCount', 'lastMemoryAt', 'updatedAt']))
+        // Invité par email : peut convertir son invitation en accès au login
+        || (request.auth.token.email != null
+            && request.auth.token.email in resource.data.get('invitedEmails', [])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['sharedWith', 'invitedEmails']))
+      );
+
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
     }
 
-    // ── Users (subscription + profile) ─────────────────────────────────────
-    // Users can read/write their own doc; email field readable for invite lookup
+    // ── Memories (collection racine, liées par notebookId) ─────────────────
+    match /memories/{memoryId} {
+      allow read: if isAuth() && canAccessNotebook(resource.data.notebookId);
+      allow create: if isAuth() && canAccessNotebook(request.resource.data.notebookId);
+      // Interdit de déplacer un souvenir vers un carnet auquel on n'a pas accès
+      allow update: if isAuth()
+        && canAccessNotebook(resource.data.notebookId)
+        && request.resource.data.notebookId == resource.data.notebookId;
+      allow delete: if isAuth() && canAccessNotebook(resource.data.notebookId);
+    }
+
+    // ── Books ───────────────────────────────────────────────────────────────
+    match /books/{bookId} {
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow read, update, delete: if isAuth()
+        && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Users (profil + abonnement) ─────────────────────────────────────────
     match /users/{userId} {
-      allow read, write: if isAuth() && request.auth.uid == userId;
-      // Allow finding users by email for sharing invites
+      // Lecture par tout utilisateur connecté : nécessaire pour retrouver un
+      // compte par email lors du partage et afficher les collaborateurs.
       allow read: if isAuth();
-    }
 
-    // ── Legacy: children (read for migration) ──────────────────────────────
-    match /children/{childId} {
-      allow read: if isAuth();
-      allow write: if isAuth() && (
-        resource == null || resource.data.parentId == request.auth.uid
+      // subscriptionTier ne peut être écrit que par le backend (Admin SDK)
+      // ou l'admin — jamais par l'utilisateur lui-même.
+      allow create: if isAuth() && request.auth.uid == userId
+        && !request.resource.data.keys().hasAny(['subscriptionTier']);
+      allow update: if isAdmin() || (
+        isAuth() && request.auth.uid == userId
+        && !request.resource.data.diff(resource.data).affectedKeys()
+             .hasAny(['subscriptionTier'])
       );
+      allow delete: if isAdmin();
     }
 
-    // ── Legacy: milestones ─────────────────────────────────────────────────
-    match /milestones/{milestoneId} {
-      allow read, write: if isAuth();
-    }
-
-    // ── Orders ─────────────────────────────────────────────────────────────
+    // ── Orders ──────────────────────────────────────────────────────────────
     match /orders/{orderId} {
-      allow read, write: if isAuth();
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+      allow read: if isAuth()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+      // Statut et notes gérés par l'admin uniquement
+      allow update, delete: if isAdmin();
     }
+
+    // ── Legacy : children ───────────────────────────────────────────────────
+    match /children/{childId} {
+      allow create: if isAuth()
+        && request.resource.data.parentId == request.auth.uid;
+      allow read, update, delete: if isAuth()
+        && resource.data.parentId == request.auth.uid;
+    }
+
+    // ── Legacy : milestones (liées par childId) ─────────────────────────────
+    match /milestones/{milestoneId} {
+      allow create: if isAuth() && ownsChild(request.resource.data.childId);
+      allow read, update, delete: if isAuth() && ownsChild(resource.data.childId);
+    }
+
+    // aiUsage/{uid} : géré exclusivement par le backend (Admin SDK).
+    // Aucune règle = accès client refusé par défaut.
   }
 }

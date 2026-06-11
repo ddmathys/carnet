@@ -2,24 +2,60 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
 
-    // Photos des souvenirs et carnets — utilisateurs authentifiés
-    match /memories/{allPaths=**} {
-      allow read, write: if request.auth != null;
+    function isOwner(userId) {
+      return request.auth != null && request.auth.uid == userId;
     }
 
-    match /notebooks/{allPaths=**} {
-      allow read, write: if request.auth != null;
+    function isAdmin() {
+      return request.auth != null
+          && request.auth.token.email == 'david.mathys24@gmail.com'
+          && request.auth.token.email_verified;
     }
 
-    // PDFs des commandes — upload par l'utilisateur authentifié, lecture par tous les authentifiés
-    match /orders/{orderId}/{fileName} {
-      allow write: if request.auth != null;
-      allow read: if request.auth != null;
+    function isImage() {
+      return request.resource.size < 15 * 1024 * 1024
+          && request.resource.contentType.matches('image/.*');
     }
 
-    // Profil photos
+    function isPdf() {
+      return request.resource.size < 200 * 1024 * 1024
+          && request.resource.contentType == 'application/pdf';
+    }
+
+    // NB : les photos affichées via URL de téléchargement (token) ne passent
+    // pas par ces règles — les collaborateurs y accèdent via les URLs
+    // stockées dans Firestore, protégées par firestore.rules.
+
+    // Photos des souvenirs — photos/{uid}/{notebookId}/{fichier}
+    match /photos/{userId}/{allPaths=**} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isImage();
+    }
+
+    // Couvertures de carnets — covers/{uid}/{fichier}
+    match /covers/{userId}/{allPaths=**} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isImage();
+    }
+
+    // PDFs numériques générés — pdfs/{uid}/{fichier}
+    match /pdfs/{userId}/{allPaths=**} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isPdf();
+    }
+
+    // PDFs de commandes — orders/{uid}/{fichier} — l'admin doit pouvoir
+    // les télécharger pour lancer l'impression
+    match /orders/{userId}/{allPaths=**} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create, update: if isOwner(userId) && isPdf();
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Photos de profil — users/{uid}/{fichier}
     match /users/{userId}/{allPaths=**} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isImage();
     }
   }
 }

@@ -12,7 +12,6 @@ import '../../core/models/milestone_model.dart';
 import '../../core/data/growth_data.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/services/deepseek_service.dart';
-import '../../core/config/app_config.dart';
 
 class GrowthScreen extends StatefulWidget {
   final String childId;
@@ -1092,7 +1091,7 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
 
     setState(() => _state = _SheetState.analyzing);
 
-    final service = DeepSeekService(apiKey: AppConfig.deepseekApiKey);
+    final service = DeepSeekService();
     final result = await service.analyzeGrowthComment(
       comment: comment,
       childName: widget.child.firstName,

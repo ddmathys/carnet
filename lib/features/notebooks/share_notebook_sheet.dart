@@ -5,7 +5,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/services/user_service.dart';
 import '../../core/services/resend_service.dart';
-import '../../core/config/app_config.dart';
 
 class ShareNotebookSheet extends StatefulWidget {
   final NotebookModel notebook;
@@ -22,7 +21,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   String? _inviteError;
   String? _inviteSuccess;
 
-  final _resend = ResendService(apiKey: AppConfig.resendApiKey);
+  final _resend = ResendService();
 
   // uid → {email, displayName}
   Map<String, _CollabInfo> _collabInfos = {};
@@ -94,10 +93,8 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
             .update({'sharedWith': FieldValue.arrayUnion([uid])});
         _emailCtrl.clear();
         await _resend.sendNotebookInvitation(
+          notebookId: widget.notebook.id,
           toEmail: email,
-          notebookTitle: widget.notebook.title,
-          inviterEmail: FirebaseAuth.instance.currentUser!.email ?? '',
-          downloadUrl: AppConfig.appDownloadUrl,
         );
         setState(() { _inviteSuccess = '$email a été ajouté au carnet.'; _inviting = false; });
         await _loadCollabInfos();
@@ -109,10 +106,8 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
             .update({'invitedEmails': FieldValue.arrayUnion([email])});
         _emailCtrl.clear();
         await _resend.sendNotebookInvitation(
+          notebookId: widget.notebook.id,
           toEmail: email,
-          notebookTitle: widget.notebook.title,
-          inviterEmail: FirebaseAuth.instance.currentUser!.email ?? '',
-          downloadUrl: AppConfig.appDownloadUrl,
         );
         setState(() {
           _inviteSuccess = 'Invitation envoyée à $email.';

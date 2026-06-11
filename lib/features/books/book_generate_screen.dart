@@ -8,7 +8,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/config/app_config.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
@@ -82,7 +81,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     'Presque prêt…',
   ];
 
-  final _deepseek = DeepSeekService(apiKey: AppConfig.deepseekApiKey);
+  final _deepseek = DeepSeekService();
 
   List<MemoryModel> get _selectedMemories =>
       _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();

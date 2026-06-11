@@ -7,7 +7,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import '../../core/config/app_config.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/services/photo_service.dart';
@@ -67,7 +66,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final List<String> _removedPhotoUrls = [];
   final _picker = ImagePicker();
 
-  final _deepseek = DeepSeekService(apiKey: AppConfig.deepseekApiKey);
+  final _deepseek = DeepSeekService();
 
   @override
   void initState() {

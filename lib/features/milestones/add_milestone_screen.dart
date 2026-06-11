@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:speech_to_text/speech_to_text.dart';
-import '../../core/config/app_config.dart';
 import '../../core/models/child_model.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -55,7 +54,7 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
   final _heightController = TextEditingController();
   bool _loading = false;
 
-  final _deepseek = DeepSeekService(apiKey: AppConfig.deepseekApiKey);
+  final _deepseek = DeepSeekService();
 
   // ── Init / dispose ─────────────────────────────────────────────────────────
 
