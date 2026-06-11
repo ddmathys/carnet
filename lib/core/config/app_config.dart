@@ -4,7 +4,7 @@ class AppConfig {
   // backend, authentifié par le token Firebase de l'utilisateur.
   static const String backendUrl = String.fromEnvironment(
     'BACKEND_URL',
-    defaultValue: 'https://bloom-backend.vercel.app',
+    defaultValue: 'https://bloom-backend-gray.vercel.app',
   );
 
   static const String appDownloadUrl = 'https://dmathys.dev/download/carnet.apk';

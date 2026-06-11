@@ -41,3 +41,4 @@ kmp/composeApp/build/
 # Secrets
 .env
 *.env
+*firebase-adminsdk*.json
