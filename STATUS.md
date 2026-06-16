@@ -10,10 +10,18 @@ les emails : **à unifier un jour**) est un journal de souvenirs multi-carnets
 livres imprimés. Flutter + Firebase (`bloom-bcb1f`), backend Vercel.
 
 Un audit complet a été fait le 11.06.2026, suivi de la **Phase 0 :
-sécurisation** — terminée et déployée ce même jour. Le **16.06.2026**, premier
-morceau de **Phase 1** livré et déployé : les **mémos vocaux**, puis une série
-d'améliorations UX (sauvegarde optimiste, génération du livre) et le début de
-**Phase 2** (personnalisation + historique des livres).
+sécurisation** — terminée et déployée ce même jour. Le **16.06.2026** : **Phase 1**
+(mémos vocaux), une série d'améliorations UX (compression photo, sauvegarde
+optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
+(personnalisation, historique, format print-ready, **intégration Gelato API**).
+
+> **Reprise rapide (où on en est le 16.06 au soir)** : tout est codé, analysé
+> (0 erreur), commité et poussé. Le **backend Gelato est déployé** et les env
+> vars (`GELATO_API_KEY`, `GELATO_PRODUCT_UID_SOFT/HARD`) sont **posées dans
+> Vercel + redéployées**. Il reste **le test réel de bout en bout sur device**
+> (générer un livre 21×28 → commander → « Envoyer à Gelato (brouillon) » →
+> vérifier le brouillon chez Gelato). Rien n'a encore été validé en réel car le
+> build Flutter ne tourne pas sur cette machine (Developer Mode/symlinks).
 
 ## ✅ Fait (16.06.2026) — UX sauvegarde & génération du livre
 
@@ -57,6 +65,58 @@ d'améliorations UX (sauvegarde optimiste, génération du livre) et le début d
 - [ ] Photos portrait → pleine page non rognée ; paysages 2/page
 - [ ] Clic « Livre » → historique ; partage OK ; suppression OK
 - [ ] Commande imprimée → entrée « Imprimé » dans l'historique
+
+## ✅ Fait (16.06.2026, suite) — corrections livre + intégration Gelato
+
+### Corrections suite aux tests
+- **Spinner plein écran infini à l'ouverture du livre** : `_loadData` n'avait ni
+  try/catch ni timeout → si le chargement échoue/pend, `_notebook` reste null →
+  spinner muet. Corrigé : timeout 20 s, gestion d'erreur, écran « Réessayer ».
+- **Spinner infini sur « Mes livres »** : la requête `generatedBooks` filtrait
+  par `notebookId`, mais la règle Firestore autorise sur `userId` → requête de
+  liste **refusée** → flux en erreur → spinner sans fin. Corrigé : requête par
+  `userId`, filtre `notebookId` + tri **côté client** ; l'UI gère l'erreur.
+- **Suppression d'un livre invisible** : le swipe n'était pas découvrable →
+  ajout d'un **menu ⋮ (Partager / Supprimer)** explicite sur chaque ligne.
+- **Titre/sous-titre « non éditables »** : l'aperçu de couverture lisait le titre
+  du carnet et n'affichait pas le sous-titre → édition sans effet visible.
+  Corrigé : aperçu **WYSIWYG** piloté en direct par les champs ; le champ titre
+  est pré-rempli avec le vrai titre par défaut (« Léa & Nala »).
+
+### Format print-ready Gelato (livre 21×28)
+- Gelato n'a **pas d'A4** en livre photo (tailles : 14×14, 20×20, **21×28**).
+  Notre PDF était en A4 → **cause racine** du « je dois réajuster chaque image ».
+- PDF passé en **21×28 cm + 4 mm de fond perdu** (document 218×288 mm). Images en
+  plein fond perdu ; texte/QR/numéro de page rentrés de 4 mm (zone de sécurité).
+  Constantes `_a4W/_a4H` dans `book_pdf_service.dart` (nom historique, valent
+  désormais 21×28+bleed).
+
+### Intégration Gelato Order API (fabrication automatisée, validation manuelle)
+- **Backend** `backend/api/gelato/order.ts` (admin only) : poste la commande
+  Firestore vers Gelato v4 (`POST order.gelatoapis.com/v4/orders`, header
+  `X-API-KEY`). **`orderType: "draft"` par défaut** → crée un brouillon NON mis
+  en production : l'admin l'ajuste/valide dans le dashboard Gelato. Mappe le
+  `productUid` selon la couverture (soft/hard), l'URL du PDF, l'adresse (pays →
+  ISO), et le **`pageCount`** (envoyé à part — pas dans le UID, donc nb de pages
+  variable OK). Stocke `gelatoOrderId/gelatoStatus/gelatoError` sur la commande.
+- **Page count** : `generateForNotebook` renvoie désormais `(bytes, pageCount)` ;
+  `OrderModel.pageCount` stocké à la commande, relu par le backend.
+- **App** : `OrderService.sendToGelato(orderId, orderType)` ; bouton
+  **« Envoyer à Gelato (brouillon) »** dans la console admin (affiche l'id du
+  brouillon ou l'erreur Gelato + Réessayer).
+- **Env vars Vercel (prod)** : `GELATO_API_KEY`, `GELATO_PRODUCT_UID_SOFT`,
+  `GELATO_PRODUCT_UID_HARD` → **posées et redéployées**.
+
+### ⬜ En attente / à tester — Gelato (NON validé en réel)
+- [ ] Générer un **nouveau** livre (21×28, avec `pageCount`) puis commande test
+- [ ] Console admin → « Envoyer à Gelato (brouillon) » → « ✅ Brouillon créé »
+- [ ] Dashboard Gelato : le PDF **remplit le gabarit 21×28 sans réajustement**
+- [ ] Vérifier le **minimum de pages** du produit 21×28 (livres courts refusés ?)
+- [ ] Risques connus si refus : couverture/intérieur en **fichiers séparés**
+      (aujourd'hui un seul PDF `type: default`), `shipmentMethodUid` requis,
+      parité du nb de pages → à corriger selon le message d'erreur Gelato.
+- **Reste pour l'automatisation complète** : **Stripe** (encaisser le client) —
+  aujourd'hui paiement « à réception », fabrication déclenchée à la main.
 
 ## ✅ Fait (Phase 1 — 16.06.2026) — Mémos vocaux
 
@@ -130,11 +190,13 @@ d'améliorations UX (sauvegarde optimiste, génération du livre) et le début d
   tendre, factuelle) ; mode interview vocal (speech_to_text déjà présent) ;
   compression des photos avant upload (`flutter_image_compress`) + date EXIF
   auto ; notification « il y a un an ».
-- **Phase 2 — Le wow du livre** : mises en page intelligentes (pleine page,
-  grilles, rythme — aujourd'hui 2 photos/page fixe) ; intro personnalisée par
-  destinataire (« Chère Mamie… ») ; aperçu feuilletable avant commande ;
-  Stripe + Gelato/Lulu print-on-demand (aujourd'hui : fabrication manuelle,
-  paiement à réception).
+- **Phase 2 — Le wow du livre** : ✅ portrait pleine page (fait), ✅ titre/
+  sous-titre éditables (fait), ✅ historique des livres (fait), ✅ format Gelato
+  21×28 (fait), ✅/🟡 **Gelato API en brouillon** (codé + déployé, **test réel à
+  faire**). Reste : **Stripe** (paiement en ligne — aujourd'hui « à réception »),
+  grilles/rythme de mise en page plus riches, intro personnalisée par
+  destinataire (« Chère Mamie… »), aperçu feuilletable avant commande,
+  fichiers cover/intérieur séparés pour Gelato si requis.
 - **Phase 3 — La boucle famille** (modèle Famileo) : invitations contributeurs
   par deep link ; gazette mensuelle automatique pour le type `famille`.
 - **Dette à traiter au fil de l'eau** : unifier le nom (bloom/Folio/carnet),
@@ -145,10 +207,25 @@ d'améliorations UX (sauvegarde optimiste, génération du livre) et le début d
 
 ## Infos pratiques
 
-- Backend : Vercel, scope `davidmathys24-2067s-projects`, projet `bloom-backend`
+- Backend : Vercel, scope `davidmathys24-2067s-projects`, projet `bloom-backend`,
+  alias prod `https://bloom-backend-gray.vercel.app`
 - L'URL du backend est dans `lib/core/config/app_config.dart`
   (surchargée possible via `--dart-define=BACKEND_URL=…`)
-- Déploiement backend : `cd backend && vercel --prod`
+- Déploiement backend : `cd backend && vercel --prod --yes`
+  (⚠️ toute modif d'env var Vercel exige un **redeploy** pour être prise en compte)
 - Déploiement règles : `firebase deploy --only firestore:rules,storage --project bloom-bcb1f`
   (auth via `$env:GOOGLE_APPLICATION_CREDENTIALS = <chemin du service account>`)
 - Admin app = email `david.mathys24@gmail.com` (vérifié) dans les règles
+- **Env vars backend** : `DEEPSEEK_API_KEY`, `RESEND_API_KEY`,
+  `FIREBASE_SERVICE_ACCOUNT`, `GELATO_API_KEY`,
+  `GELATO_PRODUCT_UID_SOFT`, `GELATO_PRODUCT_UID_HARD`
+- **Routes backend** : `/api/ai/chat`, `/api/email/order`, `/api/email/share`,
+  `/listen` (→ `/api/listen`, mémo vocal public), `/api/gelato/order` (admin)
+- **Collections Firestore** : `notebooks`, `memories`, `orders`,
+  `generatedBooks` (historique PDF), `books` (histoires IA legacy), `users`,
+  `aiUsage`, + legacy `children`/`milestones`
+- **Console admin** : route `/admin/orders` (changer statut, télécharger PDF,
+  envoyer à Gelato)
+- Format livre PDF : **21×28 cm + 4 mm bleed** (Gelato softcover). Photos
+  compressées à 2048 px ⇒ ~170 DPI en pleine page (> min Gelato 150, < 300
+  premium — plafond ajustable dans `photo_service.dart` si besoin print HD).
