@@ -190,8 +190,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
         _loadError = null;
       });
-      // Initialise les champs éditables avec les valeurs du carnet
-      _titleCtrl.text = nb.title;
+      // Initialise les champs éditables : le titre = ce qui s'affiche par
+      // défaut sur la couverture (ex. « Léa & Nala »), pour que le champ soit
+      // cohérent avec l'aperçu et directement modifiable.
+      _titleCtrl.text = _defaultCoverTitle(nb);
       _subtitleCtrl.text = nb.subtitle;
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
@@ -577,6 +579,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Step 0: Cover preview + generation ────────────────────────────────────
 
+  // Titre par défaut affiché sur la couverture (avant édition).
+  String _defaultCoverTitle(NotebookModel nb) =>
+      nb.type == 'enfant' && nb.companionName != null
+          ? '${nb.title} & ${nb.companionName}'
+          : nb.title;
+
   InputDecoration _bookFieldDecoration({
     required String label,
     String? hint,
@@ -619,6 +627,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               coverPhotoUrl: _coverPhotoUrl,
               yearRange: _yearRange,
               highlights: _coverHighlights,
+              // Aperçu WYSIWYG : piloté en direct par les champs éditables.
+              title: _titleCtrl.text.trim().isEmpty
+                  ? _defaultCoverTitle(_notebook!)
+                  : _titleCtrl.text.trim(),
+              subtitle: _subtitleCtrl.text.trim(),
             ),
           ),
           const SizedBox(height: 24),
@@ -1196,10 +1209,14 @@ class _BookCoverPreview extends StatelessWidget {
   final String? coverPhotoUrl;
   final String yearRange;
   final List<String> highlights;
+  final String title;
+  final String? subtitle;
 
   const _BookCoverPreview({
     required this.notebook,
     required this.coverColor,
+    required this.title,
+    this.subtitle,
     this.coverPhotoUrl,
     this.yearRange = '',
     this.highlights = const [],
@@ -1207,9 +1224,8 @@ class _BookCoverPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final titleText = notebook.type == 'enfant' && notebook.companionName != null
-        ? '${notebook.title}\n& ${notebook.companionName}'
-        : notebook.title;
+    final titleText = title;
+    final hasSubtitle = subtitle != null && subtitle!.trim().isNotEmpty;
 
     return Center(
       child: Container(
@@ -1271,6 +1287,16 @@ class _BookCoverPreview extends StatelessWidget {
                           fontWeight: FontWeight.bold, color: Color(0xFF2D2416),
                         ),
                       ),
+                      if (hasSubtitle) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          subtitle!,
+                          style: const TextStyle(
+                              fontSize: 8.5, color: Color(0xFF6B6B6B)),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                       const SizedBox(height: 4),
                       Container(width: 18, height: 1, color: coverColor),
                       const SizedBox(height: 4),
@@ -1309,6 +1335,20 @@ class _BookCoverPreview extends StatelessWidget {
                       textAlign: TextAlign.center,
                     ),
                   ),
+                  if (hasSubtitle) ...[
+                    const SizedBox(height: 6),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Text(
+                        subtitle!,
+                        style: TextStyle(
+                            fontSize: 9, color: Colors.white.withOpacity(0.85)),
+                        textAlign: TextAlign.center,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   Container(width: 30, height: 1, color: Colors.white.withOpacity(0.6)),
                   const SizedBox(height: 7),
