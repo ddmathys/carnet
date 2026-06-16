@@ -16,12 +16,14 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 (personnalisation, historique, format print-ready, **intégration Gelato API**).
 
 > **Reprise rapide (où on en est le 16.06 au soir)** : tout est codé, analysé
-> (0 erreur), commité et poussé. Le **backend Gelato est déployé** et les env
-> vars (`GELATO_API_KEY`, `GELATO_PRODUCT_UID_SOFT/HARD`) sont **posées dans
-> Vercel + redéployées**. Il reste **le test réel de bout en bout sur device**
-> (générer un livre 21×28 → commander → « Envoyer à Gelato (brouillon) » →
-> vérifier le brouillon chez Gelato). Rien n'a encore été validé en réel car le
-> build Flutter ne tourne pas sur cette machine (Developer Mode/symlinks).
+> (0 erreur), commité et poussé. Backend Gelato déployé, env vars posées +
+> redéployées. **Console admin débloquée** (fix `permission-denied`). Le
+> **nombre de pages Gelato** (pair, ≥28) est géré par bourrage de pages
+> blanches. Le **prix suit le nombre de pages**. Il reste **le test réel de
+> bout en bout sur device** : générer un **nouveau** livre 21×28 → commander →
+> console admin « Envoyer à Gelato (brouillon) » → vérifier le brouillon chez
+> Gelato (remplissage du gabarit, acceptation). Pas encore validé en réel (le
+> build Flutter ne tourne pas sur cette machine — Developer Mode/symlinks).
 
 ## ✅ Fait (16.06.2026) — UX sauvegarde & génération du livre
 
@@ -111,12 +113,42 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 - [ ] Générer un **nouveau** livre (21×28, avec `pageCount`) puis commande test
 - [ ] Console admin → « Envoyer à Gelato (brouillon) » → « ✅ Brouillon créé »
 - [ ] Dashboard Gelato : le PDF **remplit le gabarit 21×28 sans réajustement**
-- [ ] Vérifier le **minimum de pages** du produit 21×28 (livres courts refusés ?)
-- [ ] Risques connus si refus : couverture/intérieur en **fichiers séparés**
-      (aujourd'hui un seul PDF `type: default`), `shipmentMethodUid` requis,
-      parité du nb de pages → à corriger selon le message d'erreur Gelato.
+- [ ] Risque restant si refus : couverture/intérieur en **fichiers séparés**
+      (aujourd'hui un seul PDF `type: default`), `shipmentMethodUid` requis →
+      à corriger selon le message d'erreur Gelato.
 - **Reste pour l'automatisation complète** : **Stripe** (encaisser le client) —
   aujourd'hui paiement « à réception », fabrication déclenchée à la main.
+
+## ✅ Fait (16.06.2026, suite 2) — accès admin, prix, contraintes Gelato, divers
+
+- **Accès admin débloqué (`permission-denied`)** : la règle `isAdmin()`
+  exigeait `email_verified`, claim absent/false dans le token → la console admin
+  (requête liste de toutes les commandes) était refusée → spinner infini.
+  Retiré `email_verified` de `isAdmin()` (Firestore **et** Storage, redéployés) ;
+  le claim `email` signé suffit. Console admin résiliente (parse par doc en
+  try/catch + affichage de l'erreur au lieu d'un spinner muet).
+- **Nombre de pages valide Gelato** : Gelato n'accepte que **pair, 28–200**
+  (notre livre faisait 41 → refus). `generateForNotebook(padForPrint: true)`
+  ajoute des **pages blanches** jusqu'à la valeur valide ; `pageCount` envoyé =
+  PDF padé. Le PDF **digital reste sans bourrage**. Note « 28 pages min »
+  affichée sur l'étape format imprimé.
+- **Prix aligné sur le nombre de pages** (`book_pricing.dart`) : base
+  (souple 24,90 / rigide 34,90, jusqu'à 24 pages) + **0,50 CHF/page** au-delà.
+  Affiché partout (cartes, récap avec ligne « Pages », bouton, commande). Le prix
+  utilise une **estimation** des pages (≈ couverture + 1 page/photo + pages
+  texte) car calculé avant génération. Constantes ajustables.
+- **Ligne marketing retirée** : « Satisfait ou remboursé · Livraison offerte ».
+- **Bug compteur « 0 souvenirs »** : `notebook.memoriesCount` mis à 0 à la
+  création et jamais incrémenté. Le **home compte en direct** via agrégation
+  `count()` (total header + chaque carte). Pas 100 % temps réel (recalcul à
+  l'ouverture du home), mais toujours juste.
+- **Qualité photo → pleine page conditionnelle** : une photo portrait ne passe
+  en pleine page que si **largeur ≥ 1400 px** (~170 DPI sur 21 cm) ; sinon
+  demi-page (plus petite, pixelisation moins visible). `_imgDims` lit les
+  dimensions dans l'en-tête PNG/JPEG. Seuil `_fullPageMinWidthPx` ajustable.
+- ⚠️ **DPI** : photos compressées à 2048 px ⇒ pleine page A4/21×28 ≈ 170 DPI
+  (> min Gelato 150, < 300 premium). Plafond ajustable dans `photo_service.dart`
+  si besoin d'une qualité print HD (uploads plus lourds).
 
 ## ✅ Fait (Phase 1 — 16.06.2026) — Mémos vocaux
 
