@@ -23,6 +23,7 @@ import 'features/notebooks/notebook_edit_screen.dart';
 import 'features/memories/memories_list_screen.dart';
 import 'features/memories/memory_create_screen.dart';
 import 'features/books/book_generate_screen.dart';
+import 'features/books/book_history_screen.dart';
 import 'features/subscription/subscription_screen.dart';
 import 'features/books/multi_notebook_select_screen.dart';
 import 'features/orders/order_tracking_screen.dart';
@@ -102,6 +103,11 @@ final _router = GoRouter(
       path: '/notebook/:notebookId/book',
       builder: (_, state) =>
           BookGenerateScreen(notebookId: state.pathParameters['notebookId']!),
+    ),
+    GoRoute(
+      path: '/notebook/:notebookId/books',
+      builder: (_, state) =>
+          BookHistoryScreen(notebookId: state.pathParameters['notebookId']!),
     ),
     GoRoute(
       path: '/notebook/:notebookId/story',

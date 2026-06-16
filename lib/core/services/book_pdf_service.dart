@@ -174,12 +174,6 @@ class BookPdfService {
     final successfulPhotos =
         photoEntries.where((e) => bytesByUrl.containsKey(e.url)).toList();
 
-    // Always 2 photos per page (1 if last and odd total)
-    final photoPageGroups = <List<_PhotoEntry>>[];
-    for (int idx = 0; idx < successfulPhotos.length; idx += 2) {
-      photoPageGroups.add(successfulPhotos.sublist(idx, min(idx + 2, successfulPhotos.length)));
-    }
-
     // Text-only memories (no photos, excluding taille_poids)
     final textOnlyMemories = sorted.where((m) {
       final hasPhoto = m.mediaUrls.isNotEmpty ||
@@ -196,42 +190,65 @@ class BookPdfService {
     // Up to 5 memory titles for cover subtitle
     final highlights = _coverHighlights(sorted);
 
+    // Orientation de chaque photo : portrait → page pleine, paysage → demi-page.
+    final isPortraitList =
+        successfulPhotos.map((e) => _isPortrait(bytesByUrl[e.url]!)).toList();
+
     // Index of the LAST successful photo per memory → QR placed at end of memory.
     final lastPhotoIndexByMemory = <String, int>{};
     for (int i = 0; i < successfulPhotos.length; i++) {
       lastPhotoIndexByMemory[successfulPhotos[i].memory.id] = i;
     }
 
-    // Build page entries: title + description only on the FIRST photo of each
-    // memory; QR (listen link) only on its LAST photo; detect portrait.
+    // Construit l'entrée d'une photo : titre + description seulement sur la 1ʳᵉ
+    // photo du souvenir ; QR (lien d'écoute) seulement sur sa dernière photo.
     final shownMemoryIds = <String>{};
-    int flatIndex = 0;
-    final pageDataList = photoPageGroups.map((group) {
-      return group.map((e) {
-        final showCaption = shownMemoryIds.add(e.memory.id);
-        final isLastOfMemory =
-            lastPhotoIndexByMemory[e.memory.id] == flatIndex;
-        final hasAudio =
-            e.memory.audioUrl != null && e.memory.audioUrl!.isNotEmpty;
-        final listenUrl = (isLastOfMemory && hasAudio && backendUrl.isNotEmpty)
-            ? '$backendUrl/listen?m=${e.memory.id}'
-            : null;
-        final entry = _PhotoPageEntry(
-          bytes: bytesByUrl[e.url]!,
-          date: _dateStr(e.memory),
-          title: showCaption ? e.memory.title : null,
-          caption: showCaption ? e.memory.rawContent : null,
-          locationComment: showCaption ? locationComments[e.memory.id] : null,
-          isPortrait: _isPortrait(bytesByUrl[e.url]!),
-          listenUrl: listenUrl,
-        );
-        flatIndex++;
-        return entry;
-      }).toList();
-    }).toList();
+    _PhotoPageEntry entryAt(int i) {
+      final e = successfulPhotos[i];
+      final showCaption = shownMemoryIds.add(e.memory.id);
+      final isLastOfMemory = lastPhotoIndexByMemory[e.memory.id] == i;
+      final hasAudio =
+          e.memory.audioUrl != null && e.memory.audioUrl!.isNotEmpty;
+      final listenUrl = (isLastOfMemory && hasAudio && backendUrl.isNotEmpty)
+          ? '$backendUrl/listen?m=${e.memory.id}'
+          : null;
+      return _PhotoPageEntry(
+        bytes: bytesByUrl[e.url]!,
+        date: _dateStr(e.memory),
+        title: showCaption ? e.memory.title : null,
+        caption: showCaption ? e.memory.rawContent : null,
+        locationComment: showCaption ? locationComments[e.memory.id] : null,
+        isPortrait: isPortraitList[i],
+        listenUrl: listenUrl,
+      );
+    }
+
+    // Pagination : 1 portrait = 1 page pleine ; les paysages sont regroupés par
+    // 2 en demi-pages. L'ordre chronologique est préservé (un portrait qui
+    // s'intercale vide d'abord la paire paysage en cours).
+    final photoPages = <_BookPhotoPage>[];
+    final pendingLandscape = <_PhotoPageEntry>[];
+    void flushLandscape() {
+      if (pendingLandscape.isEmpty) return;
+      photoPages.add(
+          _BookPhotoPage(entries: List.of(pendingLandscape), fullPage: false));
+      pendingLandscape.clear();
+    }
+
+    for (int i = 0; i < successfulPhotos.length; i++) {
+      final entry = entryAt(i);
+      if (entry.isPortrait) {
+        flushLandscape();
+        photoPages.add(_BookPhotoPage(entries: [entry], fullPage: true));
+      } else {
+        pendingLandscape.add(entry);
+        if (pendingLandscape.length == 2) flushLandscape();
+      }
+    }
+    flushLandscape();
 
     final pdfCover = _toPdf(coverColor);
-    final totalPages = 1 + photoPageGroups.length + textOnlyMemories.length;
+    final totalPages = 1 + photoPages.length + textOnlyMemories.length;
     // A4 full-bleed — margins handled inside each widget
     final fmt = PdfPageFormat(_a4W, _a4H, marginAll: 0);
 
@@ -255,14 +272,15 @@ class BookPdfService {
         ),
       ));
 
-      // 2. Photo pages (1 or 2 photos per page)
-      for (int p = 0; p < pageDataList.length; p++) {
+      // 2. Photo pages (portrait pleine page, ou 1-2 paysages par page)
+      for (int p = 0; p < photoPages.length; p++) {
         final pageNum = p + 2;
-        final entries = pageDataList[p];
+        final page = photoPages[p];
         doc.addPage(pw.Page(
           pageFormat: fmt,
           build: (_) => _photoPage(
-            entries: entries,
+            entries: page.entries,
+            fullPage: page.fullPage,
             cover: pdfCover,
             pR: playfairR,
             pB: playfairB,
@@ -275,7 +293,7 @@ class BookPdfService {
 
       // 3. Text-only pages for memories without photos
       for (int t = 0; t < textOnlyMemories.length; t++) {
-        final pageNum = 1 + photoPageGroups.length + t + 1;
+        final pageNum = 1 + photoPages.length + t + 1;
         doc.addPage(pw.Page(
           pageFormat: fmt,
           build: (_) => _textOnlyPage(
@@ -369,6 +387,7 @@ class BookPdfService {
     required pw.Font dm,
     required int pageNum,
     required int total,
+    bool fullPage = false,
   }) {
     if (entries.isEmpty) return pw.Container();
 
@@ -445,6 +464,31 @@ class BookPdfService {
         ),
       ]),
     );
+
+    // ── Photo portrait en pleine page A4 (pas de coupe horizontale) ──
+    if (fullPage) {
+      final e = entries[0];
+      return pw.Stack(
+        children: [
+          pw.SizedBox(width: _a4W, height: _a4H),
+          pw.Positioned(
+            left: 0, top: 0,
+            child: pw.SizedBox(
+              width: _a4W, height: _a4H,
+              child: pw.Image(pw.MemoryImage(e.bytes),
+                  fit: pw.BoxFit.cover, alignment: pw.Alignment.center),
+            ),
+          ),
+          // Légende encadrée en haut
+          pw.Positioned(top: 0, left: 0, right: 0, child: captionBox(e, maxChars: 240)),
+          // QR « écouter » en bas-gauche si présent
+          if (e.listenUrl != null)
+            pw.Positioned(bottom: 0, left: 0, child: qrBadge(e.listenUrl!)),
+          // Numéro de page
+          pw.Positioned(bottom: 0, right: 0, child: pageBadge),
+        ],
+      );
+    }
 
     // Toujours demi-page : photo du haut, photo (ou fond crème) du bas
     final halfH = _a4H / 2;
@@ -1077,6 +1121,14 @@ class _PhotoEntry {
   final MemoryModel memory;
   final String url;
   const _PhotoEntry({required this.memory, required this.url});
+}
+
+/// Une page de photos : soit un portrait en pleine page (`fullPage`), soit
+/// 1 à 2 photos paysage en demi-pages.
+class _BookPhotoPage {
+  final List<_PhotoPageEntry> entries;
+  final bool fullPage;
+  const _BookPhotoPage({required this.entries, required this.fullPage});
 }
 
 class _PhotoPageEntry {

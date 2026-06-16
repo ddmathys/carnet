@@ -6,7 +6,9 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
+import '../../core/models/generated_book_model.dart';
 import '../../core/constants/milestone_types.dart';
+import '../../core/services/book_history_service.dart';
 import 'share_notebook_sheet.dart';
 
 class NotebookDashboardScreen extends StatelessWidget {
@@ -459,7 +461,19 @@ class _StatsGrid extends StatelessWidget {
         childAspectRatio: 1.6,
       ),
       itemCount: stats.length,
-      itemBuilder: (_, i) => _StatCard(stat: stats[i]),
+      itemBuilder: (_, i) {
+        final s = stats[i];
+        // La stat « Livres générés » est branchée sur le vrai compte.
+        if (s.label == 'Livres générés') {
+          return StreamBuilder<List<GeneratedBookModel>>(
+            stream: BookHistoryService.streamForNotebook(notebook.id),
+            builder: (_, snap) => _StatCard(
+              stat: _Stat(s.label, '${snap.data?.length ?? 0}', s.emoji),
+            ),
+          );
+        }
+        return _StatCard(stat: s);
+      },
     );
   }
 
@@ -592,7 +606,7 @@ class _ShortcutsRow extends StatelessWidget {
         _ShortcutBtn(
           emoji: '📖',
           label: 'Livre',
-          onTap: () => context.push('/notebook/${notebook.id}/book'),
+          onTap: () => context.push('/notebook/${notebook.id}/books'),
         ),
       ],
     );

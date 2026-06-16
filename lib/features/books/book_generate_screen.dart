@@ -15,6 +15,7 @@ import '../../core/models/order_model.dart';
 import '../../core/models/book_settings.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/services/book_pdf_service.dart';
+import '../../core/services/book_history_service.dart';
 import '../../core/services/order_service.dart';
 import '../story/book_settings_sheet.dart';
 
@@ -286,12 +287,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     }
     if (pdfBytes == null) return;
 
-    // 2. Sauvegarde silencieuse côté admin (sans bloquer).
+    // 2. Sauvegarde silencieuse côté admin + historique (sans bloquer).
     _uploadPdfToStorage(
       pdfBytes: pdfBytes,
       bookTitle: bookTitle,
+      subtitle: customSubtitle,
       coverType: _coverType,
       notebookId: widget.notebookId,
+      memoriesCount: _selectedMemories.length,
     );
 
     // 3. Partage — hors spinner. Si la feuille de partage ne s'ouvre pas, on
@@ -306,12 +309,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     }
   }
 
-  // Upload silencieux dans Storage pour que l'admin puisse récupérer tous les PDFs
+  // Upload silencieux dans Storage (l'admin peut récupérer tous les PDFs) +
+  // enregistrement dans l'historique des livres du carnet.
   Future<void> _uploadPdfToStorage({
     required List<int> pdfBytes,
     required String bookTitle,
+    String? subtitle,
     required String coverType,
     required String notebookId,
+    required int memoriesCount,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
@@ -332,6 +338,17 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             'type': 'digital',
           },
         ),
+      );
+      final url = await storageRef.getDownloadURL();
+      await BookHistoryService.recordBook(
+        notebookId: notebookId,
+        title: bookTitle,
+        subtitle: subtitle,
+        format: 'digital',
+        coverType: coverType,
+        pdfUrl: url,
+        storagePath: storageRef.fullPath,
+        memoriesCount: memoriesCount,
       );
     } catch (_) {
       // Silencieux — le partage a déjà eu lieu
@@ -417,6 +434,19 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       );
       final orderId = await OrderService.createOrder(order);
 
+      // 4. Historique des livres (imprimé)
+      await BookHistoryService.recordBook(
+        notebookId: widget.notebookId,
+        title: bookTitle,
+        subtitle: customSubtitle,
+        format: 'printed',
+        coverType: _coverType,
+        pdfUrl: pdfUrl,
+        storagePath: storageRef.fullPath,
+        memoriesCount: _selectedMemories.length,
+        orderId: orderId,
+      );
+
       if (!mounted) return;
       context.go('/order-confirmation/$orderId');
     } catch (e) {
@@ -496,6 +526,31 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Step 0: Cover preview + generation ────────────────────────────────────
 
+  InputDecoration _bookFieldDecoration({
+    required String label,
+    String? hint,
+    IconData? icon,
+  }) {
+    OutlineInputBorder border(Color c, double w) => OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: c, width: w),
+        );
+    return InputDecoration(
+      labelText: label,
+      hintText: hint,
+      filled: true,
+      fillColor: AppColors.white,
+      prefixIcon: icon != null
+          ? Icon(icon, size: 18, color: AppColors.sage)
+          : null,
+      isDense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      border: border(const Color(0xFFDDD8CC), 0.5),
+      enabledBorder: border(const Color(0xFFDDD8CC), 0.5),
+      focusedBorder: border(AppColors.sage, 1.5),
+    );
+  }
+
   Widget _buildPreviewStep() {
     final coverColor = Color(int.parse(
         'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
@@ -517,41 +572,50 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           ),
           const SizedBox(height: 24),
 
-          // ── Titre et sous-titre éditables ─────────────────────────────
+          // ── Personnalise ton livre (titre + sous-titre éditables) ──────
+          const Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '✏️ Personnalise ton livre',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textMedium,
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
           TextField(
             controller: _titleCtrl,
             textAlign: TextAlign.center,
+            textCapitalization: TextCapitalization.sentences,
             style: const TextStyle(
               fontFamily: 'PlayfairDisplay',
-              fontSize: 20,
+              fontSize: 18,
               fontWeight: FontWeight.bold,
               color: AppColors.textDark,
             ),
-            decoration: const InputDecoration(
-              hintText: 'Titre du livre',
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-              isDense: true,
+            decoration: _bookFieldDecoration(
+              label: 'Titre du livre',
+              icon: Icons.edit_outlined,
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 10),
           TextField(
             controller: _subtitleCtrl,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 13,
-              color: AppColors.textMedium,
-            ),
-            decoration: const InputDecoration(
-              hintText: 'Sous-titre (optionnel)',
-              border: InputBorder.none,
-              contentPadding: EdgeInsets.zero,
-              isDense: true,
+            textCapitalization: TextCapitalization.sentences,
+            minLines: 1,
+            maxLines: 2,
+            style: const TextStyle(fontSize: 13, color: AppColors.textMedium),
+            decoration: _bookFieldDecoration(
+              label: 'Sous-titre (sur la couverture)',
+              hint: 'Ex. Nos aventures 2025',
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: 12),
           Text(
             _selectedMemoryIds.length == _memories.length
                 ? '${_memories.length} souvenir${_memories.length != 1 ? 's' : ''} · ${DateTime.now().year}'
