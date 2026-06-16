@@ -9,6 +9,7 @@ import '../../core/models/memory_model.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/book_history_service.dart';
+import '../../core/services/user_service.dart';
 import 'share_notebook_sheet.dart';
 
 class NotebookDashboardScreen extends StatelessWidget {
@@ -68,6 +69,40 @@ class _DashboardBodyState extends State<_DashboardBody> {
   NotebookModel get notebook => widget.notebook;
   List<MemoryModel> get memories => widget.memories;
 
+  // Initiales des collaborateurs (sharedWith) pour l'aperçu « Partagé avec ».
+  List<String> _collabInitials = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCollabs();
+  }
+
+  @override
+  void didUpdateWidget(covariant _DashboardBody old) {
+    super.didUpdateWidget(old);
+    // Recharge si la liste de partage a changé (quelqu'un a rejoint/été retiré).
+    if (old.notebook.sharedWith.join(',') != notebook.sharedWith.join(',')) {
+      _loadCollabs();
+    }
+  }
+
+  Future<void> _loadCollabs() async {
+    final uids = notebook.sharedWith;
+    if (uids.isEmpty) {
+      if (mounted) setState(() => _collabInitials = []);
+      return;
+    }
+    final initials = await Future.wait(uids.map((uid) async {
+      final data = await UserService.getUserInfo(uid);
+      final label = (data?['displayName'] as String?)?.trim().isNotEmpty == true
+          ? data!['displayName'] as String
+          : (data?['email'] as String? ?? '?');
+      return label.isNotEmpty ? label[0].toUpperCase() : '?';
+    }));
+    if (mounted) setState(() => _collabInitials = initials);
+  }
+
   Color get _cover {
     try {
       return Color(int.parse(
@@ -98,6 +133,8 @@ class _DashboardBodyState extends State<_DashboardBody> {
                   const SizedBox(height: 16),
                   _BookProgressCta(count: total),
                 ],
+                const SizedBox(height: 16),
+                _buildSharedWith(context),
                 const SizedBox(height: 20),
                 _StatsGrid(notebook: notebook, memories: memories),
                 const SizedBox(height: 20),
@@ -145,6 +182,95 @@ class _DashboardBodyState extends State<_DashboardBody> {
         shape: const StadiumBorder(),
       ),
     );
+  }
+
+  // Ligne « Partagé avec · avatars +N » (tap → gestion). Si personne, propose
+  // de partager. Les invitations en attente sont comptées à part.
+  Widget _buildSharedWith(BuildContext context) {
+    final shared = notebook.sharedWith.length;
+    final pending = notebook.invitedEmails.length;
+
+    if (shared == 0 && pending == 0) {
+      return InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () => _showShareSheet(context),
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.person_add_outlined, size: 18, color: AppColors.sage),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('Partager ce carnet',
+                    style: TextStyle(fontSize: 13, color: AppColors.textDark)),
+              ),
+              const Icon(Icons.chevron_right, size: 18, color: AppColors.softGray),
+            ],
+          ),
+        ),
+      );
+    }
+
+    // Avatars (jusqu'à 4) + débordement
+    const maxAvatars = 4;
+    final shown = _collabInitials.take(maxAvatars).toList();
+    final overflow = shared - shown.length;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: () => _showShareSheet(context),
+      child: Container(
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+        ),
+        child: Row(
+          children: [
+            if (shown.isNotEmpty)
+              SizedBox(
+                width: 24.0 + (shown.length - 1) * 16 + (overflow > 0 ? 16 : 0),
+                height: 28,
+                child: Stack(
+                  children: [
+                    for (int i = 0; i < shown.length; i++)
+                      Positioned(left: i * 16.0, child: _Avatar(shown[i])),
+                    if (overflow > 0)
+                      Positioned(
+                          left: shown.length * 16.0,
+                          child: _Avatar('+$overflow', muted: true)),
+                  ],
+                ),
+              )
+            else
+              const Icon(Icons.people_outline, size: 18, color: AppColors.sage),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                _sharedLabel(shared, pending),
+                style: const TextStyle(fontSize: 13, color: AppColors.textDark),
+              ),
+            ),
+            const Text('Gérer',
+                style: TextStyle(color: AppColors.sage, fontSize: 12, fontWeight: FontWeight.w600)),
+            const Icon(Icons.chevron_right, size: 18, color: AppColors.softGray),
+          ],
+        ),
+      ),
+    );
+  }
+
+  String _sharedLabel(int shared, int pending) {
+    final parts = <String>[];
+    if (shared > 0) parts.add('$shared personne${shared > 1 ? 's' : ''}');
+    if (pending > 0) parts.add('$pending en attente');
+    return 'Partagé avec ${parts.join(' · ')}';
   }
 
   void _showShareSheet(BuildContext context) {
@@ -316,6 +442,34 @@ class _DashboardBodyState extends State<_DashboardBody> {
   }
 
   // Helper for emoji box in dashboard header
+}
+
+class _Avatar extends StatelessWidget {
+  final String label;
+  final bool muted;
+  const _Avatar(this.label, {this.muted = false});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 28, height: 28,
+      decoration: BoxDecoration(
+        color: muted ? AppColors.background : AppColors.sage,
+        shape: BoxShape.circle,
+        border: Border.all(color: AppColors.white, width: 1.5),
+      ),
+      child: Center(
+        child: Text(
+          label,
+          style: TextStyle(
+            color: muted ? AppColors.textMedium : AppColors.white,
+            fontSize: muted ? 10 : 12,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _EmojiBox extends StatelessWidget {
