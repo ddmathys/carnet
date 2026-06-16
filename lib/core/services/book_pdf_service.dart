@@ -16,9 +16,13 @@ class BookPdfService {
   static const _textDark = PdfColor(0.176, 0.141, 0.086);
   static const _textMedium = PdfColor(0.55, 0.55, 0.55);
 
-  // A4 dimensions in points (72 DPI base)
-  static const _a4W = 21.0 * PdfPageFormat.cm;
-  static const _a4H = 29.7 * PdfPageFormat.cm;
+  // Format « print-ready » Gelato : trim A4 (210×297 mm) + 4 mm de fond perdu
+  // (bleed) sur chaque côté → document 218×305 mm. Les images remplissent tout
+  // le document (jusqu'au bord du fond perdu) ; texte / QR / numéro de page sont
+  // rentrés d'au moins _bleed pour rester dans la zone de sécurité après coupe.
+  static const _bleed = 0.4 * PdfPageFormat.cm; // 4 mm
+  static const _a4W = 21.0 * PdfPageFormat.cm + 2 * _bleed; // 218 mm (doc)
+  static const _a4H = 29.7 * PdfPageFormat.cm + 2 * _bleed; // 305 mm (doc)
 
   static PdfColor _toPdf(Color c) =>
       PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0);
@@ -479,13 +483,14 @@ class BookPdfService {
                   fit: pw.BoxFit.cover, alignment: pw.Alignment.center),
             ),
           ),
-          // Légende encadrée en haut
-          pw.Positioned(top: 0, left: 0, right: 0, child: captionBox(e, maxChars: 240)),
+          // Légende encadrée en haut (rentrée du fond perdu)
+          pw.Positioned(top: _bleed, left: _bleed, right: _bleed,
+              child: captionBox(e, maxChars: 240)),
           // QR « écouter » en bas-gauche si présent
           if (e.listenUrl != null)
-            pw.Positioned(bottom: 0, left: 0, child: qrBadge(e.listenUrl!)),
+            pw.Positioned(bottom: _bleed, left: _bleed, child: qrBadge(e.listenUrl!)),
           // Numéro de page
-          pw.Positioned(bottom: 0, right: 0, child: pageBadge),
+          pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
         ],
       );
     }
@@ -521,21 +526,21 @@ class BookPdfService {
         pw.Positioned(left: 0, right: 0, top: halfH - 0.5,
           child: pw.Container(height: 1, color: PdfColors.white)),
 
-        // Captions au-dessus de chaque demi-page
-        pw.Positioned(top: 0, left: 0, right: 0,
+        // Captions au-dessus de chaque demi-page (rentrées du fond perdu)
+        pw.Positioned(top: _bleed, left: _bleed, right: _bleed,
           child: captionBox(e0, maxChars: 120)),
         if (e1 != null)
-          pw.Positioned(top: halfH, left: 0, right: 0,
+          pw.Positioned(top: halfH, left: _bleed, right: _bleed,
             child: captionBox(e1, maxChars: 120)),
 
         // QR « écouter » en fin de souvenir, coin bas-gauche de la demi-page
         if (e0.listenUrl != null)
-          pw.Positioned(top: halfH - 60, left: 0, child: qrBadge(e0.listenUrl!)),
+          pw.Positioned(top: halfH - 60, left: _bleed, child: qrBadge(e0.listenUrl!)),
         if (e1 != null && e1.listenUrl != null)
-          pw.Positioned(bottom: 0, left: 0, child: qrBadge(e1.listenUrl!)),
+          pw.Positioned(bottom: _bleed, left: _bleed, child: qrBadge(e1.listenUrl!)),
 
         // Numéro de page
-        pw.Positioned(bottom: 0, right: 0, child: pageBadge),
+        pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
       ],
     );
   }
@@ -587,7 +592,7 @@ class BookPdfService {
             width: w, height: h,
             child: pw.Image(pw.MemoryImage(coverPhotoBytes), fit: pw.BoxFit.cover),
           ),
-          pw.Positioned(top: 20, right: 22, child: folioTag()),
+          pw.Positioned(top: _bleed + 20, right: _bleed + 22, child: folioTag()),
           pw.Positioned(
             bottom: 0, left: 0, right: 0,
             child: pw.Container(
@@ -680,7 +685,7 @@ class BookPdfService {
     return pw.Stack(
       children: [
         pw.SizedBox(width: w, height: h, child: pw.Container(color: cover)),
-        pw.Positioned(top: 20, right: 22, child: folioTag()),
+        pw.Positioned(top: _bleed + 20, right: _bleed + 22, child: folioTag()),
         pw.SizedBox(width: w, height: h, child: pw.Center(child: centeredContent)),
       ],
     );
