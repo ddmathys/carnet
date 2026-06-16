@@ -20,6 +20,9 @@ class OrderModel {
   final String? adminNote;
   final int memoryCount;
   final String? pdfUrl;
+  final String? gelatoOrderId;
+  final String? gelatoStatus; // 'draft' | 'submitted' | 'error' | null
+  final String? gelatoError;
 
   const OrderModel({
     required this.id,
@@ -41,6 +44,9 @@ class OrderModel {
     this.adminNote,
     required this.memoryCount,
     this.pdfUrl,
+    this.gelatoOrderId,
+    this.gelatoStatus,
+    this.gelatoError,
   });
 
   String get fullName => '$firstName $lastName';
@@ -103,6 +109,9 @@ class OrderModel {
       adminNote: d['adminNote'],
       memoryCount: (d['memoryCount'] as int?) ?? 0,
       pdfUrl: d['pdfUrl'],
+      gelatoOrderId: d['gelatoOrderId'],
+      gelatoStatus: d['gelatoStatus'],
+      gelatoError: d['gelatoError'],
     );
   }
 

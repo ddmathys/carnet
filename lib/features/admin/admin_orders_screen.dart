@@ -135,6 +135,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
   bool _expanded = false;
   bool _saving = false;
   bool _downloadingPdf = false;
+  bool _sendingGelato = false;
   late String _selectedStatus;
   late final TextEditingController _noteCtrl;
 
@@ -160,6 +161,31 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
       }
     } catch (_) {} finally {
       if (mounted) setState(() => _downloadingPdf = false);
+    }
+  }
+
+  Future<void> _sendToGelato() async {
+    setState(() => _sendingGelato = true);
+    try {
+      final res =
+          await OrderService.sendToGelato(widget.order.id, orderType: 'draft');
+      if (!mounted) return;
+      final id = res['gelatoOrderId'];
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: AppColors.sage,
+        content: Text(
+          'Brouillon créé chez Gelato${id != null ? ' · $id' : ''}. '
+          'Valide-le dans le dashboard Gelato pour lancer la production.',
+        ),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: AppColors.error,
+        content: Text('Gelato : ${e.toString().replaceFirst('Exception: ', '')}'),
+      ));
+    } finally {
+      if (mounted) setState(() => _sendingGelato = false);
     }
   }
 
@@ -311,11 +337,85 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                   )
                   else
                     _PdfStatusWidget(order: widget.order),
+
+                  // ── Envoi à Gelato (brouillon à valider) ──────────────────
+                  if (widget.order.pdfUrl != null) ...[
+                    const SizedBox(height: 8),
+                    _buildGelatoSection(),
+                  ],
                 ],
               ),
             ),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildGelatoSection() {
+    final o = widget.order;
+    if (o.gelatoStatus == 'error' && o.gelatoError != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: Colors.red.shade50,
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red.shade200),
+            ),
+            child: Text('⚠️ Gelato a refusé : ${o.gelatoError}',
+                style: const TextStyle(fontSize: 11, color: Colors.red)),
+          ),
+          const SizedBox(height: 8),
+          _gelatoButton(label: 'Réessayer l’envoi à Gelato'),
+        ],
+      );
+    }
+    if (o.gelatoOrderId != null) {
+      return Container(
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(
+          color: AppColors.sage.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.sage.withOpacity(0.4)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '✅ Brouillon Gelato créé · ${o.gelatoOrderId}',
+              style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.sage),
+            ),
+            const SizedBox(height: 2),
+            const Text(
+              'Valide-le dans le dashboard Gelato pour lancer la production.',
+              style: TextStyle(fontSize: 11, color: AppColors.textMedium),
+            ),
+          ],
+        ),
+      );
+    }
+    return _gelatoButton(label: 'Envoyer à Gelato (brouillon)');
+  }
+
+  Widget _gelatoButton({required String label}) {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        onPressed: _sendingGelato ? null : _sendToGelato,
+        icon: _sendingGelato
+            ? const SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white))
+            : const Icon(Icons.send_outlined, size: 18),
+        label: Text(label),
+        style: ElevatedButton.styleFrom(backgroundColor: AppColors.amber),
       ),
     );
   }

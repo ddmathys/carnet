@@ -43,6 +43,26 @@ class OrderService {
     await FirebaseFirestore.instance.collection('orders').doc(orderId).update(data);
   }
 
+  // ── Envoyer à Gelato (admin) ──────────────────────────────────────────────
+
+  /// Crée la commande chez Gelato via le backend. `orderType` = 'draft' par
+  /// défaut (brouillon à valider dans le dashboard Gelato) ou 'order' pour
+  /// commander directement en production. Lève une exception en cas d'échec.
+  static Future<Map<String, dynamic>> sendToGelato(
+    String orderId, {
+    String orderType = 'draft',
+  }) async {
+    final data = await BackendClient.postJson(
+      '/api/gelato/order',
+      {'orderId': orderId, 'orderType': orderType},
+      timeout: const Duration(seconds: 30),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec Gelato');
+    }
+    return data;
+  }
+
   // ── Streams ────────────────────────────────────────────────────────────────
 
   // Tri client-side — pas besoin d'index composite Firestore
