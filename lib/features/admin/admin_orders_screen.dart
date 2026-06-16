@@ -62,6 +62,36 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
             child: StreamBuilder<List<OrderModel>>(
               stream: OrderService.allOrdersStream(),
               builder: (context, snap) {
+                if (snap.hasError) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.error_outline,
+                              color: AppColors.error, size: 40),
+                          const SizedBox(height: 12),
+                          const Text('Erreur de chargement des commandes',
+                              style: TextStyle(
+                                  color: AppColors.textDark,
+                                  fontWeight: FontWeight.w600)),
+                          const SizedBox(height: 6),
+                          Text('${snap.error}',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                  fontSize: 12, color: AppColors.textMedium)),
+                          const SizedBox(height: 16),
+                          OutlinedButton.icon(
+                            onPressed: () => setState(() {}),
+                            icon: const Icon(Icons.refresh),
+                            label: const Text('Réessayer'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
                 if (!snap.hasData) return const Center(child: CircularProgressIndicator());
                 final all = snap.data!;
                 final orders = _filter == 'all'

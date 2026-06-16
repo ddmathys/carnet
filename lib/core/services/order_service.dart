@@ -82,7 +82,15 @@ class OrderService {
           .collection('orders')
           .snapshots()
           .map((s) {
-            final list = s.docs.map((d) => OrderModel.fromFirestore(d)).toList();
+            // Parsing résilient : un doc malformé ne doit pas casser tout le flux.
+            final list = <OrderModel>[];
+            for (final d in s.docs) {
+              try {
+                list.add(OrderModel.fromFirestore(d));
+              } catch (e) {
+                debugPrint('[orders] doc ${d.id} ignoré: $e');
+              }
+            }
             list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
             return list;
           });

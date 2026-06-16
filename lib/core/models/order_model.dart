@@ -109,7 +109,7 @@ class OrderModel {
       updatedAt: (d['updatedAt'] as Timestamp?)?.toDate(),
       notebookId: d['notebookId'] ?? '',
       adminNote: d['adminNote'],
-      memoryCount: (d['memoryCount'] as int?) ?? 0,
+      memoryCount: (d['memoryCount'] as num?)?.toInt() ?? 0,
       pageCount: (d['pageCount'] as num?)?.toInt(),
       pdfUrl: d['pdfUrl'],
       gelatoOrderId: d['gelatoOrderId'],
