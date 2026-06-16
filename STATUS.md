@@ -171,6 +171,8 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
     (CFBundleURLTypes), `NotebookShareService`, handler dans `main.dart`.
   - **Partage natif** (`share_plus`) d'un message = lien de jonction **+** lien
     APK de téléchargement. Bouton « Partager » + « Copier » dans le sheet.
+  - **Deux chemins de partage** : « Inviter par email » → `/api/email/share` via
+    **Resend** ; « Créer un lien » → deep link partagé soi-même (pas d'email).
   - ⚠️ Sans app installée : 2 étapes (installer → rouvrir le lien). Le
     « install → rejoint auto » (deferred deep link) nécessiterait Branch/Adjust
     ou des App Links (https vérifiés) — plus tard.
@@ -179,6 +181,24 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 - **Distribution app** (discuté) : aujourd'hui APK direct
   (`dmathys.dev/download/carnet.apk`, Android sideload). Reco : Firebase App
   Distribution pour la beta, Play Store/App Store pour le public.
+
+## ✅ Fait (16.06.2026, suite 4) — Paiement (codé, désactivé)
+
+- **Paiement TWINT via Stripe Checkout** entièrement codé mais **désactivé** :
+  on reste en **facture / « à réception »** pour démarrer (`AppConfig.paymentEnabled = false`).
+- Backend (déployé, env-gated sur `STRIPE_SECRET_KEY`) :
+  - `/api/payment/checkout` (auth, propriétaire) : crée une session Stripe
+    (TWINT + carte, CHF, **montant = `order.price`** — prix variable selon le
+    nombre de pages/photos), renvoie l'URL hébergée.
+  - `/api/payment/success` : revérifie le paiement auprès de Stripe puis marque
+    la commande `paid`.
+- App : `OrderService.createCheckout`, bouton **« Payer avec TWINT »** sur le
+  suivi de commande (masqué tant que `paymentEnabled = false`).
+- **Pour activer plus tard** : `STRIPE_SECRET_KEY` dans Vercel + activer TWINT
+  dans Stripe + `paymentEnabled = true` (1 ligne) + rebuild. Compte Stripe
+  **individuel** suffit (pas de société). TVA non requise sous CHF 100k/an (CH).
+- ⚠️ Manque pour fiabilité totale si activé : **webhook Stripe** (cas où le
+  client ferme le navigateur avant le retour sur la page de succès).
 
 ## ✅ Fait (Phase 1 — 16.06.2026) — Mémos vocaux
 
