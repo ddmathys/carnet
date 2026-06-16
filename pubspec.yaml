@@ -57,6 +57,9 @@ dependencies:
   # Ouvrir l'URL de paiement Stripe Checkout
   url_launcher: ^6.3.1
 
+  # Deep links d'invitation (schéma carnet://join?token=…)
+  app_links: ^6.3.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

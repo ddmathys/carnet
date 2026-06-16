@@ -1,5 +1,6 @@
 {
   "rewrites": [
-    { "source": "/listen", "destination": "/api/listen" }
+    { "source": "/listen", "destination": "/api/listen" },
+    { "source": "/join", "destination": "/api/join" }
   ]
 }

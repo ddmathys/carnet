@@ -1,8 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:app_links/app_links.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'core/services/notebook_share_service.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
@@ -186,8 +189,62 @@ final _router = GoRouter(
   ],
 );
 
-class BloomApp extends StatelessWidget {
+final _messengerKey = GlobalKey<ScaffoldMessengerState>();
+
+class BloomApp extends StatefulWidget {
   const BloomApp({super.key});
+
+  @override
+  State<BloomApp> createState() => _BloomAppState();
+}
+
+class _BloomAppState extends State<BloomApp> {
+  final _appLinks = AppLinks();
+  StreamSubscription<Uri>? _linkSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _initDeepLinks();
+  }
+
+  Future<void> _initDeepLinks() async {
+    try {
+      final initial = await _appLinks.getInitialLink();
+      if (initial != null) _handleUri(initial);
+    } catch (_) {}
+    _linkSub = _appLinks.uriLinkStream.listen(_handleUri, onError: (_) {});
+  }
+
+  // Gère carnet://join?token=… → rejoint le carnet puis y navigue.
+  Future<void> _handleUri(Uri uri) async {
+    final isJoin = uri.host == 'join' || uri.path.contains('join');
+    if (!isJoin) return;
+    final token = uri.queryParameters['token'];
+    if (token == null || token.isEmpty) return;
+
+    final result = await NotebookShareService.joinByToken(token);
+    final messenger = _messengerKey.currentState;
+    if (result != null) {
+      _router.go('/notebook/${result.notebookId}/memories');
+      messenger?.showSnackBar(
+        SnackBar(content: Text('Tu as rejoint « ${result.title} » 🎉')),
+      );
+    } else {
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Lien invalide ou expiré — connecte-toi puis rouvre le lien.'),
+        ),
+      );
+    }
+  }
+
+  @override
+  void dispose() {
+    _linkSub?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -195,6 +252,7 @@ class BloomApp extends StatelessWidget {
       title: 'Folio',
       theme: AppTheme.light,
       routerConfig: _router,
+      scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
     );
   }

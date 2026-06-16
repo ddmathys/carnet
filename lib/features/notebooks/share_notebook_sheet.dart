@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/services/user_service.dart';
 import '../../core/services/resend_service.dart';
+import '../../core/services/notebook_share_service.dart';
 
 class ShareNotebookSheet extends StatefulWidget {
   final NotebookModel notebook;
@@ -20,6 +22,10 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   bool _inviting = false;
   String? _inviteError;
   String? _inviteSuccess;
+
+  // Lien d'invitation (deep link)
+  bool _creatingLink = false;
+  String? _inviteLink;
 
   final _resend = ResendService();
 
@@ -117,6 +123,27 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
     } catch (e) {
       setState(() { _inviteError = 'Erreur : $e'; _inviting = false; });
     }
+  }
+
+  Future<void> _createInviteLink() async {
+    setState(() { _creatingLink = true; _inviteError = null; });
+    try {
+      final url = await NotebookShareService.createInviteLink(widget.notebook.id);
+      if (!mounted) return;
+      if (url == null) {
+        setState(() { _inviteError = 'Création du lien impossible.'; _creatingLink = false; });
+        return;
+      }
+      setState(() { _inviteLink = url; _creatingLink = false; });
+    } catch (e) {
+      if (mounted) setState(() { _inviteError = 'Erreur : $e'; _creatingLink = false; });
+    }
+  }
+
+  void _copyLink() {
+    if (_inviteLink == null) return;
+    Clipboard.setData(ClipboardData(text: _inviteLink!));
+    setState(() => _inviteSuccess = 'Lien copié — partage-le où tu veux.');
   }
 
   Future<void> _removeCollaborator(String uid) async {
@@ -255,9 +282,69 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                 const SizedBox(height: 14),
               ],
 
+              // ── Lien d'invitation (owner only) ────────────────────────────
+              if (isOwner) ...[
+                const _SectionLabel('Lien d\'invitation'),
+                const SizedBox(height: 8),
+                if (_inviteLink == null)
+                  SizedBox(
+                    width: double.infinity,
+                    child: OutlinedButton.icon(
+                      onPressed: _creatingLink ? null : _createInviteLink,
+                      icon: _creatingLink
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.link, size: 18),
+                      label: const Text('Créer un lien à partager'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.sageDark,
+                        side: const BorderSide(color: AppColors.sageDark),
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                    decoration: BoxDecoration(
+                      color: AppColors.background,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: AppColors.border),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            _inviteLink!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+                          ),
+                        ),
+                        TextButton.icon(
+                          onPressed: _copyLink,
+                          icon: const Icon(Icons.copy, size: 16),
+                          label: const Text('Copier'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: AppColors.sageDark,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                const SizedBox(height: 6),
+                Text(
+                  'Toute personne avec ce lien pourra rejoindre le carnet en un tap.',
+                  style: TextStyle(color: AppColors.textMedium.withOpacity(0.7), fontSize: 11, height: 1.4),
+                ),
+                const SizedBox(height: 18),
+              ],
+
               // ── Invite form (owner only) ──────────────────────────────────
               if (isOwner) ...[
-                const _SectionLabel('Inviter quelqu\'un'),
+                const _SectionLabel('Inviter par email'),
                 const SizedBox(height: 8),
                 Row(
                   children: [
