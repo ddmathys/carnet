@@ -69,6 +69,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     })
   }
 
+  // Nombre de pages du PDF — requis par Gelato pour les livres (multipages).
+  const pageCount =
+    typeof o.pageCount === 'number' && o.pageCount > 0 ? o.pageCount : undefined
+
   const payload = {
     orderType: type,
     orderReferenceId: orderId,
@@ -80,6 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         productUid,
         files: [{ type: 'default', url: pdfUrl }],
         quantity: 1,
+        ...(pageCount ? { pageCount } : {}),
       },
     ],
     shippingAddress: {

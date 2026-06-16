@@ -19,6 +19,7 @@ class OrderModel {
   final String notebookId;
   final String? adminNote;
   final int memoryCount;
+  final int? pageCount; // nombre de pages du PDF (pour Gelato)
   final String? pdfUrl;
   final String? gelatoOrderId;
   final String? gelatoStatus; // 'draft' | 'submitted' | 'error' | null
@@ -43,6 +44,7 @@ class OrderModel {
     required this.notebookId,
     this.adminNote,
     required this.memoryCount,
+    this.pageCount,
     this.pdfUrl,
     this.gelatoOrderId,
     this.gelatoStatus,
@@ -108,6 +110,7 @@ class OrderModel {
       notebookId: d['notebookId'] ?? '',
       adminNote: d['adminNote'],
       memoryCount: (d['memoryCount'] as int?) ?? 0,
+      pageCount: (d['pageCount'] as num?)?.toInt(),
       pdfUrl: d['pdfUrl'],
       gelatoOrderId: d['gelatoOrderId'],
       gelatoStatus: d['gelatoStatus'],
@@ -133,6 +136,7 @@ class OrderModel {
     'notebookId': notebookId,
     'adminNote': adminNote,
     'memoryCount': memoryCount,
+    'pageCount': pageCount,
     'pdfUrl': pdfUrl,
   };
 }

@@ -16,13 +16,14 @@ class BookPdfService {
   static const _textDark = PdfColor(0.176, 0.141, 0.086);
   static const _textMedium = PdfColor(0.55, 0.55, 0.55);
 
-  // Format « print-ready » Gelato : trim A4 (210×297 mm) + 4 mm de fond perdu
-  // (bleed) sur chaque côté → document 218×305 mm. Les images remplissent tout
-  // le document (jusqu'au bord du fond perdu) ; texte / QR / numéro de page sont
-  // rentrés d'au moins _bleed pour rester dans la zone de sécurité après coupe.
+  // Format « print-ready » Gelato : livre photo softcover 21×28 cm (Gelato n'a
+  // pas d'A4 en livre photo ; 21×28 est le portrait le plus proche) + 4 mm de
+  // fond perdu (bleed) sur chaque côté → document 218×288 mm. Les images
+  // remplissent tout le document ; texte / QR / numéro de page sont rentrés
+  // d'au moins _bleed pour rester dans la zone de sécurité après coupe.
   static const _bleed = 0.4 * PdfPageFormat.cm; // 4 mm
   static const _a4W = 21.0 * PdfPageFormat.cm + 2 * _bleed; // 218 mm (doc)
-  static const _a4H = 29.7 * PdfPageFormat.cm + 2 * _bleed; // 305 mm (doc)
+  static const _a4H = 28.0 * PdfPageFormat.cm + 2 * _bleed; // 288 mm (doc)
 
   static PdfColor _toPdf(Color c) =>
       PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0);
@@ -122,7 +123,7 @@ class BookPdfService {
 
   // ── Notebook version (multi-template) ─────────────────────────────────────
 
-  static Future<Uint8List> generateForNotebook({
+  static Future<({Uint8List bytes, int pageCount})> generateForNotebook({
     required NotebookModel notebook,
     required Color coverColor,
     required List<MemoryModel> memories,
@@ -316,14 +317,17 @@ class BookPdfService {
       return doc.save();
     }
 
+    Uint8List bytes;
     if (svgString != null) {
       try {
-        return await buildAndSave(svgString);
+        bytes = await buildAndSave(svgString);
       } catch (_) {
-        return await buildAndSave(null);
+        bytes = await buildAndSave(null);
       }
+    } else {
+      bytes = await buildAndSave(null);
     }
-    return buildAndSave(null);
+    return (bytes: bytes, pageCount: totalPages);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────

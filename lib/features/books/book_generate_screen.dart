@@ -285,7 +285,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               radix: 16))
           : AppColors.sage;
 
-      pdfBytes = await BookPdfService.generateForNotebook(
+      final gen = await BookPdfService.generateForNotebook(
         notebook: _notebook!,
         coverColor: coverColor,
         memories: _selectedMemories,
@@ -295,6 +295,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customSubtitle: customSubtitle,
         backendUrl: AppConfig.backendUrl,
       ).timeout(const Duration(seconds: 60));
+      pdfBytes = gen.bytes;
     } catch (e) {
       pdfBytes = null;
       if (mounted) _showSnack('Erreur génération PDF : $e');
@@ -400,7 +401,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // 1. Générer le PDF en premier
       final coverColor = Color(int.parse(
           'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
-      final pdfBytes = await BookPdfService.generateForNotebook(
+      final gen = await BookPdfService.generateForNotebook(
         notebook: _notebook!,
         coverColor: coverColor,
         memories: _selectedMemories,
@@ -410,6 +411,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customSubtitle: customSubtitle,
         backendUrl: AppConfig.backendUrl,
       );
+      final pdfBytes = gen.bytes;
+      final pageCount = gen.pageCount;
 
       if (!mounted) return;
       setState(() => _orderMessage = 'Envoi du PDF…');
@@ -449,6 +452,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         createdAt: DateTime.now(),
         notebookId: widget.notebookId,
         memoryCount: _selectedMemories.length,
+        pageCount: pageCount,
         pdfUrl: pdfUrl,
       );
       final orderId = await OrderService.createOrder(order);
