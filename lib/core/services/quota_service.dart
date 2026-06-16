@@ -2,7 +2,7 @@ import 'dart:math' show min;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class QuotaService {
-  static const int freePhotoLimit = 1000;
+  static const int freePhotoLimit = 300;
   static const int premiumPhotoLimit = 10000;
   static const double premiumPriceChf = 29.0;
 
