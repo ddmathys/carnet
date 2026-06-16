@@ -1002,6 +1002,31 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             selected: _selectedFormat == 'printed' && _coverType == 'hard',
             onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'hard'; }),
           ),
+          if (_selectedFormat == 'printed') ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.amber.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.amber.withOpacity(0.3)),
+              ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline, size: 16, color: AppColors.amber),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Les livres imprimés font 28 pages minimum. Si ton livre est '
+                      'plus court, des pages blanches sont ajoutées à la fin.',
+                      style: TextStyle(fontSize: 12, color: AppColors.textMedium),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 32),
           ElevatedButton(
             onPressed: () => setState(() => _step = 2),

@@ -197,8 +197,20 @@ class BookPdfService {
     final highlights = _coverHighlights(sorted);
 
     // Orientation de chaque photo : portrait → page pleine, paysage → demi-page.
-    final isPortraitList =
-        successfulPhotos.map((e) => _isPortrait(bytesByUrl[e.url]!)).toList();
+    // Dimensions de chaque photo → orientation + éligibilité « pleine page ».
+    // Une photo portrait ne passe en PLEINE PAGE que si elle est assez nette
+    // (largeur ≥ _fullPageMinWidthPx) ; sinon, agrandie plein cadre elle serait
+    // pixelisée → on la met en demi-page (plus petite, défaut moins visible).
+    final dimsList =
+        successfulPhotos.map((e) => _imgDims(bytesByUrl[e.url]!)).toList();
+    bool isPortraitAt(int i) {
+      final d = dimsList[i];
+      return d == null ? true : d.h > d.w;
+    }
+    bool fullPageAt(int i) {
+      final d = dimsList[i];
+      return d != null && d.h > d.w && d.w >= _fullPageMinWidthPx;
+    }
 
     // Index of the LAST successful photo per memory → QR placed at end of memory.
     final lastPhotoIndexByMemory = <String, int>{};
@@ -224,7 +236,7 @@ class BookPdfService {
         title: showCaption ? e.memory.title : null,
         caption: showCaption ? e.memory.rawContent : null,
         locationComment: showCaption ? locationComments[e.memory.id] : null,
-        isPortrait: isPortraitList[i],
+        isPortrait: isPortraitAt(i),
         listenUrl: listenUrl,
       );
     }
@@ -243,7 +255,7 @@ class BookPdfService {
 
     for (int i = 0; i < successfulPhotos.length; i++) {
       final entry = entryAt(i);
-      if (entry.isPortrait) {
+      if (fullPageAt(i)) {
         flushLandscape();
         photoPages.add(_BookPhotoPage(entries: [entry], fullPage: true));
       } else {
@@ -354,16 +366,20 @@ class BookPdfService {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  // Detects portrait orientation by parsing PNG/JPEG headers — no extra packages needed.
-  static bool _isPortrait(Uint8List bytes) {
-    if (bytes.length < 4) return true;
-    // PNG: 89 50 4E 47 ... width at [16..19], height at [20..23]
+  // Largeur min (px) d'une photo portrait pour la passer en pleine page (21 cm
+  // de large → ~1400 px ≈ 170 DPI). En-dessous, on la met en demi-page.
+  static const int _fullPageMinWidthPx = 1400;
+
+  // Lit (largeur, hauteur) en pixels depuis les en-têtes PNG/JPEG — sans package.
+  static ({int w, int h})? _imgDims(Uint8List bytes) {
+    if (bytes.length < 4) return null;
+    // PNG : 89 50 4E 47 … largeur [16..19], hauteur [20..23]
     if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes.length >= 24) {
       final w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
       final h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
-      return h > w;
+      return (w: w, h: h);
     }
-    // JPEG: FF D8 ... find SOFn marker
+    // JPEG : FF D8 … marqueur SOFn
     if (bytes[0] == 0xFF && bytes[1] == 0xD8) {
       int i = 2;
       while (i < bytes.length - 3) {
@@ -373,7 +389,7 @@ class BookPdfService {
           if (i + 9 < bytes.length) {
             final h = (bytes[i + 5] << 8) | bytes[i + 6];
             final w = (bytes[i + 7] << 8) | bytes[i + 8];
-            return h > w;
+            return (w: w, h: h);
           }
         }
         if (i + 3 >= bytes.length) break;
@@ -382,7 +398,7 @@ class BookPdfService {
         i += 2 + len;
       }
     }
-    return true;
+    return null;
   }
 
   static List<String> _coverHighlights(List<MemoryModel> memories) {

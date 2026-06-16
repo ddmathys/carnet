@@ -22,6 +22,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _tier = 'free';
   List<NotebookModel> _ownNotebooks = [];
   List<NotebookModel> _sharedNotebooks = [];
+  // Nombre réel de souvenirs par carnet (le champ notebook.memoriesCount n'est
+  // jamais incrémenté → on compte en direct via une requête d'agrégation).
+  Map<String, int> _memCounts = {};
   StreamSubscription? _ownSub;
   StreamSubscription? _sharedSub;
 
@@ -55,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ..sort((a, b) => (b.lastMemoryAt ?? b.createdAt)
               .compareTo(a.lastMemoryAt ?? a.createdAt));
       });
+      _refreshMemCounts();
     });
 
     _sharedSub = FirebaseFirestore.instance
@@ -70,7 +74,29 @@ class _HomeScreenState extends State<HomeScreen> {
           ..sort((a, b) => (b.lastMemoryAt ?? b.createdAt)
               .compareTo(a.lastMemoryAt ?? a.createdAt));
       });
+      _refreshMemCounts();
     });
+  }
+
+  // Compte les souvenirs de chaque carnet (agrégation côté serveur — ne lit pas
+  // les documents). Rafraîchi à chaque changement de la liste des carnets.
+  Future<void> _refreshMemCounts() async {
+    final ids = <String>{
+      ..._ownNotebooks.map((n) => n.id),
+      ..._sharedNotebooks.map((n) => n.id),
+    };
+    final counts = <String, int>{};
+    await Future.wait(ids.map((id) async {
+      try {
+        final agg = await FirebaseFirestore.instance
+            .collection('memories')
+            .where('notebookId', isEqualTo: id)
+            .count()
+            .get();
+        counts[id] = agg.count ?? 0;
+      } catch (_) {}
+    }));
+    if (mounted) setState(() => _memCounts = counts);
   }
 
   Future<void> _loadQuota() async {
@@ -84,8 +110,9 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBody(BuildContext context) {
     final allOwn = _ownNotebooks;
     final allShared = _sharedNotebooks;
-    final totalMemories = [...allOwn, ...allShared]
-        .fold<int>(0, (s, n) => s + n.memoriesCount);
+    final totalMemories = _memCounts.isNotEmpty
+        ? _memCounts.values.fold<int>(0, (s, c) => s + c)
+        : [...allOwn, ...allShared].fold<int>(0, (s, n) => s + n.memoriesCount);
     final isEmpty = allOwn.isEmpty && allShared.isEmpty;
 
     return CustomScrollView(
@@ -115,7 +142,10 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
-                  (_, i) => _NotebookCard(notebook: allOwn[i], isOwner: true),
+                  (_, i) => _NotebookCard(
+                      notebook: allOwn[i],
+                      isOwner: true,
+                      memoryCount: _memCounts[allOwn[i].id]),
                   childCount: allOwn.length,
                 ),
               ),
@@ -129,7 +159,10 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
-                  (_, i) => _NotebookCard(notebook: allShared[i], isOwner: false),
+                  (_, i) => _NotebookCard(
+                      notebook: allShared[i],
+                      isOwner: false,
+                      memoryCount: _memCounts[allShared[i].id]),
                   childCount: allShared.length,
                 ),
               ),
@@ -460,7 +493,9 @@ class _EmptyState extends StatelessWidget {
 class _NotebookCard extends StatelessWidget {
   final NotebookModel notebook;
   final bool isOwner;
-  const _NotebookCard({required this.notebook, this.isOwner = true});
+  final int? memoryCount; // compte réel (null = pas encore chargé)
+  const _NotebookCard(
+      {required this.notebook, this.isOwner = true, this.memoryCount});
 
   Color get _cover {
     try {
@@ -601,7 +636,7 @@ class _NotebookCard extends StatelessWidget {
                     Row(children: [
                       Icon(Icons.auto_stories_outlined, size: 13, color: AppColors.textMedium),
                       const SizedBox(width: 4),
-                      Text('${notebook.memoriesCount} souvenir${notebook.memoriesCount != 1 ? 's' : ''}',
+                      Text('${memoryCount ?? notebook.memoriesCount} souvenir${(memoryCount ?? notebook.memoriesCount) != 1 ? 's' : ''}',
                         style: const TextStyle(fontSize: 12, color: AppColors.textMedium)),
                       const SizedBox(width: 12),
                       Icon(Icons.access_time_outlined, size: 13, color: AppColors.textMedium),
