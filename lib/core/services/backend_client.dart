@@ -14,7 +14,10 @@ class BackendClient {
   }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return null;
-    final token = await user.getIdToken();
+    // getIdToken() peut rafraîchir le token via le réseau : sans timeout, un
+    // refresh qui pend bloque l'appel indéfiniment (spinner infini, sans
+    // erreur). On le borne comme le reste.
+    final token = await user.getIdToken().timeout(timeout);
 
     final response = await http
         .post(

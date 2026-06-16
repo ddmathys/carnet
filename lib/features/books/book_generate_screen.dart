@@ -220,10 +220,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     });
 
     try {
-      final comments = await _deepseek.generateLocationComments(
-        memories: memoriesWithLocation,
-        tone: _settings.tone,
-      );
+      // Garde-fou : quoi qu'il arrive en aval, la barre aboutit. Sans
+      // commentaires de lieux, on passe quand même à l'aperçu.
+      final comments = await _deepseek
+          .generateLocationComments(
+            memories: memoriesWithLocation,
+            tone: _settings.tone,
+          )
+          .timeout(const Duration(seconds: 45),
+              onTimeout: () => <String, String>{});
       _progressTimer?.cancel();
       if (!mounted) return;
       setState(() {
