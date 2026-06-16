@@ -1,4 +1,4 @@
-# État du projet — point du 11 juin 2026
+# État du projet — point du 16 juin 2026
 
 Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
@@ -10,7 +10,36 @@ les emails : **à unifier un jour**) est un journal de souvenirs multi-carnets
 livres imprimés. Flutter + Firebase (`bloom-bcb1f`), backend Vercel.
 
 Un audit complet a été fait le 11.06.2026, suivi de la **Phase 0 :
-sécurisation** — terminée et déployée ce même jour.
+sécurisation** — terminée et déployée ce même jour. Le **16.06.2026**, premier
+morceau de **Phase 1** livré et déployé : les **mémos vocaux**.
+
+## ✅ Fait (Phase 1 — 16.06.2026) — Mémos vocaux
+
+- **Feature complète** : enregistrement / lecture / suppression d'un message
+  vocal dans la création de souvenir (toutes catégories), upload Storage
+  `audio/{uid}/{notebookId}/`, champs `audioUrl` / `audioDurationMs` sur
+  `MemoryModel`, suppression en cascade avec photos/souvenirs.
+- **QR « écouter »** imprimé en fin de chaque souvenir dans le livre PDF,
+  pointant sur la page publique `/listen?m=<memoryId>` du backend.
+- **Backend** : nouvelle route `api/listen.ts` (page publique, le memoryId fait
+  capacité — pas d'auth). Déployée sur `bloom-backend-gray.vercel.app`.
+- **Rewrite Vercel** `backend/vercel.json` : `/listen → /api/listen`. ⚠️ Sans
+  ça, le QR (`$backendUrl/listen`) ferait 404 — le bug a été attrapé et corrigé.
+- **Règles Storage** : règle `/audio/{uid}/**` (owner, <25 Mo, `audio/*`)
+  ajoutée **et déployée en prod**.
+- **Bonus** : l'analyse IA est devenue **non-bloquante** (timeout 5 s → ouvre le
+  formulaire, complète les champs vides au retour sans écraser les saisies).
+- **Dépendances** : `record`, `audioplayers`, `path_provider`, `url_launcher`
+  (ce dernier en amorce Stripe Phase 2). Override local `packages/record_linux`
+  (stub) car la version pub casse la compilation — à retirer plus tard.
+- **Commits** : `b2e799f` (feature) + `2b572ed` (rewrite), poussés sur GitHub.
+
+### ⬜ À tester sur téléphone (non encore validé en réel)
+- [ ] Enregistrer un mémo → sauvegarde OK (upload Storage)
+- [ ] Générer un aperçu livre → QR présent en fin de souvenir
+- [ ] Scanner le QR → la page `/listen` joue bien l'audio (URL Firebase
+      tokenisée — seul le routage 400/404 a été vérifié, pas la lecture réelle)
+- [ ] Éditer un souvenir : remplacer / supprimer un mémo existant
 
 ## ✅ Fait (Phase 0 — 11.06.2026)
 
