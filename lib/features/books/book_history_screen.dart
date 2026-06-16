@@ -285,13 +285,39 @@ class _BookTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 4),
               busy
                   ? const SizedBox(
                       width: 22, height: 22,
                       child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.ios_share,
-                      color: AppColors.sage, size: 22),
+                  : PopupMenuButton<String>(
+                      icon: const Icon(Icons.more_vert,
+                          color: AppColors.textMedium),
+                      onSelected: (v) {
+                        if (v == 'share') onShare();
+                        if (v == 'delete') onDelete();
+                      },
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'share',
+                          child: Row(children: [
+                            Icon(Icons.ios_share,
+                                size: 18, color: AppColors.sage),
+                            SizedBox(width: 10),
+                            Text('Partager'),
+                          ]),
+                        ),
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Row(children: [
+                            Icon(Icons.delete_outline,
+                                size: 18, color: AppColors.error),
+                            SizedBox(width: 10),
+                            Text('Supprimer'),
+                          ]),
+                        ),
+                      ],
+                    ),
             ],
           ),
         ),
