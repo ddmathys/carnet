@@ -7,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/media_upload_queue.dart';
 
 class MemoriesListScreen extends StatefulWidget {
   final String notebookId;
@@ -55,7 +56,26 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
               context.go('/notebook/${widget.notebookId}/dashboard'),
         ),
       ),
-      body: StreamBuilder<QuerySnapshot>(
+      body: Column(
+        children: [
+          const _UploadStatusBanner(),
+          Expanded(child: _buildMemoriesStream()),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () =>
+            context.push('/notebook/${widget.notebookId}/add-memory'),
+        backgroundColor: AppColors.sage,
+        foregroundColor: AppColors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Ajouter'),
+        shape: const StadiumBorder(),
+      ),
+    );
+  }
+
+  Widget _buildMemoriesStream() {
+    return StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
             .collection('memories')
             .where('notebookId', isEqualTo: widget.notebookId)
@@ -108,18 +128,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
               ),
             ],
           );
-        },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () =>
-            context.push('/notebook/${widget.notebookId}/add-memory'),
-        backgroundColor: AppColors.sage,
-        foregroundColor: AppColors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Ajouter'),
-        shape: const StadiumBorder(),
-      ),
-    );
+        });
   }
 
   Widget _buildSearchBar() {
@@ -243,6 +252,94 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
     await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
         audioUrl: memory.audioUrl);
   }
+}
+
+/// Bannière discrète reflétant la file d'upload en arrière-plan :
+/// « Envoi en cours… » avec un petit spinner pendant que les photos/mémos
+/// partent, ou une bannière d'erreur avec « Réessayer » si un envoi a échoué.
+/// Disparaît une fois tout terminé (la photo apparaît seule via le flux live).
+class _UploadStatusBanner extends StatelessWidget {
+  const _UploadStatusBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: MediaUploadQueue.instance,
+      builder: (context, _) {
+        final q = MediaUploadQueue.instance;
+        if (q.pending > 0) {
+          final n = q.pending;
+          return _strip(
+            color: AppColors.sage.withOpacity(0.12),
+            child: Row(
+              children: [
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.sage),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    n == 1
+                        ? 'Envoi du souvenir en cours…'
+                        : 'Envoi de $n souvenirs en cours…',
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.textMedium),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+        if (q.failed.isNotEmpty) {
+          final n = q.failed.length;
+          return _strip(
+            color: AppColors.error.withOpacity(0.10),
+            child: Row(
+              children: [
+                const Icon(Icons.cloud_off_outlined,
+                    size: 16, color: AppColors.error),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    n == 1
+                        ? 'Échec de l\'envoi des médias'
+                        : 'Échec de l\'envoi de $n souvenirs',
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.error),
+                  ),
+                ),
+                TextButton(
+                  onPressed: q.retryFailed,
+                  style: TextButton.styleFrom(
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Réessayer',
+                      style: TextStyle(
+                          color: AppColors.error,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12.5)),
+                ),
+              ],
+            ),
+          );
+        }
+        return const SizedBox.shrink();
+      },
+    );
+  }
+
+  Widget _strip({required Color color, required Widget child}) => Container(
+        width: double.infinity,
+        color: color,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: child,
+      );
 }
 
 class _FilterChip extends StatelessWidget {

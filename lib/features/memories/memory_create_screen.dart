@@ -14,8 +14,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/draft_milestone.dart';
 import '../../core/services/deepseek_service.dart';
-import '../../core/services/photo_service.dart';
-import '../../core/services/audio_service.dart';
+import '../../core/services/media_upload_queue.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/constants/notebook_types.dart';
@@ -79,7 +78,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
   bool _loading = false;
-  String? _saveStatus; // libellé affiché sous le spinner pendant la sauvegarde
 
   // Photos (multi)
   final List<File> _localPhotos = [];
@@ -684,12 +682,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   Future<void> _save() async {
-    if (!_saveEnabled) return;
-    final hasMedia = _localPhotos.isNotEmpty || _localAudioPath != null;
-    setState(() {
-      _loading = true;
-      _saveStatus = hasMedia ? 'Envoi des photos et du son…' : null;
-    });
+    if (!_saveEnabled || _loading) return;
+    setState(() => _loading = true);
     try {
       final category = _selectedCategory!;
       final rawContent = _buildRawContent(category);
@@ -700,42 +694,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ? double.tryParse(_heightController.text.replaceAll(',', '.'))
           : null;
 
-      // ── Media handling ───────────────────────────────────────────────────
-      // On lance compression+upload des photos ET du nouvel audio EN PARALLÈLE
-      // (avant c'était séquentiel : photos puis audio), et on supprime en même
-      // temps les médias retirés. Tout démarre ici, on n'attend qu'ensuite.
-      final photoUploadFuture = PhotoService.uploadMultiplePhotos(
-        photos: _localPhotos,
-        notebookId: widget.notebookId,
-      );
-
-      final Future<String?> audioUploadFuture = _localAudioPath != null
-          ? AudioService.uploadMemoryAudio(
-              audio: File(_localAudioPath!),
-              notebookId: widget.notebookId,
-            )
-          : Future<String?>.value(_audioRemoved ? null : _existingAudioUrl);
-
-      // Suppressions des médias retirés/remplacés (indépendantes des uploads).
-      final deletions = <Future<void>>[
-        ..._removedPhotoUrls.map(PhotoService.deletePhotoByUrl),
-      ];
-      // L'ancien audio est supprimé s'il est remplacé OU retiré sans remplacement.
-      if (_existingAudioUrl != null && (_localAudioPath != null || _audioRemoved)) {
-        deletions.add(AudioService.deleteAudioByUrl(_existingAudioUrl));
-      }
-      final deletionsFuture = Future.wait(deletions);
-
-      final newUrls = await photoUploadFuture;
-      final audioUrl = await audioUploadFuture;
-      await deletionsFuture;
-
-      final allUrls = [..._existingPhotoUrls, ...newUrls];
-      final photoUrl = allUrls.isNotEmpty ? allUrls.first : null;
-      final audioDurationMs = audioUrl != null ? _audioDurationMs : null;
-      // ────────────────────────────────────────────────────────────────────
-
-      if (mounted) setState(() => _saveStatus = 'Enregistrement…');
+      // ── Sauvegarde optimiste (façon WhatsApp) ─────────────────────────────
+      // On écrit d'abord le souvenir en base AVEC les médias déjà connus
+      // (photos existantes en édition, audio existant conservé). Les NOUVEAUX
+      // médias (photos locales, mémo vocal fraîchement enregistré) sont laissés
+      // de côté : ils partent en arrière-plan via MediaUploadQueue, qui
+      // complétera le document une fois l'upload terminé. La liste écoute le
+      // flux Firestore en temps réel → le souvenir apparaît tout de suite et
+      // ses photos arrivent toutes seules ensuite.
+      final knownPhotoUrls = List<String>.of(_existingPhotoUrls);
+      final knownAudioUrl = _audioRemoved ? null : _existingAudioUrl;
 
       final titleValue = _titleController.text.trim();
       final locationValue = _locationController.text.trim();
@@ -749,19 +717,24 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'datePrecision': datePrecisionToString(_datePrecision),
         'dateLabel': formatDateWithPrecision(_selectedDate, _datePrecision),
         'rawContent': rawContent,
-        'mediaUrls': allUrls,
-        'photoUrl': photoUrl,
-        'audioUrl': audioUrl,
-        'audioDurationMs': audioDurationMs,
+        'mediaUrls': knownPhotoUrls,
+        'photoUrl': knownPhotoUrls.isNotEmpty ? knownPhotoUrls.first : null,
+        'audioUrl': knownAudioUrl,
+        'audioDurationMs': knownAudioUrl != null ? _audioDurationMs : null,
         'weightKg': weightKg,
         'heightCm': heightCm,
       };
 
       final col = FirebaseFirestore.instance.collection('memories');
+      final String memoryId;
       if (_isEditing) {
-        await col.doc(widget.memoryId).update(payload);
+        memoryId = widget.memoryId!;
+        await col.doc(memoryId).update(payload);
       } else {
-        await col.add({
+        // doc() génère l'id côté client → pas besoin d'attendre le serveur.
+        final ref = col.doc();
+        memoryId = ref.id;
+        await ref.set({
           ...payload,
           'aiNarration': null,
           'createdAt': FieldValue.serverTimestamp(),
@@ -776,18 +749,30 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'updatedAt': FieldValue.serverTimestamp(),
       });
 
+      // Y a-t-il des médias à uploader/supprimer en arrière-plan ?
+      final hasMediaWork = _localPhotos.isNotEmpty ||
+          _localAudioPath != null ||
+          _removedPhotoUrls.isNotEmpty ||
+          (_audioRemoved && _existingAudioUrl != null);
+      if (hasMediaWork) {
+        MediaUploadQueue.instance.enqueue(MediaUploadJob(
+          memoryId: memoryId,
+          notebookId: widget.notebookId,
+          localPhotos: List<File>.of(_localPhotos),
+          existingPhotoUrls: knownPhotoUrls,
+          removedPhotoUrls: List<String>.of(_removedPhotoUrls),
+          localAudioPath: _localAudioPath,
+          existingAudioUrl: _existingAudioUrl,
+          audioRemoved: _audioRemoved,
+          audioDurationMs: _audioDurationMs,
+        ));
+      }
+
       if (mounted) context.go('/notebook/${widget.notebookId}/memories');
     } catch (e) {
       if (!mounted) return;
-      final msg = _friendlyError(e);
-      _showSnack(msg);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _loading = false;
-          _saveStatus = null;
-        });
-      }
+      setState(() => _loading = false);
+      _showSnack(_friendlyError(e));
     }
   }
 
@@ -1176,7 +1161,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
-              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1239,7 +1223,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
-              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1354,7 +1337,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
-              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1411,7 +1393,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
-              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1844,7 +1825,6 @@ class _SaveButton extends StatelessWidget {
   final bool loading;
   final String label;
   final String? hint;
-  final String? loadingLabel;
   final VoidCallback onPressed;
 
   const _SaveButton({
@@ -1853,31 +1833,11 @@ class _SaveButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.hint,
-    this.loadingLabel,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (loading) {
-      return Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const CircularProgressIndicator(),
-            if (loadingLabel != null) ...[
-              const SizedBox(height: 12),
-              Text(
-                loadingLabel!,
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: AppColors.textMedium,
-                ),
-              ),
-            ],
-          ],
-        ),
-      );
-    }
+    if (loading) return const Center(child: CircularProgressIndicator());
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
