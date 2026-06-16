@@ -2,7 +2,10 @@ import 'dart:math' show min;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class QuotaService {
-  static const int freePhotoLimit = 300;
+  static const int freePhotoLimit = 300; // affiché à l'utilisateur
+  // Blocage réel (marge de tolérance au-dessus de la limite affichée) : on
+  // n'empêche l'ajout qu'à partir de 350, mais l'UI annonce 300.
+  static const int freePhotoHardLimit = 350;
   static const int premiumPhotoLimit = 10000;
   static const double premiumPriceChf = 29.0;
 
@@ -65,6 +68,22 @@ class QuotaService {
     final limit = await getPhotoLimit(userId);
     final count = await countUserPhotos(userId);
     return QuotaStatus(current: count, limit: limit);
+  }
+
+  // Limite de blocage réelle (≠ limite affichée pour le gratuit).
+  static Future<int> getHardPhotoLimit(String userId) async {
+    return await isPremium(userId) ? premiumPhotoLimit : freePhotoHardLimit;
+  }
+
+  /// Peut-on ajouter [adding] photo(s) ? Bloque à la limite réelle (350 free /
+  /// 10000 premium). Renvoie aussi le compte courant pour l'écran d'upgrade.
+  static Future<({bool allowed, int current, int limit})> canAddPhotos(
+    String userId, {
+    int adding = 1,
+  }) async {
+    final hardLimit = await getHardPhotoLimit(userId);
+    final count = await countUserPhotos(userId);
+    return (allowed: count + adding <= hardLimit, current: count, limit: hardLimit);
   }
 }
 

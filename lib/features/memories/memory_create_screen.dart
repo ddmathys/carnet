@@ -5,6 +5,7 @@ import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -15,6 +16,7 @@ import '../../core/models/notebook_model.dart';
 import '../../core/models/draft_milestone.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/quota_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/constants/notebook_types.dart';
@@ -284,6 +286,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   Future<void> _pickPhotos(ImageSource source) async {
+    // Quota photos : on bloque à la limite réelle (compte les photos déjà en
+    // cours d'ajout). Premium = 10 000, gratuit = 350 (affiché 300).
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final q =
+          await QuotaService.canAddPhotos(uid, adding: _localPhotos.length + 1);
+      if (!q.allowed) {
+        if (mounted) _showQuotaDialog();
+        return;
+      }
+    }
     try {
       if (source == ImageSource.gallery) {
         final picked = await _picker.pickMultiImage(
@@ -317,6 +330,34 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   void _removeLocalPhoto(int index) {
     setState(() => _localPhotos.removeAt(index));
+  }
+
+  void _showQuotaDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Limite de photos atteinte'),
+        content: Text(
+          'Le forfait gratuit est limité à ${QuotaService.freePhotoLimit} photos. '
+          'Passe en premium pour ${QuotaService.premiumPhotoLimit} photos '
+          '(${QuotaService.premiumPriceChf.toStringAsFixed(0)} CHF/an).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Plus tard'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.push('/subscription');
+            },
+            child: const Text('Passer premium'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showPhotoSourceSheet() async {
