@@ -250,6 +250,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Future<void> _downloadPdf() async {
     if (_notebook == null) return;
     setState(() => _exporting = true);
+
+    final customTitle = _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
+    final customSubtitle = _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null;
+    final bookTitle = customTitle ?? _notebook!.title;
+
+    // 1. Génération des octets du PDF (étape lourde mais bornée). Le spinner
+    //    ne couvre QUE cette étape.
+    Uint8List? pdfBytes;
     try {
       final coverColor = _notebook!.coverColor.isNotEmpty
           ? Color(int.parse(
@@ -257,11 +265,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               radix: 16))
           : AppColors.sage;
 
-      final customTitle = _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
-      final customSubtitle = _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null;
-      final bookTitle = customTitle ?? _notebook!.title;
-
-      final pdfBytes = await BookPdfService.generateForNotebook(
+      pdfBytes = await BookPdfService.generateForNotebook(
         notebook: _notebook!,
         coverColor: coverColor,
         memories: _selectedMemories,
@@ -270,25 +274,35 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customTitle: customTitle,
         customSubtitle: customSubtitle,
         backendUrl: AppConfig.backendUrl,
-      );
+      ).timeout(const Duration(seconds: 60));
+    } catch (e) {
+      pdfBytes = null;
+      if (mounted) _showSnack('Erreur génération PDF : $e');
+    } finally {
+      // On arrête le spinner dès que le PDF est prêt (ou a échoué) — surtout
+      // PAS après le partage : la feuille de partage système est une étape
+      // interactive qui ne doit jamais bloquer l'indicateur.
+      if (mounted) setState(() => _exporting = false);
+    }
+    if (pdfBytes == null) return;
 
-      // Partager le PDF immédiatement
+    // 2. Sauvegarde silencieuse côté admin (sans bloquer).
+    _uploadPdfToStorage(
+      pdfBytes: pdfBytes,
+      bookTitle: bookTitle,
+      coverType: _coverType,
+      notebookId: widget.notebookId,
+    );
+
+    // 3. Partage — hors spinner. Si la feuille de partage ne s'ouvre pas, on
+    //    le signale au lieu de tourner dans le vide.
+    try {
       await Printing.sharePdf(
         bytes: pdfBytes,
         filename: '${bookTitle.replaceAll(' ', '_')}.pdf',
       );
-
-      // Sauvegarder en arrière-plan dans Firebase Storage (accès admin)
-      _uploadPdfToStorage(
-        pdfBytes: pdfBytes,
-        bookTitle: bookTitle,
-        coverType: _coverType,
-        notebookId: widget.notebookId,
-      );
     } catch (e) {
-      _showSnack('Erreur export PDF : $e');
-    } finally {
-      if (mounted) setState(() => _exporting = false);
+      if (mounted) _showSnack('Partage impossible : $e');
     }
   }
 
