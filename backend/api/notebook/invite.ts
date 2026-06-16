@@ -8,6 +8,8 @@ import { db } from '../../lib/firebase'
 // partageable (qui rebondit vers l'app via la page /join).
 const BASE_URL =
   process.env.PUBLIC_BASE_URL ?? 'https://bloom-backend-gray.vercel.app'
+const DOWNLOAD_URL =
+  process.env.APP_DOWNLOAD_URL ?? 'https://dmathys.dev/download/carnet.apk'
 const INVITE_TTL_DAYS = 30
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -44,5 +46,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({
     token,
     url: `${BASE_URL}/join?token=${token}`,
+    downloadUrl: DOWNLOAD_URL,
+    notebookTitle: String(nb.title ?? 'Carnet'),
   })
 }

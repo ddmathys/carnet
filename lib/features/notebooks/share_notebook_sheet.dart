@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
@@ -25,7 +26,13 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
 
   // Lien d'invitation (deep link)
   bool _creatingLink = false;
-  String? _inviteLink;
+  ({String url, String downloadUrl, String title})? _inviteData;
+
+  String get _shareMessage =>
+      '📖 Rejoins mon carnet « ${_inviteData!.title} » sur Carnet :\n'
+      '${_inviteData!.url}\n\n'
+      'Pas encore l\'app ? Installe-la, puis rouvre le lien ci-dessus :\n'
+      '${_inviteData!.downloadUrl}';
 
   final _resend = ResendService();
 
@@ -128,21 +135,28 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   Future<void> _createInviteLink() async {
     setState(() { _creatingLink = true; _inviteError = null; });
     try {
-      final url = await NotebookShareService.createInviteLink(widget.notebook.id);
+      final invite =
+          await NotebookShareService.createInviteLink(widget.notebook.id);
       if (!mounted) return;
-      if (url == null) {
+      if (invite == null) {
         setState(() { _inviteError = 'Création du lien impossible.'; _creatingLink = false; });
         return;
       }
-      setState(() { _inviteLink = url; _creatingLink = false; });
+      setState(() { _inviteData = invite; _creatingLink = false; });
     } catch (e) {
       if (mounted) setState(() { _inviteError = 'Erreur : $e'; _creatingLink = false; });
     }
   }
 
+  Future<void> _shareLink() async {
+    if (_inviteData == null) return;
+    await Share.share(_shareMessage,
+        subject: 'Rejoins mon carnet « ${_inviteData!.title} »');
+  }
+
   void _copyLink() {
-    if (_inviteLink == null) return;
-    Clipboard.setData(ClipboardData(text: _inviteLink!));
+    if (_inviteData == null) return;
+    Clipboard.setData(ClipboardData(text: _shareMessage));
     setState(() => _inviteSuccess = 'Lien copié — partage-le où tu veux.');
   }
 
@@ -286,7 +300,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
               if (isOwner) ...[
                 const _SectionLabel('Lien d\'invitation'),
                 const SizedBox(height: 8),
-                if (_inviteLink == null)
+                if (_inviteData == null)
                   SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -304,39 +318,48 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                       ),
                     ),
                   )
-                else
+                else ...[
                   Container(
-                    padding: const EdgeInsets.fromLTRB(14, 10, 8, 10),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
                       color: AppColors.background,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: AppColors.border),
                     ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            _inviteLink!,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
-                          ),
-                        ),
-                        TextButton.icon(
-                          onPressed: _copyLink,
-                          icon: const Icon(Icons.copy, size: 16),
-                          label: const Text('Copier'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: AppColors.sageDark,
-                            padding: const EdgeInsets.symmetric(horizontal: 8),
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      _inviteData!.url,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
                     ),
                   ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: _shareLink,
+                          icon: const Icon(Icons.share, size: 18),
+                          label: const Text('Partager'),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      OutlinedButton.icon(
+                        onPressed: _copyLink,
+                        icon: const Icon(Icons.copy, size: 16),
+                        label: const Text('Copier'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: AppColors.sageDark,
+                          side: const BorderSide(color: AppColors.sageDark),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 6),
                 Text(
-                  'Toute personne avec ce lien pourra rejoindre le carnet en un tap.',
+                  'Le message inclut le lien pour rejoindre + le lien de '
+                  'téléchargement de l\'app si la personne ne l\'a pas.',
                   style: TextStyle(color: AppColors.textMedium.withOpacity(0.7), fontSize: 11, height: 1.4),
                 ),
                 const SizedBox(height: 18),

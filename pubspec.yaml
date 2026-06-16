@@ -60,6 +60,9 @@ dependencies:
   # Deep links d'invitation (schéma carnet://join?token=…)
   app_links: ^6.3.2
 
+  # Partage natif du lien d'invitation (WhatsApp, SMS, mail…)
+  share_plus: ^10.1.4
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
