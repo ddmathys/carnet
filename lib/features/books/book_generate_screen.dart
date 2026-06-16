@@ -16,6 +16,7 @@ import '../../core/models/book_settings.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
+import '../../core/services/book_pricing.dart';
 import '../../core/services/order_service.dart';
 import '../story/book_settings_sheet.dart';
 
@@ -88,6 +89,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   List<MemoryModel> get _selectedMemories =>
       _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();
+
+  // Nombre de pages estimé + prix (aligné sur les pages) pour les écrans.
+  int get _estimatedPages => BookPricing.estimatePages(_selectedMemories);
+  double _priceFor(String coverType) =>
+      BookPricing.price(coverType: coverType, pages: _estimatedPages);
+  String _priceLabel(String coverType) => BookPricing.format(_priceFor(coverType));
 
   String get _yearRange {
     if (_selectedMemories.isEmpty) return '${DateTime.now().year}';
@@ -391,7 +398,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
     setState(() { _ordering = true; _orderMessage = 'Génération du livre…'; });
     try {
-      final price = _coverType == 'hard' ? 34.90 : 24.90;
+      final price = _priceFor(_coverType);
       final bookTitle = _titleCtrl.text.trim().isNotEmpty
           ? _titleCtrl.text.trim()
           : _notebook!.title;
@@ -978,8 +985,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _FormatCard(
             emoji: '📗',
             title: 'Couverture souple',
-            subtitle: 'Livre A4 · impression professionnelle · 5–7 jours',
-            price: 'CHF 24.90',
+            subtitle: 'Livre 21×28 cm · ~$_estimatedPages pages · 5–7 jours',
+            price: _priceLabel('soft'),
             priceColor: AppColors.amber,
             selected: _selectedFormat == 'printed' && _coverType == 'soft',
             onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'soft'; }),
@@ -988,8 +995,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _FormatCard(
             emoji: '📕',
             title: 'Couverture rigide',
-            subtitle: 'Livre A4 · couverture cartonnée · 5–7 jours',
-            price: 'CHF 34.90',
+            subtitle: 'Livre 21×28 cm · couverture cartonnée · ~$_estimatedPages pages',
+            price: _priceLabel('hard'),
             priceColor: AppColors.amber,
             selected: _selectedFormat == 'printed' && _coverType == 'hard',
             onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'hard'; }),
@@ -999,9 +1006,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             onPressed: () => setState(() => _step = 2),
             child: Text(_selectedFormat == 'digital'
                 ? 'Continuer'
-                : _coverType == 'hard'
-                    ? 'Continuer · CHF 34.90'
-                    : 'Continuer · CHF 24.90'),
+                : 'Continuer · ${_priceLabel(_coverType)}'),
           ),
           const SizedBox(height: 16),
           const Center(
@@ -1065,8 +1070,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 if (!isDigital) ...[
                   const Divider(height: 24, color: Color(0xFFDDD8CC)),
                   _OrderRow(
+                    label: 'Pages',
+                    value: '~$_estimatedPages pages'),
+                  const Divider(height: 24, color: Color(0xFFDDD8CC)),
+                  _OrderRow(
                     label: 'Total',
-                    value: _coverType == 'hard' ? 'CHF 34.90' : 'CHF 24.90',
+                    value: _priceLabel(_coverType),
                     bold: true,
                     valueColor: AppColors.amber,
                   ),
@@ -1132,24 +1141,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                         backgroundColor: AppColors.amber,
                         foregroundColor: Colors.white,
                       ),
-                      child: Text('Commander · ${_coverType == 'hard' ? 'CHF 34.90' : 'CHF 24.90'}'),
+                      child: Text('Commander · ${_priceLabel(_coverType)}'),
                     ),
                 ],
               ),
-            ),
-            const SizedBox(height: 16),
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.verified_outlined,
-                    size: 14, color: AppColors.textMedium),
-                SizedBox(width: 6),
-                Text(
-                  'Satisfait ou remboursé · Livraison offerte dès 2 livres',
-                  style: TextStyle(
-                      color: AppColors.textMedium, fontSize: 12),
-                ),
-              ],
             ),
           ],
 
