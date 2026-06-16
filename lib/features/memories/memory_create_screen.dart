@@ -79,6 +79,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
   bool _loading = false;
+  String? _saveStatus; // libellé affiché sous le spinner pendant la sauvegarde
 
   // Photos (multi)
   final List<File> _localPhotos = [];
@@ -684,7 +685,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   Future<void> _save() async {
     if (!_saveEnabled) return;
-    setState(() => _loading = true);
+    final hasMedia = _localPhotos.isNotEmpty || _localAudioPath != null;
+    setState(() {
+      _loading = true;
+      _saveStatus = hasMedia ? 'Envoi des photos et du son…' : null;
+    });
     try {
       final category = _selectedCategory!;
       final rawContent = _buildRawContent(category);
@@ -695,37 +700,42 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ? double.tryParse(_heightController.text.replaceAll(',', '.'))
           : null;
 
-      // ── Photo handling ───────────────────────────────────────────────────
-      // Delete removed photos from Storage
-      await Future.wait(_removedPhotoUrls.map(PhotoService.deletePhotoByUrl));
-
-      // Upload new local photos
-      final newUrls = await PhotoService.uploadMultiplePhotos(
+      // ── Media handling ───────────────────────────────────────────────────
+      // On lance compression+upload des photos ET du nouvel audio EN PARALLÈLE
+      // (avant c'était séquentiel : photos puis audio), et on supprime en même
+      // temps les médias retirés. Tout démarre ici, on n'attend qu'ensuite.
+      final photoUploadFuture = PhotoService.uploadMultiplePhotos(
         photos: _localPhotos,
         notebookId: widget.notebookId,
       );
 
+      final Future<String?> audioUploadFuture = _localAudioPath != null
+          ? AudioService.uploadMemoryAudio(
+              audio: File(_localAudioPath!),
+              notebookId: widget.notebookId,
+            )
+          : Future<String?>.value(_audioRemoved ? null : _existingAudioUrl);
+
+      // Suppressions des médias retirés/remplacés (indépendantes des uploads).
+      final deletions = <Future<void>>[
+        ..._removedPhotoUrls.map(PhotoService.deletePhotoByUrl),
+      ];
+      // L'ancien audio est supprimé s'il est remplacé OU retiré sans remplacement.
+      if (_existingAudioUrl != null && (_localAudioPath != null || _audioRemoved)) {
+        deletions.add(AudioService.deleteAudioByUrl(_existingAudioUrl));
+      }
+      final deletionsFuture = Future.wait(deletions);
+
+      final newUrls = await photoUploadFuture;
+      final audioUrl = await audioUploadFuture;
+      await deletionsFuture;
+
       final allUrls = [..._existingPhotoUrls, ...newUrls];
       final photoUrl = allUrls.isNotEmpty ? allUrls.first : null;
-      // ────────────────────────────────────────────────────────────────────
-
-      // ── Audio handling ───────────────────────────────────────────────────
-      String? audioUrl = _audioRemoved ? null : _existingAudioUrl;
-      // Nouvel enregistrement → upload + suppression de l'ancien
-      if (_localAudioPath != null) {
-        if (_existingAudioUrl != null) {
-          await AudioService.deleteAudioByUrl(_existingAudioUrl);
-        }
-        audioUrl = await AudioService.uploadMemoryAudio(
-          audio: File(_localAudioPath!),
-          notebookId: widget.notebookId,
-        );
-      } else if (_audioRemoved && _existingAudioUrl != null) {
-        // Audio existant supprimé sans remplacement
-        await AudioService.deleteAudioByUrl(_existingAudioUrl);
-      }
       final audioDurationMs = audioUrl != null ? _audioDurationMs : null;
       // ────────────────────────────────────────────────────────────────────
+
+      if (mounted) setState(() => _saveStatus = 'Enregistrement…');
 
       final titleValue = _titleController.text.trim();
       final locationValue = _locationController.text.trim();
@@ -772,7 +782,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       final msg = _friendlyError(e);
       _showSnack(msg);
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _saveStatus = null;
+        });
+      }
     }
   }
 
@@ -1161,6 +1176,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
+              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1223,6 +1239,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
+              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1337,6 +1354,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
+              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1393,6 +1411,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
+              loadingLabel: _saveStatus,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -1825,6 +1844,7 @@ class _SaveButton extends StatelessWidget {
   final bool loading;
   final String label;
   final String? hint;
+  final String? loadingLabel;
   final VoidCallback onPressed;
 
   const _SaveButton({
@@ -1833,11 +1853,31 @@ class _SaveButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.hint,
+    this.loadingLabel,
   });
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Center(child: CircularProgressIndicator());
+    if (loading) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const CircularProgressIndicator(),
+            if (loadingLabel != null) ...[
+              const SizedBox(height: 12),
+              Text(
+                loadingLabel!,
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.textMedium,
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [

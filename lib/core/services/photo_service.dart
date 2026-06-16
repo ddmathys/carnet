@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:uuid/uuid.dart';
 import 'audio_service.dart';
 
@@ -10,7 +12,14 @@ class PhotoService {
   static final _firestore = FirebaseFirestore.instance;
   static const _uuid = Uuid();
 
-  /// Upload a single photo, return download URL.
+  // Compression cible : ~2048 px sur le grand côté, qualité 85. Une photo de
+  // téléphone (4000 px, ~5 Mo) tombe à ~2048 px / ~400–700 Ko — assez pour une
+  // impression demi-page à 300 DPI, et 5–10× plus rapide à uploader.
+  static const int _maxDimension = 2048;
+  static const int _jpegQuality = 85;
+
+  /// Upload a single photo, return download URL. The image is JPEG-compressed
+  /// before upload; on compression failure the original file is sent instead.
   static Future<String?> uploadMemoryPhoto({
     required File photo,
     required String notebookId,
@@ -18,9 +27,28 @@ class PhotoService {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return null;
     final ref = _storage.ref('photos/$uid/$notebookId/${_uuid.v4()}.jpg');
-    final task = await ref.putFile(
-        photo, SettableMetadata(contentType: 'image/jpeg'));
+    final metadata = SettableMetadata(contentType: 'image/jpeg');
+    final bytes = await _compress(photo);
+    final task = bytes != null
+        ? await ref.putData(bytes, metadata)
+        : await ref.putFile(photo, metadata);
     return await task.ref.getDownloadURL();
+  }
+
+  /// Compress to JPEG. Returns null on failure so the caller can fall back to
+  /// uploading the original untouched.
+  static Future<Uint8List?> _compress(File photo) async {
+    try {
+      return await FlutterImageCompress.compressWithFile(
+        photo.absolute.path,
+        minWidth: _maxDimension,
+        minHeight: _maxDimension,
+        quality: _jpegQuality,
+        format: CompressFormat.jpeg,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Upload multiple photos in parallel, return list of download URLs.

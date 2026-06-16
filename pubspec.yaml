@@ -29,6 +29,7 @@ dependencies:
   # Images
   image_picker: ^1.1.2
   cached_network_image: ^3.4.1
+  flutter_image_compress: ^2.3.0
 
   # Charts (courbe croissance)
   fl_chart: ^0.69.0
