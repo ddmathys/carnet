@@ -166,6 +166,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
   bool _saving = false;
   bool _downloadingPdf = false;
   bool _sendingGelato = false;
+  bool _deleting = false;
   late String _selectedStatus;
   late final TextEditingController _noteCtrl;
 
@@ -216,6 +217,43 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
       ));
     } finally {
       if (mounted) setState(() => _sendingGelato = false);
+    }
+  }
+
+  Future<void> _deleteOrder() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Supprimer la commande ?'),
+        content: const Text(
+            'La commande et son PDF seront définitivement supprimés de '
+            'l\'application. (Pense à la supprimer aussi chez Gelato si besoin.)'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _deleting = true);
+    try {
+      await OrderService.deleteOrder(widget.order);
+      // Le stream retire la carte automatiquement.
+    } catch (e) {
+      if (mounted) {
+        setState(() => _deleting = false);
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          backgroundColor: AppColors.error,
+          content: Text('Suppression impossible : $e'),
+        ));
+      }
     }
   }
 
@@ -373,6 +411,24 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                     const SizedBox(height: 8),
                     _buildGelatoSection(),
                   ],
+
+                  // ── Supprimer la commande ─────────────────────────────────
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    width: double.infinity,
+                    child: TextButton.icon(
+                      onPressed: _deleting ? null : _deleteOrder,
+                      icon: _deleting
+                          ? const SizedBox(
+                              width: 16, height: 16,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2, color: AppColors.error))
+                          : const Icon(Icons.delete_outline,
+                              size: 18, color: AppColors.error),
+                      label: const Text('Supprimer la commande',
+                          style: TextStyle(color: AppColors.error)),
+                    ),
+                  ),
                 ],
               ),
             ),

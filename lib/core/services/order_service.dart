@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import '../models/order_model.dart';
 import 'backend_client.dart';
@@ -30,6 +31,22 @@ class OrderService {
     } catch (e) {
       debugPrint('[email/order] ERROR: $e');
     }
+  }
+
+  // ── Supprimer une commande (admin) ────────────────────────────────────────
+
+  /// Supprime la commande (ex. après suppression côté Gelato) : le PDF Storage
+  /// (best-effort) puis le document Firestore. Réservé à l'admin par les règles.
+  static Future<void> deleteOrder(OrderModel order) async {
+    final url = order.pdfUrl;
+    if (url != null && url.isNotEmpty) {
+      try {
+        await FirebaseStorage.instance.refFromURL(url).delete();
+      } catch (e) {
+        debugPrint('[orders] PDF non supprimé (${order.id}): $e');
+      }
+    }
+    await FirebaseFirestore.instance.collection('orders').doc(order.id).delete();
   }
 
   // ── Mettre à jour le statut (admin) ───────────────────────────────────────
