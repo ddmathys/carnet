@@ -127,6 +127,11 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
   Retiré `email_verified` de `isAdmin()` (Firestore **et** Storage, redéployés) ;
   le claim `email` signé suffit. Console admin résiliente (parse par doc en
   try/catch + affichage de l'erreur au lieu d'un spinner muet).
+- **Suppression d'une commande (admin)** : bouton « Supprimer la commande » dans
+  la console (`OrderService.deleteOrder` → PDF Storage best-effort + doc
+  Firestore). Pour le cas « supprimée chez Gelato → la retirer de l'app ». NB :
+  ne supprime que côté app, pas le brouillon Gelato (annulation API possible plus
+  tard si voulu).
 - **Nombre de pages valide Gelato** : Gelato n'accepte que **pair, 28–200**
   (notre livre faisait 41 → refus). `generateForNotebook(padForPrint: true)`
   ajoute des **pages blanches** jusqu'à la valeur valide ; `pageCount` envoyé =
