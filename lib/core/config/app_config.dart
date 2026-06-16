@@ -9,8 +9,8 @@ class AppConfig {
 
   static const String appDownloadUrl = 'https://dmathys.dev/download/carnet.apk';
 
-  // Paiement en ligne (TWINT/carte via Stripe). `true` = bouton « Payer »
-  // affiché. Mettre `false` pour revenir au paiement par facture (« à
-  // réception ») si besoin. Nécessite STRIPE_SECRET_KEY côté backend.
-  static const bool paymentEnabled = true;
+  // Paiement en ligne (TWINT/carte via Stripe). `false` = paiement par FACTURE
+  // (« à réception »), le bouton « Payer » est masqué. Repasser à `true` quand
+  // Stripe est configuré (STRIPE_SECRET_KEY côté backend) pour activer TWINT.
+  static const bool paymentEnabled = false;
 }
