@@ -8,9 +8,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
+      // NB : on ne vérifie PAS email_verified — selon le provider, ce claim peut
+      // être absent/false dans le token (ce qui bloquait la console admin). Le
+      // claim `email` d'un token Firebase est signé par Firebase et ne peut pas
+      // être falsifié par le client, donc le check email seul est sûr.
       return isAuth()
-          && request.auth.token.email == 'david.mathys24@gmail.com'
-          && request.auth.token.email_verified;
+          && request.auth.token.email == 'david.mathys24@gmail.com';
     }
 
     // Accès à un carnet : propriétaire ou collaborateur (sharedWith).

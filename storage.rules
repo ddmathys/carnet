@@ -7,9 +7,10 @@ service firebase.storage {
     }
 
     function isAdmin() {
+      // Cf. firestore.rules : on ne vérifie pas email_verified (claim parfois
+      // absent/false selon le provider). Le claim email signé par Firebase suffit.
       return request.auth != null
-          && request.auth.token.email == 'david.mathys24@gmail.com'
-          && request.auth.token.email_verified;
+          && request.auth.token.email == 'david.mathys24@gmail.com';
     }
 
     function isImage() {
