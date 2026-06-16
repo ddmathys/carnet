@@ -22,6 +22,11 @@ service firebase.storage {
           && request.resource.contentType == 'application/pdf';
     }
 
+    function isAudio() {
+      return request.resource.size < 25 * 1024 * 1024
+          && request.resource.contentType.matches('audio/.*');
+    }
+
     // NB : les photos affichées via URL de téléchargement (token) ne passent
     // pas par ces règles — les collaborateurs y accèdent via les URLs
     // stockées dans Firestore, protégées par firestore.rules.
@@ -50,6 +55,14 @@ service firebase.storage {
       allow read: if isOwner(userId) || isAdmin();
       allow create, update: if isOwner(userId) && isPdf();
       allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Mémos vocaux des souvenirs — audio/{uid}/{notebookId}/{fichier}
+    // Lus dans le livre via l'URL de download tokenisée (page /listen du backend),
+    // qui ne passe pas par ces règles.
+    match /audio/{userId}/{allPaths=**} {
+      allow read, delete: if isOwner(userId);
+      allow create, update: if isOwner(userId) && isAudio();
     }
 
     // Photos de profil — users/{uid}/{fichier}

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:exif/exif.dart';
@@ -7,9 +8,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:speech_to_text/speech_to_text.dart';
+import 'package:record/record.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'package:path_provider/path_provider.dart';
 import '../../core/models/notebook_model.dart';
+import '../../core/models/draft_milestone.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/audio_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/constants/notebook_types.dart';
@@ -42,10 +48,24 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final _smartController = TextEditingController();
   bool _isAnalyzing = false;
   bool _showManualGrid = false;
+  // L'analyse IA tourne encore en arrière-plan (formulaire déjà ouvert).
+  bool _analysisPending = false;
+  Timer? _analysisTimeoutTimer;
 
-  // Voice
+  // Voice (speech-to-text → remplit le texte)
   final SpeechToText _speech = SpeechToText();
   bool _isListening = false;
+
+  // Mémo vocal (audio attaché au souvenir)
+  final AudioRecorder _recorder = AudioRecorder();
+  final AudioPlayer _audioPlayer = AudioPlayer();
+  bool _isRecording = false;
+  bool _isPlayingMemo = false;
+  String? _localAudioPath; // nouvel enregistrement local non encore uploadé
+  String? _existingAudioUrl; // audio déjà stocké (mode édition)
+  bool _audioRemoved = false; // l'utilisateur a supprimé l'audio existant
+  int? _audioDurationMs;
+  DateTime? _recordStartedAt;
 
   // Step 1: form
   String? _selectedCategory;
@@ -83,6 +103,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     _weightController.dispose();
     _heightController.dispose();
     _speech.stop();
+    _recorder.dispose();
+    _audioPlayer.dispose();
+    _analysisTimeoutTimer?.cancel();
     super.dispose();
   }
 
@@ -143,6 +166,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ...mediaUrls,
       }.toList();
       _existingPhotoUrls.addAll(existing);
+      _existingAudioUrl = data['audioUrl'] as String?;
+      _audioDurationMs = (data['audioDurationMs'] as num?)?.toInt();
       _dateNeedsConfirmation = false; // editing: date already confirmed
       _step = 1;
       if (data['type'] == 'taille_poids') {
@@ -377,6 +402,98 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
+  // ── Mémo vocal ──────────────────────────────────────────────────────────────
+
+  bool get _hasAudio =>
+      _localAudioPath != null ||
+      (_existingAudioUrl != null && !_audioRemoved);
+
+  Future<void> _toggleRecording() async {
+    if (_isRecording) {
+      final path = await _recorder.stop();
+      final ms = _recordStartedAt != null
+          ? DateTime.now().difference(_recordStartedAt!).inMilliseconds
+          : null;
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          if (path != null) {
+            _localAudioPath = path;
+            _audioDurationMs = ms;
+            // Un nouvel enregistrement remplace l'audio existant.
+            if (_existingAudioUrl != null) _audioRemoved = true;
+          }
+        });
+      }
+      return;
+    }
+
+    try {
+      if (!await _recorder.hasPermission()) {
+        _showSnack('Micro non autorisé');
+        return;
+      }
+      final dir = await getTemporaryDirectory();
+      final path =
+          '${dir.path}/memo_${DateTime.now().millisecondsSinceEpoch}.m4a';
+      await _audioPlayer.stop();
+      await _recorder.start(
+        const RecordConfig(encoder: AudioEncoder.aacLc),
+        path: path,
+      );
+      if (mounted) {
+        setState(() {
+          _isRecording = true;
+          _isPlayingMemo = false;
+          _recordStartedAt = DateTime.now();
+        });
+      }
+    } catch (e) {
+      if (mounted) _showSnack('Enregistrement impossible : $e');
+    }
+  }
+
+  Future<void> _togglePlayMemo() async {
+    if (_isPlayingMemo) {
+      await _audioPlayer.stop();
+      if (mounted) setState(() => _isPlayingMemo = false);
+      return;
+    }
+    try {
+      _audioPlayer.onPlayerComplete.listen((_) {
+        if (mounted) setState(() => _isPlayingMemo = false);
+      });
+      if (_localAudioPath != null) {
+        await _audioPlayer.play(DeviceFileSource(_localAudioPath!));
+      } else if (_existingAudioUrl != null) {
+        await _audioPlayer.play(UrlSource(_existingAudioUrl!));
+      } else {
+        return;
+      }
+      if (mounted) setState(() => _isPlayingMemo = true);
+    } catch (e) {
+      if (mounted) _showSnack('Lecture impossible : $e');
+    }
+  }
+
+  void _removeAudio() {
+    setState(() {
+      _audioPlayer.stop();
+      _isPlayingMemo = false;
+      _localAudioPath = null;
+      _audioDurationMs = null;
+      if (_existingAudioUrl != null) _audioRemoved = true;
+    });
+  }
+
+  String _formatAudioDuration(int? ms) {
+    if (ms == null || ms <= 0) return '';
+    final totalSec = (ms / 1000).round();
+    final m = totalSec ~/ 60;
+    final s = totalSec % 60;
+    return '${m.toString().padLeft(1, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
   Future<void> _analyzeAndFill() async {
     final text = _smartController.text.trim();
     if (text.isEmpty) return;
@@ -384,36 +501,66 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       await _speech.stop();
       setState(() => _isListening = false);
     }
-    setState(() => _isAnalyzing = true);
+    setState(() {
+      _isAnalyzing = true;
+      _analysisPending = true;
+    });
+
+    // Si l'IA dépasse 5 s, on ouvre quand même le formulaire pour que
+    // l'utilisateur puisse enregistrer un mémo vocal / remplir sans attendre.
+    // L'analyse continue en arrière-plan et complète les champs vides à son
+    // retour (sans écraser ce que l'utilisateur a déjà saisi).
+    _analysisTimeoutTimer?.cancel();
+    _analysisTimeoutTimer = Timer(const Duration(seconds: 5), () {
+      if (!mounted || !_analysisPending) return;
+      setState(() {
+        _isAnalyzing = false; // libère le spinner bloquant de l'étape 0
+        if (_step == 0) _step = 1; // ouvre le formulaire (catégorie par défaut)
+      });
+    });
+
     try {
       final results = await _deepseek.extractAllMilestonesFromText(text: text);
+      _analysisTimeoutTimer?.cancel();
       if (!mounted) return;
       if (results == null || results.isEmpty) {
+        setState(() {
+          _isAnalyzing = false;
+          _analysisPending = false;
+        });
         _showSnack('Impossible d\'analyser — réessaie');
         return;
       }
-      final r = results.first;
-      setState(() {
+      _applyAnalysis(results.first);
+    } catch (_) {
+      _analysisTimeoutTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _isAnalyzing = false;
+          _analysisPending = false;
+        });
+        _showSnack('Impossible d\'analyser — réessaie');
+      }
+    }
+  }
+
+  /// Applique le résultat de l'IA. Si le formulaire a déjà été ouvert via le
+  /// délai de 5 s et que l'utilisateur a commencé à le remplir, on préserve
+  /// ses saisies et on ne complète que les champs encore vides.
+  void _applyAnalysis(DraftMilestone r) {
+    // Le formulaire est déjà ouvert si l'analyse est revenue après le timeout.
+    final advancedEarly = _step == 1;
+    final userTouchedForm = advancedEarly &&
+        (_selectedSubType != null ||
+            _textController.text.trim().isNotEmpty ||
+            _weightController.text.trim().isNotEmpty ||
+            _heightController.text.trim().isNotEmpty);
+
+    setState(() {
+      if (!userTouchedForm) {
+        // Cas normal : on applique entièrement la classification de l'IA.
         _selectedCategory = r.type;
         _selectedSubType = r.subType;
-
-        // ── Date ────────────────────────────────────────────────────────────
-        // Apply AI date if:
-        //  - still needs confirmation (no EXIF found yet)
-        //  - OR EXIF set it but AI date is more specific (keep EXIF priority
-        //    only when EXIF already confirmed the date, i.e. !_dateNeedsConfirmation
-        //    AND photos exist)
-        final exifAlreadySetDate = !_dateNeedsConfirmation && _hasPhotos;
-        if (r.date != null && !exifAlreadySetDate) {
-          _selectedDate = r.date!;
-          _datePrecision = r.datePrecision;
-          _dateNeedsConfirmation = false;
-        } else if (r.date == null && _dateNeedsConfirmation) {
-          // AI found no date and no EXIF → keep "needs confirmation"
-        }
-        // If r.date == null but EXIF already set it → keep EXIF date (no change)
-
-        // ── Content ─────────────────────────────────────────────────────────
         _textController.text = r.type != 'taille_poids' ? r.rawContent : '';
         if (r.weightKg != null) {
           _weightController.text = r.weightKg!.toStringAsFixed(1);
@@ -421,24 +568,38 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         if (r.heightCm != null) {
           _heightController.text = r.heightCm!.toStringAsFixed(1);
         }
+      } else {
+        // L'utilisateur a déjà saisi quelque chose → on garde sa catégorie.
+        _selectedCategory ??= r.type;
+        _selectedSubType ??= r.subType;
+      }
 
-        // ── Title & location (fill if empty) ────────────────────────────────
-        if (_titleController.text.isEmpty &&
-            r.title != null &&
-            r.title!.isNotEmpty) {
-          _titleController.text = r.title!;
-        }
-        if (_locationController.text.isEmpty &&
-            r.location != null &&
-            r.location!.isNotEmpty) {
-          _locationController.text = r.location!;
-        }
+      // ── Date ──────────────────────────────────────────────────────────────
+      // On applique la date de l'IA seulement si elle n'a pas déjà été fixée
+      // (ni par EXIF, ni manuellement) — _dateNeedsConfirmation le garantit.
+      final exifAlreadySetDate = !_dateNeedsConfirmation && _hasPhotos;
+      if (r.date != null && _dateNeedsConfirmation && !exifAlreadySetDate) {
+        _selectedDate = r.date!;
+        _datePrecision = r.datePrecision;
+        _dateNeedsConfirmation = false;
+      }
 
-        _step = 1;
-      });
-    } finally {
-      if (mounted) setState(() => _isAnalyzing = false);
-    }
+      // ── Titre & lieu (remplis seulement si vides) ─────────────────────────
+      if (_titleController.text.isEmpty &&
+          r.title != null &&
+          r.title!.isNotEmpty) {
+        _titleController.text = r.title!;
+      }
+      if (_locationController.text.isEmpty &&
+          r.location != null &&
+          r.location!.isNotEmpty) {
+        _locationController.text = r.location!;
+      }
+
+      _analysisPending = false;
+      _isAnalyzing = false;
+      _step = 1;
+    });
   }
 
   String get _dateLabel => _dateNeedsConfirmation
@@ -548,6 +709,24 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       final photoUrl = allUrls.isNotEmpty ? allUrls.first : null;
       // ────────────────────────────────────────────────────────────────────
 
+      // ── Audio handling ───────────────────────────────────────────────────
+      String? audioUrl = _audioRemoved ? null : _existingAudioUrl;
+      // Nouvel enregistrement → upload + suppression de l'ancien
+      if (_localAudioPath != null) {
+        if (_existingAudioUrl != null) {
+          await AudioService.deleteAudioByUrl(_existingAudioUrl);
+        }
+        audioUrl = await AudioService.uploadMemoryAudio(
+          audio: File(_localAudioPath!),
+          notebookId: widget.notebookId,
+        );
+      } else if (_audioRemoved && _existingAudioUrl != null) {
+        // Audio existant supprimé sans remplacement
+        await AudioService.deleteAudioByUrl(_existingAudioUrl);
+      }
+      final audioDurationMs = audioUrl != null ? _audioDurationMs : null;
+      // ────────────────────────────────────────────────────────────────────
+
       final titleValue = _titleController.text.trim();
       final locationValue = _locationController.text.trim();
       final payload = {
@@ -562,6 +741,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'rawContent': rawContent,
         'mediaUrls': allUrls,
         'photoUrl': photoUrl,
+        'audioUrl': audioUrl,
+        'audioDurationMs': audioDurationMs,
         'weightKg': weightKg,
         'heightCm': heightCm,
       };
@@ -683,7 +864,39 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           onPressed: _goBack,
         ),
       ),
-      body: _step == 0 ? _buildSmartInputStep() : _buildDetailsStep(),
+      body: _step == 0
+          ? _buildSmartInputStep()
+          : Column(
+              children: [
+                if (_analysisPending) _buildAnalysisBanner(),
+                Expanded(child: _buildDetailsStep()),
+              ],
+            ),
+    );
+  }
+
+  Widget _buildAnalysisBanner() {
+    return Container(
+      width: double.infinity,
+      color: AppColors.sage.withOpacity(0.12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 16,
+            height: 16,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: AppColors.sage),
+          ),
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Text(
+              'Analyse IA en cours… les champs vides se rempliront automatiquement. Tu peux déjà enregistrer un mémo vocal.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -939,6 +1152,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 16),
           _buildPhotoSection(),
           const SizedBox(height: 16),
+          _buildVoiceMemoSection(),
+          const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
@@ -998,6 +1213,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ),
           const SizedBox(height: 16),
           _buildPhotoSection(),
+          const SizedBox(height: 16),
+          _buildVoiceMemoSection(),
           const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
@@ -1111,6 +1328,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 16),
           _buildPhotoSection(),
           const SizedBox(height: 16),
+          _buildVoiceMemoSection(),
+          const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
@@ -1164,6 +1383,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ),
           const SizedBox(height: 16),
           _buildPhotoSection(),
+          const SizedBox(height: 16),
+          _buildVoiceMemoSection(),
           const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
@@ -1253,6 +1474,112 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                 ],
               ),
             ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  // ── Mémo vocal widget ─────────────────────────────────────────────────────
+
+  Widget _buildVoiceMemoSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle('🎙️ Mémo vocal (optionnel)'),
+        const SizedBox(height: 8),
+        if (_hasAudio) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            decoration: BoxDecoration(
+              color: AppColors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: AppColors.sage, width: 1),
+            ),
+            child: Row(
+              children: [
+                GestureDetector(
+                  onTap: _togglePlayMemo,
+                  child: Container(
+                    width: 38, height: 38,
+                    decoration: const BoxDecoration(
+                      color: AppColors.sage,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      _isPlayingMemo ? Icons.stop : Icons.play_arrow,
+                      color: Colors.white, size: 20,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Message vocal',
+                          style: TextStyle(
+                              color: AppColors.textDark,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 14)),
+                      if (_formatAudioDuration(_audioDurationMs).isNotEmpty)
+                        Text(_formatAudioDuration(_audioDurationMs),
+                            style: const TextStyle(
+                                color: AppColors.textMedium, fontSize: 12)),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.delete_outline,
+                      color: AppColors.softGray, size: 22),
+                  onPressed: _removeAudio,
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          GestureDetector(
+            onTap: _toggleRecording,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: _isRecording
+                    ? AppColors.error.withOpacity(0.08)
+                    : AppColors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _isRecording ? AppColors.error : const Color(0xFFDDD8CC),
+                  width: _isRecording ? 1 : 0.5,
+                ),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    _isRecording ? Icons.stop : Icons.mic_none_outlined,
+                    color: _isRecording ? AppColors.error : AppColors.sage,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    _isRecording
+                        ? 'Enregistrement… appuie pour arrêter'
+                        : 'Enregistrer un message vocal',
+                    style: TextStyle(
+                      color: _isRecording ? AppColors.error : AppColors.sage,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Un QR code sera ajouté au livre pour écouter ce message.',
+            style: TextStyle(color: AppColors.softGray, fontSize: 12),
           ),
         ],
       ],

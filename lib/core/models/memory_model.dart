@@ -14,6 +14,8 @@ class MemoryModel {
   final String? aiNarration;
   final String? photoUrl;
   final List<String> mediaUrls;
+  final String? audioUrl;
+  final int? audioDurationMs;
   final double? weightKg;
   final double? heightCm;
   final DateTime createdAt;
@@ -32,6 +34,8 @@ class MemoryModel {
     this.aiNarration,
     this.photoUrl,
     this.mediaUrls = const [],
+    this.audioUrl,
+    this.audioDurationMs,
     this.weightKg,
     this.heightCm,
     required this.createdAt,
@@ -54,6 +58,8 @@ class MemoryModel {
       aiNarration: d['aiNarration'],
       photoUrl: d['photoUrl'],
       mediaUrls: List<String>.from(d['mediaUrls'] ?? []),
+      audioUrl: d['audioUrl'],
+      audioDurationMs: (d['audioDurationMs'] as num?)?.toInt(),
       weightKg: (d['weightKg'] as num?)?.toDouble(),
       heightCm: (d['heightCm'] as num?)?.toDouble(),
       createdAt: d['createdAt'] != null
@@ -75,6 +81,8 @@ class MemoryModel {
         'aiNarration': aiNarration,
         'photoUrl': photoUrl,
         'mediaUrls': mediaUrls,
+        'audioUrl': audioUrl,
+        'audioDurationMs': audioDurationMs,
         'weightKg': weightKg,
         'heightCm': heightCm,
         'createdAt': Timestamp.fromDate(createdAt),

@@ -126,6 +126,7 @@ class BookPdfService {
     String? coverPhotoUrl,
     String? customTitle,
     String? customSubtitle,
+    String backendUrl = '',
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -195,18 +196,37 @@ class BookPdfService {
     // Up to 5 memory titles for cover subtitle
     final highlights = _coverHighlights(sorted);
 
-    // Build page entries: description only for first photo of each memory; detect portrait.
+    // Index of the LAST successful photo per memory → QR placed at end of memory.
+    final lastPhotoIndexByMemory = <String, int>{};
+    for (int i = 0; i < successfulPhotos.length; i++) {
+      lastPhotoIndexByMemory[successfulPhotos[i].memory.id] = i;
+    }
+
+    // Build page entries: title + description only on the FIRST photo of each
+    // memory; QR (listen link) only on its LAST photo; detect portrait.
     final shownMemoryIds = <String>{};
+    int flatIndex = 0;
     final pageDataList = photoPageGroups.map((group) {
       return group.map((e) {
         final showCaption = shownMemoryIds.add(e.memory.id);
-        return _PhotoPageEntry(
+        final isLastOfMemory =
+            lastPhotoIndexByMemory[e.memory.id] == flatIndex;
+        final hasAudio =
+            e.memory.audioUrl != null && e.memory.audioUrl!.isNotEmpty;
+        final listenUrl = (isLastOfMemory && hasAudio && backendUrl.isNotEmpty)
+            ? '$backendUrl/listen?m=${e.memory.id}'
+            : null;
+        final entry = _PhotoPageEntry(
           bytes: bytesByUrl[e.url]!,
           date: _dateStr(e.memory),
+          title: showCaption ? e.memory.title : null,
           caption: showCaption ? e.memory.rawContent : null,
           locationComment: showCaption ? locationComments[e.memory.id] : null,
           isPortrait: _isPortrait(bytesByUrl[e.url]!),
+          listenUrl: listenUrl,
         );
+        flatIndex++;
+        return entry;
       }).toList();
     }).toList();
 
@@ -245,6 +265,7 @@ class BookPdfService {
             entries: entries,
             cover: pdfCover,
             pR: playfairR,
+            pB: playfairB,
             dm: dmSans,
             pageNum: pageNum,
             total: totalPages,
@@ -265,6 +286,7 @@ class BookPdfService {
             dm: dmSans,
             pageNum: pageNum,
             total: totalPages,
+            backendUrl: backendUrl,
           ),
         ));
       }
@@ -343,6 +365,7 @@ class BookPdfService {
     required List<_PhotoPageEntry> entries,
     required PdfColor cover,
     required pw.Font pR,
+    required pw.Font pB,
     required pw.Font dm,
     required int pageNum,
     required int total,
@@ -351,7 +374,8 @@ class BookPdfService {
 
     // Caption box (white solid — no alpha issues)
     pw.Widget captionBox(_PhotoPageEntry e, {double maxChars = 220}) {
-      final hasBody = (e.caption?.isNotEmpty ?? false) || (e.locationComment?.isNotEmpty ?? false);
+      final hasTitle = e.title?.isNotEmpty ?? false;
+      final hasBody = (e.caption?.isNotEmpty ?? false) || (e.locationComment?.isNotEmpty ?? false) || hasTitle;
       return pw.Container(
         color: PdfColors.white,
         padding: pw.EdgeInsets.fromLTRB(14, hasBody ? 10 : 7, 14, hasBody ? 10 : 7),
@@ -360,6 +384,11 @@ class BookPdfService {
           children: [
             pw.Text(e.date,
               style: pw.TextStyle(font: pR, fontSize: 8.5, color: cover, fontStyle: pw.FontStyle.italic)),
+            if (hasTitle) ...[
+              pw.SizedBox(height: 3),
+              pw.Text(e.title!,
+                style: pw.TextStyle(font: pB, fontSize: 11.5, color: _textDark, letterSpacing: 0.2)),
+            ],
             if (e.caption != null && e.caption!.isNotEmpty) ...[
               pw.SizedBox(height: 4),
               pw.Text(
@@ -390,6 +419,31 @@ class BookPdfService {
       padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       child: pw.Text('$pageNum / $total',
         style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium)),
+    );
+
+    // QR « écouter le mémo vocal » — placé au coin bas-gauche de la demi-page
+    pw.Widget qrBadge(String url) => pw.Container(
+      color: PdfColors.white,
+      padding: const pw.EdgeInsets.fromLTRB(6, 6, 8, 6),
+      child: pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
+        pw.BarcodeWidget(
+          barcode: pw.Barcode.qrCode(),
+          data: url,
+          width: 46, height: 46,
+          color: _textDark,
+        ),
+        pw.SizedBox(width: 6),
+        pw.Column(
+          mainAxisSize: pw.MainAxisSize.min,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text('Écouter', style: pw.TextStyle(font: pB, fontSize: 7.5, color: cover)),
+            pw.SizedBox(height: 1),
+            pw.Text('le mémo vocal',
+              style: pw.TextStyle(font: pR, fontSize: 6.5, color: _textMedium)),
+          ],
+        ),
+      ]),
     );
 
     // Toujours demi-page : photo du haut, photo (ou fond crème) du bas
@@ -429,6 +483,12 @@ class BookPdfService {
         if (e1 != null)
           pw.Positioned(top: halfH, left: 0, right: 0,
             child: captionBox(e1, maxChars: 120)),
+
+        // QR « écouter » en fin de souvenir, coin bas-gauche de la demi-page
+        if (e0.listenUrl != null)
+          pw.Positioned(top: halfH - 60, left: 0, child: qrBadge(e0.listenUrl!)),
+        if (e1 != null && e1.listenUrl != null)
+          pw.Positioned(bottom: 0, left: 0, child: qrBadge(e1.listenUrl!)),
 
         // Numéro de page
         pw.Positioned(bottom: 0, right: 0, child: pageBadge),
@@ -592,11 +652,16 @@ class BookPdfService {
     required pw.Font dm,
     required int pageNum,
     required int total,
+    String backendUrl = '',
   }) {
     final dateStr = memory.dateLabel ??
         '${memory.date.day.toString().padLeft(2, '0')}/'
         '${memory.date.month.toString().padLeft(2, '0')}/'
         '${memory.date.year}';
+    final hasAudio = memory.audioUrl != null && memory.audioUrl!.isNotEmpty;
+    final listenUrl = (hasAudio && backendUrl.isNotEmpty)
+        ? '$backendUrl/listen?m=${memory.id}'
+        : null;
 
     return pw.Container(
       color: _cream,
@@ -632,6 +697,29 @@ class BookPdfService {
               pw.SizedBox(width: 5),
               pw.Text(memory.location!,
                 style: pw.TextStyle(font: pR, fontSize: 8, color: cover, fontStyle: pw.FontStyle.italic)),
+            ]),
+          ],
+          if (listenUrl != null) ...[
+            pw.SizedBox(height: 16),
+            pw.Row(children: [
+              pw.BarcodeWidget(
+                barcode: pw.Barcode.qrCode(),
+                data: listenUrl,
+                width: 56, height: 56,
+                color: _textDark,
+              ),
+              pw.SizedBox(width: 10),
+              pw.Column(
+                mainAxisSize: pw.MainAxisSize.min,
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text('Écouter le mémo vocal',
+                    style: pw.TextStyle(font: pB, fontSize: 9, color: cover)),
+                  pw.SizedBox(height: 2),
+                  pw.Text('Scanne ce code pour écouter le message.',
+                    style: pw.TextStyle(font: pR, fontSize: 7.5, color: _textMedium)),
+                ],
+              ),
             ]),
           ],
           pw.SizedBox(height: 8),
@@ -994,8 +1082,10 @@ class _PhotoEntry {
 class _PhotoPageEntry {
   final Uint8List bytes;
   final String date;
+  final String? title;
   final String? caption;
   final String? locationComment;
   final bool isPortrait;
-  const _PhotoPageEntry({required this.bytes, required this.date, this.caption, this.locationComment, this.isPortrait = true});
+  final String? listenUrl;
+  const _PhotoPageEntry({required this.bytes, required this.date, this.title, this.caption, this.locationComment, this.isPortrait = true, this.listenUrl});
 }

@@ -48,11 +48,28 @@ dependencies:
   speech_to_text: ^7.0.0
   cupertino_icons: ^1.0.8
 
+  # Mémo vocal (enregistrement + lecture)
+  record: ^5.1.2
+  audioplayers: ^6.1.0
+  path_provider: ^2.1.4
+
+  # Ouvrir l'URL de paiement Stripe Checkout
+  url_launcher: ^6.3.1
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.3
+
+# La version pub de record_linux (0.7.2) est périmée et casse la compilation
+# (n'implémente pas startStream de record_platform_interface ^1.6.0, importé
+# inconditionnellement par le dart_plugin_registrant même pour un build Android).
+# On la remplace par un stub local (packages/record_linux) — l'app ne cible
+# jamais Linux. À retirer quand un record_linux >0.7.2 sera publié sur pub.dev.
+dependency_overrides:
+  record_linux:
+    path: packages/record_linux
 
 flutter_launcher_icons:
   android: true

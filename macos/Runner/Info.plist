@@ -2,6 +2,14 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Folio utilise le micro pour enregistrer des mémos vocaux à joindre à vos souvenirs.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Folio utilise la reconnaissance vocale pour transcrire ce que vous dictez.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Folio utilise l'appareil photo pour ajouter des photos à vos souvenirs.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Folio accède à vos photos pour les joindre à vos souvenirs.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleExecutable</key>

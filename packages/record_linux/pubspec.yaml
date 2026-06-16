@@ -1,0 +1,27 @@
+name: record_linux
+description: >-
+  Stub local remplaçant le record_linux 0.7.2 de pub.dev, périmé : il
+  n'implémente pas startStream de record_platform_interface ^1.6.0 et casse le
+  build (le dart_plugin_registrant importe inconditionnellement toutes les
+  implémentations endossées, même pour un build Android). L'app ne cible jamais
+  Linux : toutes les méthodes lèvent. À supprimer dès qu'un record_linux corrigé
+  est publié sur pub.dev.
+version: 0.7.3
+homepage: https://github.com/llfbandit/record/tree/master/record_linux
+
+environment:
+  sdk: ^3.3.0
+  flutter: ">=3.16.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  record_platform_interface: ^1.6.0
+
+flutter:
+  plugin:
+    implements: record
+    platforms:
+      linux:
+        dartPluginClass: RecordLinux

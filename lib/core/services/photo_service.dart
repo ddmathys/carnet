@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
+import 'audio_service.dart';
 
 class PhotoService {
   static final _storage = FirebaseStorage.instance;
@@ -50,16 +51,19 @@ class PhotoService {
         .where('notebookId', isEqualTo: notebookId)
         .get();
 
-    // Delete all photos from Storage (photoUrl + mediaUrls)
-    final photoFutures = memories.docs.expand((doc) {
+    // Delete all photos + voice memos from Storage
+    final mediaFutures = memories.docs.expand((doc) {
       final data = doc.data();
       final urls = <String?>[
         data['photoUrl'] as String?,
         ...List<String>.from(data['mediaUrls'] as List<dynamic>? ?? []),
       ];
-      return urls.map(deletePhotoByUrl);
+      return <Future<void>>[
+        ...urls.map(deletePhotoByUrl),
+        AudioService.deleteAudioByUrl(data['audioUrl'] as String?),
+      ];
     });
-    await Future.wait(photoFutures);
+    await Future.wait(mediaFutures);
 
     // Delete memories from Firestore in batches
     const batchSize = 400;
@@ -75,15 +79,17 @@ class PhotoService {
     await _firestore.collection('notebooks').doc(notebookId).delete();
   }
 
-  /// Delete a memory and ALL its photos (photoUrl + mediaUrls).
+  /// Delete a memory and ALL its photos (photoUrl + mediaUrls) + voice memo.
   static Future<void> deleteMemory(
-      String memoryId, String? photoUrl, List<String> mediaUrls) async {
+      String memoryId, String? photoUrl, List<String> mediaUrls,
+      {String? audioUrl}) async {
     final allUrls = {
       if (photoUrl != null && photoUrl.isNotEmpty) photoUrl,
       ...mediaUrls,
     };
     await Future.wait([
       ...allUrls.map(deletePhotoByUrl),
+      AudioService.deleteAudioByUrl(audioUrl),
       _firestore.collection('memories').doc(memoryId).delete(),
     ]);
   }
