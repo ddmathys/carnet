@@ -44,6 +44,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   NotebookModel? _notebook;
   List<MemoryModel> _memories = [];
   BookSettings _settings = const BookSettings();
+  String? _loadError; // message si le chargement initial échoue
 
   // ── State ──────────────────────────────────────────────────────────────────
   int _step = 0; // 0=cover+create, 1=format, 2=order
@@ -153,35 +154,51 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   Future<void> _loadData() async {
     final ids = widget._ids;
+    if (mounted) setState(() => _loadError = null);
+    const t = Duration(seconds: 20);
+    try {
+      // Load primary notebook (first in list)
+      final nbDoc = await FirebaseFirestore.instance
+          .collection('notebooks')
+          .doc(ids.first)
+          .get()
+          .timeout(t);
+      if (!mounted) return;
+      if (!nbDoc.exists) {
+        setState(() => _loadError = 'Carnet introuvable.');
+        return;
+      }
 
-    // Load primary notebook (first in list)
-    final nbDoc = await FirebaseFirestore.instance
-        .collection('notebooks')
-        .doc(ids.first)
-        .get();
-    if (!mounted) return;
+      // Load memories from ALL notebooks
+      final allMemories = <MemoryModel>[];
+      for (final id in ids) {
+        final memSnap = await FirebaseFirestore.instance
+            .collection('memories')
+            .where('notebookId', isEqualTo: id)
+            .get()
+            .timeout(t);
+        allMemories
+            .addAll(memSnap.docs.map((d) => MemoryModel.fromFirestore(d)));
+      }
+      allMemories.sort((a, b) => a.date.compareTo(b.date));
 
-    // Load memories from ALL notebooks
-    final allMemories = <MemoryModel>[];
-    for (final id in ids) {
-      final memSnap = await FirebaseFirestore.instance
-          .collection('memories')
-          .where('notebookId', isEqualTo: id)
-          .get();
-      allMemories.addAll(memSnap.docs.map((d) => MemoryModel.fromFirestore(d)));
+      if (!mounted) return;
+      final nb = NotebookModel.fromFirestore(nbDoc);
+      setState(() {
+        _notebook = nb;
+        _memories = allMemories;
+        _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
+        _loadError = null;
+      });
+      // Initialise les champs éditables avec les valeurs du carnet
+      _titleCtrl.text = nb.title;
+      _subtitleCtrl.text = nb.subtitle;
+    } catch (e) {
+      // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
+      // infini, sans message — la cause des « le spinner tourne ».
+      if (!mounted) return;
+      setState(() => _loadError = 'Chargement impossible. Vérifie ta connexion.');
     }
-    allMemories.sort((a, b) => a.date.compareTo(b.date));
-
-    if (!mounted) return;
-    final nb = NotebookModel.fromFirestore(nbDoc);
-    setState(() {
-      _notebook = nb;
-      _memories = allMemories;
-      _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
-    });
-    // Initialise les champs éditables avec les valeurs du carnet
-    _titleCtrl.text = nb.title;
-    _subtitleCtrl.text = nb.subtitle;
   }
 
   // ── Generation ─────────────────────────────────────────────────────────────
@@ -463,9 +480,43 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   @override
   Widget build(BuildContext context) {
     if (_notebook == null) {
-      return const Scaffold(
+      return Scaffold(
         backgroundColor: AppColors.background,
-        body: Center(child: CircularProgressIndicator()),
+        appBar: AppBar(
+          backgroundColor: AppColors.background,
+          elevation: 0,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
+            onPressed: () =>
+                context.go('/notebook/${widget.notebookId}/dashboard'),
+          ),
+        ),
+        body: Center(
+          child: _loadError == null
+              ? const CircularProgressIndicator()
+              : Padding(
+                  padding: const EdgeInsets.all(32),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.cloud_off_outlined,
+                          color: AppColors.softGray, size: 40),
+                      const SizedBox(height: 12),
+                      Text(
+                        _loadError!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: AppColors.textMedium),
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: _loadData,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Réessayer'),
+                      ),
+                    ],
+                  ),
+                ),
+        ),
       );
     }
 
