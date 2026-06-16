@@ -132,6 +132,7 @@ class BookPdfService {
     String? customTitle,
     String? customSubtitle,
     String backendUrl = '',
+    bool padForPrint = false,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -314,9 +315,22 @@ class BookPdfService {
         ));
       }
 
+      // 4. Pages blanches de bourrage pour atteindre un nombre de pages valide
+      //    chez Gelato (pair, 28–200). Uniquement pour l'impression.
+      if (padForPrint) {
+        for (int p = totalPages; p < _gelatoValidPageCount(totalPages); p++) {
+          doc.addPage(pw.Page(
+            pageFormat: fmt,
+            build: (_) => pw.Container(color: _cream),
+          ));
+        }
+      }
+
       return doc.save();
     }
 
+    final finalPageCount =
+        padForPrint ? _gelatoValidPageCount(totalPages) : totalPages;
     Uint8List bytes;
     if (svgString != null) {
       try {
@@ -327,7 +341,15 @@ class BookPdfService {
     } else {
       bytes = await buildAndSave(null);
     }
-    return (bytes: bytes, pageCount: totalPages);
+    return (bytes: bytes, pageCount: finalPageCount);
+  }
+
+  // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
+  // pair, minimum 28, maximum 200.
+  static int _gelatoValidPageCount(int n) {
+    var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
+    if (v > 200) v = 200;
+    return v;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
