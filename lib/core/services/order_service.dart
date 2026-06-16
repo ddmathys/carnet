@@ -49,6 +49,19 @@ class OrderService {
     await FirebaseFirestore.instance.collection('orders').doc(order.id).delete();
   }
 
+  // ── Paiement (TWINT / carte via Stripe Checkout) ──────────────────────────
+
+  /// Crée une session de paiement Stripe pour la commande et renvoie l'URL
+  /// hébergée (à ouvrir dans le navigateur). null si échec/non configuré.
+  static Future<String?> createCheckout(String orderId) async {
+    final data = await BackendClient.postJson(
+      '/api/payment/checkout',
+      {'orderId': orderId},
+      timeout: const Duration(seconds: 30),
+    );
+    return data?['url'] as String?;
+  }
+
   // ── Mettre à jour le statut (admin) ───────────────────────────────────────
 
   static Future<void> updateStatus(String orderId, String status, {String? adminNote}) async {

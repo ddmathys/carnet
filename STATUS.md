@@ -155,6 +155,31 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
   (> min Gelato 150, < 300 premium). Plafond ajustable dans `photo_service.dart`
   si besoin d'une qualité print HD (uploads plus lourds).
 
+## ✅ Fait (16.06.2026, suite 3) — Partage & quotas
+
+- **Quota photos** : gratuit **300** (affiché) / blocage réel **350**, premium
+  **10 000** @ 29 CHF/an. Mémo vocal gratuit pour tous. Blocage à l'ajout de
+  photo (`_pickPhotos`) avec popup « Passer premium ». `quota_service.dart`.
+- **Suppression de commande (admin)** : bouton dans la console
+  (`OrderService.deleteOrder` → PDF + doc).
+- **Compteur souvenirs corrigé** (home) : agrégation `count()` en direct.
+- **Invitation de carnet par deep link** (`carnet://join?token=…`) :
+  - backend `/api/notebook/invite` (crée un token dans `notebookInvites`),
+    `/api/notebook/join` (ajoute au `sharedWith` via admin SDK), page web
+    `/join` (rebond app + fallback téléchargement). Routes déployées.
+  - app : `app_links` (réception), config native Android (intent-filter) + iOS
+    (CFBundleURLTypes), `NotebookShareService`, handler dans `main.dart`.
+  - **Partage natif** (`share_plus`) d'un message = lien de jonction **+** lien
+    APK de téléchargement. Bouton « Partager » + « Copier » dans le sheet.
+  - ⚠️ Sans app installée : 2 étapes (installer → rouvrir le lien). Le
+    « install → rejoint auto » (deferred deep link) nécessiterait Branch/Adjust
+    ou des App Links (https vérifiés) — plus tard.
+- **« Partagé avec »** sur le dashboard du carnet : avatars + nombre (+ en
+  attente), tap → sheet de gestion. Sinon « Partager ce carnet ».
+- **Distribution app** (discuté) : aujourd'hui APK direct
+  (`dmathys.dev/download/carnet.apk`, Android sideload). Reco : Firebase App
+  Distribution pour la beta, Play Store/App Store pour le public.
+
 ## ✅ Fait (Phase 1 — 16.06.2026) — Mémos vocaux
 
 - **Feature complète** : enregistrement / lecture / suppression d'un message

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/order_service.dart';
@@ -101,6 +102,7 @@ class OrderDetailScreen extends StatelessWidget {
                 const SizedBox(height: 24),
                 _OrderDetailsCard(order: order),
                 const SizedBox(height: 16),
+                _PayButton(order: order),
                 _PdfDownloadButton(order: order),
                 const SizedBox(height: 12),
                 _CancelOrderButton(order: order),
@@ -307,6 +309,84 @@ class _Row extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _PayButton extends StatefulWidget {
+  final OrderModel order;
+  const _PayButton({required this.order});
+
+  @override
+  State<_PayButton> createState() => _PayButtonState();
+}
+
+class _PayButtonState extends State<_PayButton> {
+  bool _loading = false;
+
+  Future<void> _pay() async {
+    setState(() => _loading = true);
+    try {
+      final url = await OrderService.createCheckout(widget.order.id);
+      if (!mounted) return;
+      if (url == null) {
+        _snack('Paiement indisponible pour le moment.');
+        return;
+      }
+      final ok =
+          await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+      if (!ok && mounted) _snack('Impossible d\'ouvrir le paiement.');
+    } catch (e) {
+      if (mounted) _snack('Erreur : $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _snack(String m) => ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(m)));
+
+  @override
+  Widget build(BuildContext context) {
+    if (widget.order.status == 'paid') {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.sage.withOpacity(0.10),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.sage.withOpacity(0.4)),
+        ),
+        child: const Row(children: [
+          Icon(Icons.check_circle, color: AppColors.sage, size: 18),
+          SizedBox(width: 10),
+          Text('Payé · merci !',
+              style: TextStyle(
+                  color: AppColors.sage, fontWeight: FontWeight.w600)),
+        ]),
+      );
+    }
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: SizedBox(
+        width: double.infinity,
+        child: ElevatedButton.icon(
+          onPressed: _loading ? null : _pay,
+          icon: _loading
+              ? const SizedBox(
+                  width: 18, height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
+              : const Icon(Icons.account_balance_wallet_outlined),
+          label: const Text('Payer avec TWINT'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppColors.amber,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(vertical: 14),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _PdfDownloadButton extends StatefulWidget {
