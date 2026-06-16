@@ -11,7 +11,52 @@ livres imprimés. Flutter + Firebase (`bloom-bcb1f`), backend Vercel.
 
 Un audit complet a été fait le 11.06.2026, suivi de la **Phase 0 :
 sécurisation** — terminée et déployée ce même jour. Le **16.06.2026**, premier
-morceau de **Phase 1** livré et déployé : les **mémos vocaux**.
+morceau de **Phase 1** livré et déployé : les **mémos vocaux**, puis une série
+d'améliorations UX (sauvegarde optimiste, génération du livre) et le début de
+**Phase 2** (personnalisation + historique des livres).
+
+## ✅ Fait (16.06.2026) — UX sauvegarde & génération du livre
+
+- **Compression photo avant upload** (`flutter_image_compress`, max 2048 px /
+  q85) : ~5 Mo → ~400–700 Ko. Dans `photo_service.dart`.
+- **Sauvegarde optimiste façon WhatsApp** : le souvenir (texte) est écrit en
+  base et affiché immédiatement ; photos + mémo vocal partent en arrière-plan
+  via `MediaUploadQueue` (singleton), qui complète le doc ensuite. La liste
+  étant en flux temps réel, les photos apparaissent seules — pas de
+  rafraîchissement manuel. Bannière discrète + bouton « Réessayer » sur échec.
+- **Fix spinner infini (génération du livre)** : `getIdToken()` n'avait pas de
+  timeout dans `backend_client.dart` → corrigé (protège tous les appels IA),
+  + garde-fou sur `_generate`.
+- **Fix spinner infini (« Ton PDF est prêt »)** : le spinner était lié à la fin
+  du partage (`Printing.sharePdf` qui ne revient pas) → découplé, il ne couvre
+  plus que la génération des octets (+ timeout 60s) ; le partage est hors
+  spinner avec message d'erreur si échec.
+
+## ✅ Fait (16.06.2026) — Phase 2 (début) : livre personnalisé + historique
+
+- **Titre + sous-titre éditables** sur l'écran de génération (champs encadrés,
+  étaient sans bordure et invisibles comme tels).
+- **Photos portrait en pleine page** dans le PDF (plus de rognage horizontal) ;
+  paysages toujours 2/page ; ordre chronologique préservé. Dans
+  `book_pdf_service.dart` (pagination orientation-aware).
+- **Historique des livres générés** : nouvelle collection Firestore
+  `generatedBooks` (≠ `books` qui sert aux histoires IA), `GeneratedBookModel`,
+  `BookHistoryService`. Chaque génération (numérique + commande imprimée) crée
+  une entrée. Nouvel écran `/notebook/:id/books` : liste, **partage** (tap),
+  **suppression** (swipe → doc + fichier Storage ; commande imprimée intacte).
+  Le bouton « Livre » du dashboard ouvre l'historique (FAB « Créer un livre ») ;
+  stat « Livres générés » branchée sur le vrai compte. Règles `generatedBooks`
+  (propriétaire only) **déployées**.
+
+### ⬜ À tester sur téléphone (lot du 16.06, non validé en réel)
+- [ ] Sauvegarde d'un souvenir : retour immédiat, bannière d'envoi, photos qui
+      apparaissent seules ; cas hors-ligne → « Réessayer »
+- [ ] Génération du livre : plus de spinner infini (étape « Créer » et
+      « Télécharger »)
+- [ ] Titre/sous-titre édités → visibles sur couverture/PDF
+- [ ] Photos portrait → pleine page non rognée ; paysages 2/page
+- [ ] Clic « Livre » → historique ; partage OK ; suppression OK
+- [ ] Commande imprimée → entrée « Imprimé » dans l'historique
 
 ## ✅ Fait (Phase 1 — 16.06.2026) — Mémos vocaux
 
