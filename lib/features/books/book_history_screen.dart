@@ -99,6 +99,7 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
       body: StreamBuilder<List<GeneratedBookModel>>(
         stream: BookHistoryService.streamForNotebook(widget.notebookId),
         builder: (context, snap) {
+          if (snap.hasError) return _errorState();
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
@@ -123,6 +124,39 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
         icon: const Icon(Icons.add),
         label: const Text('Créer un livre'),
         shape: const StadiumBorder(),
+      ),
+    );
+  }
+
+  Widget _errorState() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.cloud_off_outlined,
+                color: AppColors.softGray, size: 40),
+            const SizedBox(height: 12),
+            const Text(
+              'Impossible de charger tes livres.',
+              style: TextStyle(color: AppColors.textMedium),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Tu peux quand même en créer un nouveau.',
+              style: TextStyle(color: AppColors.softGray, fontSize: 12),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 16),
+            OutlinedButton.icon(
+              onPressed: () => setState(() {}), // ré-abonne le StreamBuilder
+              icon: const Icon(Icons.refresh),
+              label: const Text('Réessayer'),
+            ),
+          ],
+        ),
       ),
     );
   }

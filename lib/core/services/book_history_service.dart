@@ -9,15 +9,19 @@ class BookHistoryService {
   static CollectionReference<Map<String, dynamic>> get _col =>
       _db.collection('generatedBooks');
 
-  /// Flux des livres d'un carnet. Tri `createdAt` desc côté client pour éviter
-  /// un index composite Firestore.
+  /// Flux des livres d'un carnet. On filtre par `userId` (et non `notebookId`)
+  /// car les règles Firestore autorisent la lecture sur `userId == auth.uid` :
+  /// une requête de liste qui ne contraint pas ce champ serait REFUSÉE par
+  /// Firestore (et le flux émettrait une erreur → spinner infini).
+  /// Le filtrage `notebookId` et le tri `createdAt` desc se font côté client
+  /// (évite aussi un index composite).
   static Stream<List<GeneratedBookModel>> streamForNotebook(String notebookId) {
-    return _col
-        .where('notebookId', isEqualTo: notebookId)
-        .snapshots()
-        .map((snap) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(const []);
+    return _col.where('userId', isEqualTo: uid).snapshots().map((snap) {
       final books = snap.docs
           .map((d) => GeneratedBookModel.fromFirestore(d))
+          .where((b) => b.notebookId == notebookId)
           .toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
       return books;
