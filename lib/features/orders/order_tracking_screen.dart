@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../../core/config/app_config.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/order_service.dart';
@@ -365,6 +366,8 @@ class _PayButtonState extends State<_PayButton> {
         ]),
       );
     }
+    // Paiement en ligne désactivé → on reste sur la facture (« à réception »).
+    if (!AppConfig.paymentEnabled) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: SizedBox(
