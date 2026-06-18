@@ -26,10 +26,17 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 >
 > **MÀJ 18.06.2026** : le **build Flutter tourne bien sur cette machine** (hot
 > restart OK sur device SM A556B) — l'ancienne note « build cassé / symlinks »
-> était fausse. Les tests sur téléphone sont donc possibles. ⚠️ **Lien de
-> téléchargement de l'app cassé** : `dmathys.dev` renvoie un 404 Vercel
-> (`DEPLOYMENT_NOT_FOUND`, domaine sans déploiement) → l'invité ne peut pas
-> installer l'app. Voir bloc « Hébergement APK » plus bas.
+> était fausse. Les tests sur téléphone sont donc possibles.
+>
+> ✅ **Lien de téléchargement réparé (18.06)** : `dmathys.dev` était en 404
+> Vercel (`DEPLOYMENT_NOT_FOUND`, domaine sans déploiement). Désormais : projet
+> Vercel **`landing`** (dossier `landing/`) servant une page de téléchargement
+> brandée sur `dmathys.dev`, avec redirect `/download/carnet.apk` → APK hébergé
+> sur **Firebase Storage** `public/carnet.apk` (lecture publique, règle
+> déployée). APK **recompilé à jour** et uploadé (94,9 Mo). Chaîne testée OK
+> (dmathys.dev → bouton → redirect → APK, HTTP 206). Pour mettre à jour l'app :
+> `flutter build apk --release` puis
+> `gsutil cp build/app/outputs/flutter-apk/app-release.apk gs://bloom-bcb1f.firebasestorage.app/public/carnet.apk`.
 
 ## ✅ Fait (16.06.2026) — UX sauvegarde & génération du livre
 
