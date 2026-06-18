@@ -219,10 +219,16 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
             ? NotebookModel.fromFirestore(snap.data!)
             : widget.notebook;
 
-        return Container(
+        // Le padding-clavier est À L'EXTÉRIEUR du Container blanc : il pousse
+        // tout le sheet au-dessus du clavier (zone transparente), au lieu de
+        // créer une grande zone blanche vide à l'intérieur.
+        return Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(context).viewInsets.bottom),
+          child: Container(
           // Plafonne la hauteur : il reste toujours une zone au-dessus pour
           // fermer le sheet (tap sur le voile / glisser la poignée), même avec
-          // beaucoup de collaborateurs ou le clavier ouvert.
+          // beaucoup de collaborateurs.
           constraints: BoxConstraints(
             maxHeight: MediaQuery.of(context).size.height * 0.9,
           ),
@@ -230,15 +236,9 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
             color: AppColors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
-          // Le clavier (viewInsets) pousse le contenu au-dessus du champ email.
-          padding: EdgeInsets.fromLTRB(
-              24,
-              12,
-              24,
-              MediaQuery.of(context).viewInsets.bottom +
-                  MediaQuery.of(context).padding.bottom +
-                  20),
           child: SingleChildScrollView(
+            padding: EdgeInsets.fromLTRB(
+                24, 12, 24, MediaQuery.of(context).padding.bottom + 20),
             child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -523,6 +523,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                 ),
               ],
             ],
+          ),
           ),
           ),
         );
