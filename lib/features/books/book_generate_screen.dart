@@ -61,6 +61,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Set<String> _selectedMemoryIds = {};
   String? _coverPhotoUrl;
 
+  // Aperçu WYSIWYG : on génère les MÊMES octets PDF que le téléchargement et on
+  // affiche chaque page rastérisée → aucune différence possible avec le rendu
+  // final / l'impression Gelato.
+  Uint8List? _previewPdfBytes;
+  int _previewPageCount = 0;
+
   late final TextEditingController _titleCtrl;
   late final TextEditingController _subtitleCtrl;
 
@@ -212,30 +218,35 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Generation ─────────────────────────────────────────────────────────────
 
+  // Génère le PDF d'aperçu — mêmes octets que le téléchargement (sans bourrage
+  // de pages blanches), pour un aperçu strictement identique au rendu final.
+  Future<({Uint8List bytes, int pageCount})> _buildPreviewPdf() {
+    final coverColor = _notebook!.coverColor.isNotEmpty
+        ? Color(int.parse(
+            'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16))
+        : AppColors.sage;
+    return BookPdfService.generateForNotebook(
+      notebook: _notebook!,
+      coverColor: coverColor,
+      memories: _selectedMemories,
+      locationComments: _locationComments,
+      coverPhotoUrl: _coverPhotoUrl,
+      customTitle:
+          _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
+      customSubtitle:
+          _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null,
+      backendUrl: AppConfig.backendUrl,
+    ).timeout(const Duration(seconds: 60));
+  }
+
   Future<void> _generate() async {
     if (_selectedMemories.isEmpty) {
       _showSnack('Sélectionne au moins un souvenir avant de créer le livre.');
       return;
     }
-
-    // If no AI needed, go directly to preview
-    if (!_settings.locationComments) {
-      setState(() => _showPreview = true);
-      return;
-    }
-
-    // Generate location comments for memories that have a location
-    final memoriesWithLocation = _selectedMemories
-        .where((m) => m.location != null && m.location!.trim().isNotEmpty)
-        .toList();
-
-    if (memoriesWithLocation.isEmpty) {
-      setState(() => _showPreview = true);
-      return;
-    }
+    if (_notebook == null) return;
 
     setState(() { _generating = true; _progress = 0.0; _msgIndex = 0; });
-
     _progressTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
       if (!mounted) return;
       setState(() {
@@ -246,29 +257,41 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       });
     });
 
+    // 1. Commentaires de lieux (IA) — optionnel, non bloquant.
+    if (_settings.locationComments) {
+      final memoriesWithLocation = _selectedMemories
+          .where((m) => m.location != null && m.location!.trim().isNotEmpty)
+          .toList();
+      if (memoriesWithLocation.isNotEmpty) {
+        try {
+          _locationComments = await _deepseek
+              .generateLocationComments(
+                memories: memoriesWithLocation,
+                tone: _settings.tone,
+              )
+              .timeout(const Duration(seconds: 45),
+                  onTimeout: () => <String, String>{});
+        } catch (_) {/* on continue sans commentaires */}
+      }
+    }
+
+    // 2. Génère le vrai PDF → aperçu WYSIWYG (rastérisé page par page).
     try {
-      // Garde-fou : quoi qu'il arrive en aval, la barre aboutit. Sans
-      // commentaires de lieux, on passe quand même à l'aperçu.
-      final comments = await _deepseek
-          .generateLocationComments(
-            memories: memoriesWithLocation,
-            tone: _settings.tone,
-          )
-          .timeout(const Duration(seconds: 45),
-              onTimeout: () => <String, String>{});
-      _progressTimer?.cancel();
+      final gen = await _buildPreviewPdf();
       if (!mounted) return;
+      _progressTimer?.cancel();
       setState(() {
-        _locationComments = comments;
+        _previewPdfBytes = gen.bytes;
+        _previewPageCount = gen.pageCount;
         _progress = 1.0;
         _generating = false;
         _showPreview = true;
       });
-    } catch (_) {
+    } catch (e) {
       _progressTimer?.cancel();
       if (!mounted) return;
-      // Non-fatal: proceed to preview even without location comments
-      setState(() { _generating = false; _showPreview = true; });
+      setState(() => _generating = false);
+      _showSnack('Aperçu impossible : $e');
     }
   }
 
@@ -788,66 +811,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // ── Book preview (swipeable pages) ────────────────────────────────────────
 
   Widget _buildBookPreview() {
-    final coverColor = Color(int.parse(
-        'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
-
-    // Build page data: cover + photo pages (no AI chapters)
-    final pages = <_PreviewPage>[];
-
-    // Cover
-    pages.add(_PreviewPage.cover(
-      emoji: _notebook!.emoji,
-      title: _notebook!.type == 'enfant' && _notebook!.companionName != null
-          ? '${_notebook!.title} & ${_notebook!.companionName}'
-          : _notebook!.title,
-      year: _yearRange,
-      color: coverColor,
-      coverPhotoUrl: _coverPhotoUrl,
-      highlights: _coverHighlights,
-    ));
-
-    // Photo pages (mirrors smart PDF layout: odd → 3-photo page)
-    final photoEntries = <_PreviewPhotoEntry>[];
-    final shownMemIds = <String>{};
-    for (final m in _selectedMemories) {
-      final urls = m.mediaUrls.isNotEmpty
-          ? m.mediaUrls
-          : (m.photoUrl != null && m.photoUrl!.isNotEmpty ? [m.photoUrl!] : <String>[]);
-      for (final url in urls) {
-        final showCaption = shownMemIds.add(m.id);
-        final caption = showCaption ? m.rawContent : null;
-        final date = m.dateLabel ??
-            '${m.date.day.toString().padLeft(2, '0')}/${m.date.month.toString().padLeft(2, '0')}/${m.date.year}';
-        photoEntries.add(_PreviewPhotoEntry(url: url, caption: caption, date: date));
-      }
+    if (_previewPdfBytes == null) {
+      return const Center(child: CircularProgressIndicator());
     }
-    for (int pi = 0; pi < photoEntries.length; pi += 2) {
-      pages.add(_PreviewPage.photos(
-        entry1: photoEntries[pi],
-        entry2: pi + 1 < photoEntries.length ? photoEntries[pi + 1] : null,
-      ));
-    }
-
-    // Text-only memories (no photos)
-    for (final m in _selectedMemories) {
-      final urls = m.mediaUrls.isNotEmpty
-          ? m.mediaUrls
-          : (m.photoUrl != null && m.photoUrl!.isNotEmpty ? [m.photoUrl!] : <String>[]);
-      if (urls.isEmpty && m.type != 'taille_poids') {
-        final date = m.dateLabel ??
-            '${m.date.day.toString().padLeft(2, '0')}/${m.date.month.toString().padLeft(2, '0')}/${m.date.year}';
-        pages.add(_PreviewPage.textOnly(
-          date: date,
-          title: m.title?.isNotEmpty == true ? m.title : null,
-          content: m.rawContent,
-          location: m.location?.isNotEmpty == true ? m.location : null,
-        ));
-      }
-    }
-
-    return _BookPageViewer(
-      pages: pages,
-      coverColor: coverColor,
+    return _PdfPreviewViewer(
+      pdfBytes: _previewPdfBytes!,
+      pageCount: _previewPageCount,
       onChooseFormat: () => setState(() {
         _showPreview = false;
         _step = 1;
@@ -1563,100 +1532,35 @@ class _OrderRow extends StatelessWidget {
   }
 }
 
-// ── Preview data models ───────────────────────────────────────────────────────
+// ── PDF preview viewer — affiche les pages du VRAI PDF (rastérisées) ──────────
+// L'aperçu est strictement identique au fichier téléchargé / envoyé à Gelato :
+// on génère les mêmes octets PDF puis on rastérise chaque page à la demande.
 
-enum _PageType { cover, chapter, photos, textOnly }
-
-class _PreviewPhotoEntry {
-  final String url;
-  final String? caption; // null = not first occurrence of this memory
-  final String date;
-  const _PreviewPhotoEntry({required this.url, this.caption, required this.date});
-}
-
-class _PreviewPage {
-  final _PageType type;
-  // cover
-  final String? emoji;
-  final String? title;
-  final String? year;
-  final Color? color;
-  final String? coverPhotoUrl;
-  final List<String> highlights;
-  // chapter (kept for type completeness but unused)
-  final String? chapterTitle;
-  final String? body;
-  // photos (up to 3)
-  final _PreviewPhotoEntry? entry1;
-  final _PreviewPhotoEntry? entry2;
-  final _PreviewPhotoEntry? entry3;
-  // textOnly
-  final String? textDate;
-  final String? textTitle;
-  final String? textContent;
-  final String? textLocation;
-
-  const _PreviewPage._({
-    required this.type,
-    this.emoji, this.title, this.year, this.color, this.coverPhotoUrl,
-    this.highlights = const [],
-    this.chapterTitle, this.body,
-    this.entry1, this.entry2, this.entry3,
-    this.textDate, this.textTitle, this.textContent, this.textLocation,
-  });
-
-  factory _PreviewPage.cover({
-    required String emoji, required String title,
-    required String year, required Color color,
-    String? coverPhotoUrl,
-    List<String> highlights = const [],
-  }) => _PreviewPage._(type: _PageType.cover,
-      emoji: emoji, title: title, year: year, color: color,
-      coverPhotoUrl: coverPhotoUrl, highlights: highlights);
-
-  factory _PreviewPage.chapter({required String title, required String body}) =>
-      _PreviewPage._(type: _PageType.chapter, chapterTitle: title, body: body);
-
-  factory _PreviewPage.photos({
-    required _PreviewPhotoEntry entry1,
-    _PreviewPhotoEntry? entry2,
-    _PreviewPhotoEntry? entry3,
-  }) => _PreviewPage._(type: _PageType.photos, entry1: entry1, entry2: entry2, entry3: entry3);
-
-  factory _PreviewPage.textOnly({
-    required String date,
-    String? title,
-    required String content,
-    String? location,
-  }) => _PreviewPage._(
-    type: _PageType.textOnly,
-    textDate: date,
-    textTitle: title,
-    textContent: content,
-    textLocation: location,
-  );
-}
-
-// ── Book page viewer widget ───────────────────────────────────────────────────
-
-class _BookPageViewer extends StatefulWidget {
-  final List<_PreviewPage> pages;
-  final Color coverColor;
+class _PdfPreviewViewer extends StatefulWidget {
+  final Uint8List pdfBytes;
+  final int pageCount;
   final VoidCallback onChooseFormat;
 
-  const _BookPageViewer({
-    required this.pages,
-    required this.coverColor,
+  const _PdfPreviewViewer({
+    required this.pdfBytes,
+    required this.pageCount,
     required this.onChooseFormat,
   });
 
   @override
-  State<_BookPageViewer> createState() => _BookPageViewerState();
+  State<_PdfPreviewViewer> createState() => _PdfPreviewViewerState();
 }
 
-class _BookPageViewerState extends State<_BookPageViewer> {
+class _PdfPreviewViewerState extends State<_PdfPreviewViewer> {
   late final PageController _ctrl;
   int _current = 0;
+
+  // Cache des pages déjà rastérisées (index → PNG).
+  final Map<int, Uint8List> _cache = {};
+  final Map<int, Future<Uint8List>> _inflight = {};
+
+  // Format du document Gelato (218 × 288 mm) → ratio des cartes de page.
+  static const double _pageAspect = 218 / 288;
 
   @override
   void initState() {
@@ -1669,9 +1573,37 @@ class _BookPageViewerState extends State<_BookPageViewer> {
   }
 
   @override
+  void didUpdateWidget(covariant _PdfPreviewViewer old) {
+    super.didUpdateWidget(old);
+    // Nouveau PDF (sélection/titre modifiés) → on jette le cache.
+    if (!identical(old.pdfBytes, widget.pdfBytes)) {
+      _cache.clear();
+      _inflight.clear();
+    }
+  }
+
+  @override
   void dispose() {
     _ctrl.dispose();
     super.dispose();
+  }
+
+  // Rastérise une page (résolution adaptée à un écran de téléphone) et garde le
+  // résultat en cache. Les appels concurrents sur la même page sont fusionnés.
+  Future<Uint8List> _rasterPage(int index) {
+    final cached = _cache[index];
+    if (cached != null) return Future.value(cached);
+    return _inflight[index] ??= () async {
+      final raster = await Printing.raster(
+        widget.pdfBytes,
+        pages: [index],
+        dpi: 140,
+      ).first;
+      final png = await raster.toPng();
+      if (mounted) _cache[index] = png;
+      _inflight.remove(index);
+      return png;
+    }();
   }
 
   @override
@@ -1682,7 +1614,7 @@ class _BookPageViewerState extends State<_BookPageViewer> {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 10),
           child: Text(
-            '${_current + 1} / ${widget.pages.length}',
+            '${_current + 1} / ${widget.pageCount}',
             style: const TextStyle(color: AppColors.textMedium, fontSize: 13),
           ),
         ),
@@ -1692,8 +1624,11 @@ class _BookPageViewerState extends State<_BookPageViewer> {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: PageView.builder(
               controller: _ctrl,
-              itemCount: widget.pages.length,
-              itemBuilder: (_, i) => _buildPage(widget.pages[i]),
+              itemCount: widget.pageCount,
+              itemBuilder: (_, i) => _PdfPageCard(
+                aspect: _pageAspect,
+                future: _rasterPage(i),
+              ),
             ),
           ),
         ),
@@ -1703,7 +1638,7 @@ class _BookPageViewerState extends State<_BookPageViewer> {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(
-              widget.pages.length.clamp(0, 20),
+              widget.pageCount.clamp(0, 20),
               (i) => AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 margin: const EdgeInsets.symmetric(horizontal: 3),
@@ -1730,389 +1665,53 @@ class _BookPageViewerState extends State<_BookPageViewer> {
       ],
     );
   }
-
-  Widget _buildPage(_PreviewPage page) {
-    return Container(
-      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 16,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      clipBehavior: Clip.hardEdge,
-      child: switch (page.type) {
-        _PageType.cover => _buildCoverPage(page),
-        _PageType.chapter => _buildChapterPage(page),
-        _PageType.photos => _buildPhotosPage(page),
-        _PageType.textOnly => _buildTextOnlyPage(page),
-      },
-    );
-  }
-
-  Widget _buildCoverPage(_PreviewPage p) {
-    final hasPhoto = p.coverPhotoUrl != null;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        // Background: photo or solid color
-        if (hasPhoto)
-          SizedBox.expand(
-            child: CachedNetworkImage(
-              imageUrl: p.coverPhotoUrl!,
-              fit: BoxFit.cover,
-              width: double.infinity,
-              height: double.infinity,
-              placeholder: (_, __) => Container(color: p.color),
-              errorWidget: (_, __, ___) => Container(color: p.color),
-            ),
-          )
-        else
-          Container(color: p.color),
-        // Overlay
-        if (hasPhoto)
-          Container(color: Colors.black.withOpacity(0.28)),
-        // "folio" top-right
-        Positioned(
-          top: 12, right: 14,
-          child: Text(
-            'folio',
-            style: TextStyle(
-              fontSize: 11, color: Colors.white.withOpacity(0.9),
-              fontStyle: FontStyle.italic, letterSpacing: 1.5,
-            ),
-          ),
-        ),
-        // Content
-        if (hasPhoto)
-          // Photo: title box at bottom
-          Positioned(
-            bottom: 0, left: 0, right: 0,
-            child: Container(
-              color: Colors.white.withOpacity(0.95),
-              padding: const EdgeInsets.fromLTRB(18, 16, 18, 20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    p.title ?? '',
-                    style: const TextStyle(
-                      fontFamily: 'PlayfairDisplay', fontSize: 18,
-                      fontWeight: FontWeight.bold, color: Color(0xFF2D2416),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Container(width: 22, height: 1.5, color: p.color),
-                  const SizedBox(height: 6),
-                  Text(
-                    'LIVRE DE SOUVENIRS  ·  ${p.year}',
-                    style: const TextStyle(fontSize: 9, color: Color(0xFF8C8C8C), letterSpacing: 1.5),
-                  ),
-                  if (p.highlights.isNotEmpty) ...[
-                    const SizedBox(height: 5),
-                    Text(
-                      p.highlights.take(3).map((h) => '· $h').join('  '),
-                      style: const TextStyle(fontSize: 9, color: Color(0xFF8C8C8C), fontStyle: FontStyle.italic),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          )
-        else
-          // Solid color: centered
-          Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Text(p.emoji ?? '📔', style: const TextStyle(fontSize: 54)),
-                const SizedBox(height: 18),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 28),
-                  child: Text(
-                    p.title ?? '',
-                    style: const TextStyle(
-                      fontFamily: 'PlayfairDisplay', fontSize: 20,
-                      fontWeight: FontWeight.bold, color: Colors.white, height: 1.3,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Container(width: 36, height: 1.5, color: Colors.white54),
-                const SizedBox(height: 10),
-                Text(
-                  p.year ?? '',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 2),
-                ),
-                if (p.highlights.isNotEmpty) ...[
-                  const SizedBox(height: 8),
-                  Container(width: 30, height: 0.5, color: Colors.white38),
-                  const SizedBox(height: 6),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      p.highlights.take(3).map((h) => '· $h').join('  '),
-                      style: const TextStyle(color: Colors.white70, fontSize: 9, fontStyle: FontStyle.italic),
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-      ],
-    );
-  }
-
-  Widget _buildChapterPage(_PreviewPage p) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if ((p.chapterTitle ?? '').isNotEmpty) ...[
-            Text(
-              p.chapterTitle!,
-              style: const TextStyle(
-                fontFamily: 'PlayfairDisplay',
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textDark,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Container(
-              width: 32, height: 2,
-              decoration: BoxDecoration(
-                color: AppColors.sage,
-                borderRadius: BorderRadius.circular(1),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          Text(
-            p.body ?? '',
-            style: const TextStyle(
-              color: AppColors.textDark,
-              fontSize: 13,
-              height: 1.7,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildPhotosPage(_PreviewPage p) {
-    final entries = [p.entry1, p.entry2, p.entry3].whereType<_PreviewPhotoEntry>().toList();
-    return _PreviewPhotoPage(entries: entries);
-  }
-
-  Widget _buildTextOnlyPage(_PreviewPage p) {
-    return Container(
-      color: const Color(0xFFF9F6EE),
-      padding: const EdgeInsets.fromLTRB(24, 28, 24, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          if (p.textDate != null)
-            Text(
-              p.textDate!,
-              style: TextStyle(
-                fontSize: 11,
-                color: widget.coverColor,
-                fontStyle: FontStyle.italic,
-                letterSpacing: 0.5,
-              ),
-            ),
-          const SizedBox(height: 8),
-          if (p.textTitle != null && p.textTitle!.isNotEmpty) ...[
-            Text(
-              p.textTitle!,
-              style: const TextStyle(
-                fontFamily: 'PlayfairDisplay',
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF2D2416),
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          Container(
-            width: 28, height: 1.5,
-            color: widget.coverColor,
-          ),
-          const SizedBox(height: 14),
-          Expanded(
-            child: Text(
-              p.textContent ?? '',
-              style: const TextStyle(
-                fontSize: 13,
-                color: Color(0xFF2D2416),
-                height: 1.7,
-              ),
-            ),
-          ),
-          if (p.textLocation != null && p.textLocation!.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(Icons.place_outlined, size: 11, color: widget.coverColor),
-                const SizedBox(width: 4),
-                Expanded(
-                  child: Text(
-                    p.textLocation!,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: widget.coverColor,
-                      fontStyle: FontStyle.italic,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
 }
 
-// ── Preview photo page (orientation-aware layout) ─────────────────────────────
+// Une page du PDF rastérisée, dans une carte blanche au ratio du document.
+class _PdfPageCard extends StatelessWidget {
+  final double aspect;
+  final Future<Uint8List> future;
 
-class _PreviewPhotoPage extends StatefulWidget {
-  final List<_PreviewPhotoEntry> entries;
-  const _PreviewPhotoPage({required this.entries});
-
-  @override
-  State<_PreviewPhotoPage> createState() => _PreviewPhotoPageState();
-}
-
-class _PreviewPhotoPageState extends State<_PreviewPhotoPage> {
-  final Map<String, bool> _portraitMap = {};
-  final Map<String, ImageStreamListener> _listeners = {};
-
-  @override
-  void initState() {
-    super.initState();
-    for (final e in widget.entries) {
-      _detectOrientation(e.url);
-    }
-  }
-
-  void _detectOrientation(String url) {
-    final provider = NetworkImage(url);
-    final stream = provider.resolve(ImageConfiguration.empty);
-    late ImageStreamListener listener;
-    listener = ImageStreamListener((info, _) {
-      if (mounted) {
-        setState(() => _portraitMap[url] = info.image.height > info.image.width);
-      }
-      stream.removeListener(listener);
-      _listeners.remove(url);
-    }, onError: (_, __) {
-      stream.removeListener(listener);
-      _listeners.remove(url);
-    });
-    _listeners[url] = listener;
-    stream.addListener(listener);
-  }
-
-  @override
-  void dispose() {
-    for (final entry in _listeners.entries) {
-      NetworkImage(entry.key).resolve(ImageConfiguration.empty).removeListener(entry.value);
-    }
-    super.dispose();
-  }
-
-  bool _isPortrait(String url) => _portraitMap[url] ?? true;
-
-  Widget _photoBlock(_PreviewPhotoEntry entry, {bool compact = false}) {
-    final maxChars = compact ? 60 : 100;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(6),
-            child: Container(
-              width: double.infinity,
-              color: const Color(0xFFF9F6EE),
-              child: CachedNetworkImage(
-                imageUrl: entry.url,
-                fit: BoxFit.contain,
-                width: double.infinity,
-                placeholder: (_, __) => const Center(child: CircularProgressIndicator(strokeWidth: 2)),
-                errorWidget: (_, __, ___) => const Icon(Icons.broken_image_outlined, color: AppColors.softGray),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 3),
-        Text(entry.date,
-          style: const TextStyle(fontSize: 9, color: AppColors.sage, fontStyle: FontStyle.italic)),
-        if (entry.caption != null)
-          Text(
-            entry.caption!.length > maxChars ? '${entry.caption!.substring(0, maxChars)}…' : entry.caption!,
-            style: const TextStyle(color: AppColors.textDark, fontSize: 10, height: 1.3),
-            maxLines: 2, overflow: TextOverflow.ellipsis,
-          ),
-      ],
-    );
-  }
+  const _PdfPageCard({required this.aspect, required this.future});
 
   @override
   Widget build(BuildContext context) {
-    final e = widget.entries;
-    if (e.isEmpty) return const SizedBox.shrink();
-
-    // Single photo
-    if (e.length == 1) {
-      return Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-        child: Column(children: [Expanded(child: _photoBlock(e[0]))]),
-      );
-    }
-
-    // 2 photos: side by side if both portrait, stacked if landscape
-    final sideBySide = _isPortrait(e[0].url) && _isPortrait(e[1].url);
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
-      child: sideBySide
-          ? Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(child: _photoBlock(e[0], compact: true)),
-                const SizedBox(width: 6),
-                const VerticalDivider(width: 1, color: Color(0xFFEEEEEE)),
-                const SizedBox(width: 6),
-                Expanded(child: _photoBlock(e[1], compact: true)),
-              ],
-            )
-          : Column(
-              children: [
-                Expanded(child: _photoBlock(e[0])),
-                const SizedBox(height: 8),
-                const Divider(height: 1, color: Color(0xFFEEEEEE)),
-                const SizedBox(height: 8),
-                Expanded(child: _photoBlock(e[1])),
-              ],
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withOpacity(0.08),
+              blurRadius: 16,
+              offset: const Offset(0, 4),
             ),
+          ],
+        ),
+        clipBehavior: Clip.hardEdge,
+        child: AspectRatio(
+          aspectRatio: aspect,
+          child: FutureBuilder<Uint8List>(
+            future: future,
+            builder: (_, snap) {
+              if (snap.hasData) {
+                return Image.memory(snap.data!, fit: BoxFit.cover);
+              }
+              if (snap.hasError) {
+                return const Center(
+                  child: Icon(Icons.broken_image_outlined,
+                      color: AppColors.softGray, size: 28),
+                );
+              }
+              return const Center(
+                child: CircularProgressIndicator(strokeWidth: 2),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 }

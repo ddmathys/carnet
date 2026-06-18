@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
@@ -28,6 +30,11 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   bool _creatingLink = false;
   ({String url, String downloadUrl, String title})? _inviteData;
 
+  // Feedback transitoire « copié ✓ » affiché juste à côté du lien (le message
+  // d'invitation par email, lui, vit tout en bas et serait invisible ici).
+  String? _copyFeedback;
+  Timer? _copyFeedbackTimer;
+
   String get _shareMessage =>
       '📖 Rejoins mon carnet « ${_inviteData!.title} » sur Carnet :\n'
       '${_inviteData!.url}\n\n'
@@ -48,7 +55,18 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   @override
   void dispose() {
     _emailCtrl.dispose();
+    _copyFeedbackTimer?.cancel();
     super.dispose();
+  }
+
+  // Affiche un « copié ✓ » à côté du lien, avec retour haptique, puis l'efface.
+  void _flashCopied(String message) {
+    HapticFeedback.selectionClick();
+    _copyFeedbackTimer?.cancel();
+    setState(() => _copyFeedback = message);
+    _copyFeedbackTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copyFeedback = null);
+    });
   }
 
   Future<void> _loadCollabInfos() async {
@@ -156,8 +174,14 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
 
   void _copyLink() {
     if (_inviteData == null) return;
+    Clipboard.setData(ClipboardData(text: _inviteData!.url));
+    _flashCopied('Lien copié ✓');
+  }
+
+  void _copyMessage() {
+    if (_inviteData == null) return;
     Clipboard.setData(ClipboardData(text: _shareMessage));
-    setState(() => _inviteSuccess = 'Lien copié — partage-le où tu veux.');
+    _flashCopied('Message copié ✓');
   }
 
   Future<void> _removeCollaborator(String uid) async {
@@ -196,13 +220,26 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
             : widget.notebook;
 
         return Container(
+          // Plafonne la hauteur : il reste toujours une zone au-dessus pour
+          // fermer le sheet (tap sur le voile / glisser la poignée), même avec
+          // beaucoup de collaborateurs ou le clavier ouvert.
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.9,
+          ),
           decoration: const BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
+          // Le clavier (viewInsets) pousse le contenu au-dessus du champ email.
           padding: EdgeInsets.fromLTRB(
-              24, 12, 24, MediaQuery.of(context).padding.bottom + 20),
-          child: Column(
+              24,
+              12,
+              24,
+              MediaQuery.of(context).viewInsets.bottom +
+                  MediaQuery.of(context).padding.bottom +
+                  20),
+          child: SingleChildScrollView(
+            child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -319,20 +356,52 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                     ),
                   )
                 else ...[
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppColors.background,
+                  // Tap le lien pour le copier directement
+                  Tooltip(
+                    message: 'Toucher pour copier le lien',
+                    child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _copyLink,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: AppColors.border),
-                    ),
-                    child: Text(
-                      _inviteData!.url,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: AppColors.background,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppColors.border),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                _inviteData!.url,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            const Icon(Icons.copy, size: 16, color: AppColors.sageDark),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
+                  ),
+                  // Confirmation « copié ✓ » visible juste sous le lien.
+                  if (_copyFeedback != null) ...[
+                    const SizedBox(height: 8),
+                    Row(children: [
+                      const Icon(Icons.check_circle, color: AppColors.sage, size: 15),
+                      const SizedBox(width: 6),
+                      Text(_copyFeedback!,
+                          style: const TextStyle(
+                              color: AppColors.sage,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600)),
+                    ]),
+                  ],
                   const SizedBox(height: 8),
                   Row(
                     children: [
@@ -347,13 +416,29 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                       OutlinedButton.icon(
                         onPressed: _copyLink,
                         icon: const Icon(Icons.copy, size: 16),
-                        label: const Text('Copier'),
+                        label: const Text('Copier le lien'),
                         style: OutlinedButton.styleFrom(
                           foregroundColor: AppColors.sageDark,
                           side: const BorderSide(color: AppColors.sageDark),
                         ),
                       ),
                     ],
+                  ),
+                  const SizedBox(height: 8),
+                  // Copier le message complet (lien + texte d'invitation)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _copyMessage,
+                      icon: const Icon(Icons.notes, size: 16),
+                      label: const Text('Copier le message complet'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.textMedium,
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, 32),
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                    ),
                   ),
                 ],
                 const SizedBox(height: 6),
@@ -438,6 +523,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                 ),
               ],
             ],
+          ),
           ),
         );
       },
