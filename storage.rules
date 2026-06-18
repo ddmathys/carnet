@@ -71,5 +71,12 @@ service firebase.storage {
       allow read, delete: if isOwner(userId);
       allow create, update: if isOwner(userId) && isImage();
     }
+
+    // Fichiers publics — public/{fichier} : lecture libre (sans auth), pour
+    // l'APK de l'app téléchargeable via dmathys.dev. Écriture admin uniquement.
+    match /public/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }

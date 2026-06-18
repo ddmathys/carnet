@@ -22,8 +22,14 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 > blanches. Le **prix suit le nombre de pages**. Il reste **le test réel de
 > bout en bout sur device** : générer un **nouveau** livre 21×28 → commander →
 > console admin « Envoyer à Gelato (brouillon) » → vérifier le brouillon chez
-> Gelato (remplissage du gabarit, acceptation). Pas encore validé en réel (le
-> build Flutter ne tourne pas sur cette machine — Developer Mode/symlinks).
+> Gelato (remplissage du gabarit, acceptation).
+>
+> **MÀJ 18.06.2026** : le **build Flutter tourne bien sur cette machine** (hot
+> restart OK sur device SM A556B) — l'ancienne note « build cassé / symlinks »
+> était fausse. Les tests sur téléphone sont donc possibles. ⚠️ **Lien de
+> téléchargement de l'app cassé** : `dmathys.dev` renvoie un 404 Vercel
+> (`DEPLOYMENT_NOT_FOUND`, domaine sans déploiement) → l'invité ne peut pas
+> installer l'app. Voir bloc « Hébergement APK » plus bas.
 
 ## ✅ Fait (16.06.2026) — UX sauvegarde & génération du livre
 
