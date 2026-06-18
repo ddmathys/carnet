@@ -60,6 +60,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Map<String, String> _locationComments = {};
   Set<String> _selectedMemoryIds = {};
   String? _coverPhotoUrl;
+  // Si vrai, la photo de couverture n'est pas répétée dans les pages du livre.
+  bool _excludeCoverPhotoFromBook = false;
 
   // Aperçu WYSIWYG : on génère les MÊMES octets PDF que le téléchargement et on
   // affiche chaque page rastérisée → aucune différence possible avec le rendu
@@ -121,7 +123,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         final words = m.rawContent.trim().split(RegExp(r'\s+')).take(4).join(' ');
         if (words.isNotEmpty) result.add(words);
       }
-      if (result.length >= 5) break;
+      if (result.length >= 15) break;
     }
     return result;
   }
@@ -231,6 +233,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       memories: _selectedMemories,
       locationComments: _locationComments,
       coverPhotoUrl: _coverPhotoUrl,
+      excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
       customSubtitle:
@@ -321,6 +324,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         memories: _selectedMemories,
         locationComments: _locationComments,
         coverPhotoUrl: _coverPhotoUrl,
+        excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
         customSubtitle: customSubtitle,
         backendUrl: AppConfig.backendUrl,
@@ -437,6 +441,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         memories: _selectedMemories,
         locationComments: _locationComments,
         coverPhotoUrl: _coverPhotoUrl,
+        excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
         customSubtitle: customSubtitle,
         backendUrl: AppConfig.backendUrl,
@@ -916,6 +921,34 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 fontSize: 11,
                 fontStyle: FontStyle.italic),
           ),
+          // Option : ne pas répéter la photo de couverture dans les pages.
+          InkWell(
+            onTap: () => setState(
+                () => _excludeCoverPhotoFromBook = !_excludeCoverPhotoFromBook),
+            borderRadius: BorderRadius.circular(8),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Icon(
+                    _excludeCoverPhotoFromBook
+                        ? Icons.check_box
+                        : Icons.check_box_outline_blank,
+                    size: 18,
+                    color: AppColors.sage,
+                  ),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Ne pas répéter cette photo dans le livre',
+                      style:
+                          TextStyle(color: AppColors.textDark, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ],
       ],
     );
@@ -1264,47 +1297,70 @@ class _BookCoverPreview extends StatelessWidget {
             ),
             // Cover content
             if (coverPhotoUrl != null)
-              // Photo version: title box at bottom
+              // Photo version : bandeau bas compact, 2 colonnes (titre à gauche,
+              // liste des souvenirs à droite) — laisse plus de place à la photo.
               Positioned(
                 bottom: 0, left: 0, right: 0,
                 child: Container(
                   color: Colors.white.withOpacity(0.94),
-                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 14),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+                  padding: const EdgeInsets.fromLTRB(10, 7, 10, 9),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      Text(
-                        titleText,
-                        style: const TextStyle(
-                          fontFamily: 'PlayfairDisplay', fontSize: 13,
-                          fontWeight: FontWeight.bold, color: Color(0xFF2D2416),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              titleText,
+                              style: const TextStyle(
+                                fontFamily: 'PlayfairDisplay', fontSize: 11,
+                                fontWeight: FontWeight.bold, color: Color(0xFF2D2416),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            if (hasSubtitle) ...[
+                              const SizedBox(height: 2),
+                              Text(
+                                subtitle!,
+                                style: const TextStyle(
+                                    fontSize: 7.5, color: Color(0xFF6B6B6B)),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ],
+                            const SizedBox(height: 3),
+                            Container(width: 16, height: 1, color: coverColor),
+                            const SizedBox(height: 3),
+                            Text(
+                              yearRange.isNotEmpty ? yearRange : '${DateTime.now().year}',
+                              style: const TextStyle(fontSize: 6.5, color: Color(0xFF8C8C8C), letterSpacing: 1.5),
+                            ),
+                          ],
                         ),
-                      ),
-                      if (hasSubtitle) ...[
-                        const SizedBox(height: 2),
-                        Text(
-                          subtitle!,
-                          style: const TextStyle(
-                              fontSize: 8.5, color: Color(0xFF6B6B6B)),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                      const SizedBox(height: 4),
-                      Container(width: 18, height: 1, color: coverColor),
-                      const SizedBox(height: 4),
-                      Text(
-                        yearRange.isNotEmpty ? yearRange : '${DateTime.now().year}',
-                        style: const TextStyle(fontSize: 8, color: Color(0xFF8C8C8C), letterSpacing: 2),
                       ),
                       if (highlights.isNotEmpty) ...[
-                        const SizedBox(height: 4),
-                        Text(
-                          highlights.take(3).map((h) => '· $h').join('  '),
-                          style: const TextStyle(fontSize: 7, color: Color(0xFF8C8C8C), fontStyle: FontStyle.italic),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisSize: MainAxisSize.min,
+                            children: highlights
+                                .take(15)
+                                .map((h) => Text(
+                                      '· $h',
+                                      style: const TextStyle(
+                                          fontSize: 5.5,
+                                          color: Color(0xFF8C8C8C),
+                                          height: 1.3),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      textAlign: TextAlign.right,
+                                    ))
+                                .toList(),
+                          ),
                         ),
                       ],
                     ],

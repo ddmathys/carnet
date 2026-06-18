@@ -133,6 +133,7 @@ class BookPdfService {
     String? customSubtitle,
     String backendUrl = '',
     bool padForPrint = false,
+    bool excludeCoverPhotoFromBook = false,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -177,14 +178,25 @@ class BookPdfService {
     }));
 
     final coverPhotoBytes = coverPhotoUrl != null ? bytesByUrl[coverPhotoUrl] : null;
-    final successfulPhotos =
-        photoEntries.where((e) => bytesByUrl.containsKey(e.url)).toList();
+    // Photos affichées dans le livre. Option : exclure la photo de couverture
+    // pour ne pas la répéter à l'intérieur.
+    final successfulPhotos = photoEntries.where((e) {
+      if (!bytesByUrl.containsKey(e.url)) return false;
+      if (excludeCoverPhotoFromBook &&
+          coverPhotoUrl != null &&
+          e.url == coverPhotoUrl) return false;
+      return true;
+    }).toList();
+    final shownPhotoMemoIds = successfulPhotos.map((e) => e.memory.id).toSet();
 
-    // Text-only memories (no photos, excluding taille_poids)
+    // Souvenirs en page texte : ceux sans photo affichée (jamais de photo, ou
+    // dont la seule photo était la couverture exclue / un download échoué).
     final textOnlyMemories = sorted.where((m) {
+      if (m.type == 'taille_poids') return false;
       final hasPhoto = m.mediaUrls.isNotEmpty ||
           (m.photoUrl != null && m.photoUrl!.isNotEmpty);
-      return !hasPhoto && m.type != 'taille_poids';
+      if (!hasPhoto) return true;
+      return !shownPhotoMemoIds.contains(m.id);
     }).toList();
 
     // Year range from actual memory dates
@@ -412,7 +424,7 @@ class BookPdfService {
         final words = m.rawContent.trim().split(RegExp(r'\s+')).take(4).join(' ');
         if (words.isNotEmpty) result.add(words);
       }
-      if (result.length >= 5) break;
+      if (result.length >= 15) break;
     }
     return result;
   }
@@ -609,6 +621,8 @@ class BookPdfService {
     final highlightLine = highlights.isEmpty
         ? null
         : highlights.take(4).map((h) => '· $h').join('   ');
+    // Liste exhaustive (jusqu'à 15) pour la colonne de droite de la couv. photo.
+    final coverMemoList = highlights.take(15).toList();
 
     // "carnet" brand text — top-right on all covers
     pw.Widget folioTag() => pw.Text(
@@ -639,32 +653,55 @@ class BookPdfService {
             bottom: 0, left: 0, right: 0,
             child: pw.Container(
               color: PdfColors.white,
-              padding: const pw.EdgeInsets.fromLTRB(26, 22, 26, 30),
-              child: pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                mainAxisSize: pw.MainAxisSize.min,
+              // Bandeau compact (laisse plus de place à la photo) en 2 colonnes :
+              // titre/sous-titre/année à gauche, liste des souvenirs à droite.
+              padding: const pw.EdgeInsets.fromLTRB(24, 14, 24, 18),
+              child: pw.Row(
+                crossAxisAlignment: pw.CrossAxisAlignment.end,
                 children: [
-                  pw.Text(
-                    displayTitle,
-                    style: pw.TextStyle(font: pB, fontSize: 21, color: _textDark, letterSpacing: 0.2),
+                  pw.Expanded(
+                    child: pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      mainAxisSize: pw.MainAxisSize.min,
+                      children: [
+                        pw.Text(
+                          displayTitle,
+                          style: pw.TextStyle(font: pB, fontSize: 18, color: _textDark, letterSpacing: 0.2),
+                        ),
+                        if (displaySubtitle != null) ...[
+                          pw.SizedBox(height: 4),
+                          pw.Text(displaySubtitle,
+                            style: pw.TextStyle(font: pR, fontSize: 10, color: _textMedium)),
+                        ],
+                        pw.SizedBox(height: 8),
+                        pw.Container(width: 26, height: 1.5, color: cover),
+                        pw.SizedBox(height: 8),
+                        pw.Text(
+                          'LIVRE DE SOUVENIRS  ·  $yearRange',
+                          style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium, letterSpacing: 1.5),
+                        ),
+                      ],
+                    ),
                   ),
-                  if (displaySubtitle != null) ...[
-                    pw.SizedBox(height: 5),
-                    pw.Text(displaySubtitle,
-                      style: pw.TextStyle(font: pR, fontSize: 11, color: _textMedium)),
-                  ],
-                  pw.SizedBox(height: 10),
-                  pw.Container(width: 28, height: 1.5, color: cover),
-                  pw.SizedBox(height: 10),
-                  pw.Text(
-                    'LIVRE DE SOUVENIRS  ·  $yearRange',
-                    style: pw.TextStyle(font: pR, fontSize: 7.5, color: _textMedium, letterSpacing: 1.5),
-                  ),
-                  if (highlightLine != null) ...[
-                    pw.SizedBox(height: 7),
-                    pw.Text(
-                      highlightLine,
-                      style: pw.TextStyle(font: pR, fontSize: 7.5, color: _textMedium, fontStyle: pw.FontStyle.italic),
+                  if (coverMemoList.isNotEmpty) ...[
+                    pw.SizedBox(width: 16),
+                    pw.Expanded(
+                      child: pw.Column(
+                        crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        mainAxisSize: pw.MainAxisSize.min,
+                        children: coverMemoList
+                            .map((h) => pw.Padding(
+                                  padding: const pw.EdgeInsets.only(bottom: 1.5),
+                                  child: pw.Text(
+                                    '· $h',
+                                    style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium),
+                                    maxLines: 1,
+                                    overflow: pw.TextOverflow.clip,
+                                    textAlign: pw.TextAlign.right,
+                                  ),
+                                ))
+                            .toList(),
+                      ),
                     ),
                   ],
                 ],
