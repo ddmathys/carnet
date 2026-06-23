@@ -44,6 +44,31 @@ class OrderConfirmationScreen extends StatelessWidget {
                 style: TextStyle(fontSize: 15, color: AppColors.textMedium, height: 1.6),
                 textAlign: TextAlign.center,
               ),
+              const SizedBox(height: 20),
+              // Paiement après livraison (MVP) — aucun paiement en ligne ici.
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.amber.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.amber.withOpacity(0.4)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('🧾', style: TextStyle(fontSize: 18)),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Vous paierez après réception du livre, par TWINT. '
+                        'Les détails de paiement vous seront envoyés par e-mail.',
+                        style: TextStyle(
+                            fontSize: 13, color: AppColors.textDark, height: 1.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               const SizedBox(height: 32),
               OutlinedButton.icon(
                 onPressed: () => context.go('/orders/$orderId'),

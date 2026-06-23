@@ -1,0 +1,16 @@
+{
+  "name": "_pdfbuild",
+  "version": "1.0.0",
+  "main": "build.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "pdf-parse": "^2.4.5",
+    "pdfkit": "^0.19.1"
+  }
+}

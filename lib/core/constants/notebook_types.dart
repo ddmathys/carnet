@@ -41,6 +41,15 @@ const kNotebookTypes = [
     hasExpectedDate: true,
   ),
   NotebookType(
+    id: 'moi',
+    label: 'Moi',
+    emoji: '🙋',
+    description: 'Mes événements, mes objectifs, mon quotidien — un carnet rien que pour moi.',
+    whyThis: 'Pour les adultes : tes moments perso, avec un suivi de poids dans le temps.',
+    memoryPlaceholder: 'Ex : Objectif atteint, 72 kg ce matin…',
+    hasWeightTracking: true,
+  ),
+  NotebookType(
     id: 'libre',
     label: 'Libre',
     emoji: '✨',
@@ -68,6 +77,8 @@ class NotebookType {
   final bool hasRecipient;
   final bool hasFrequency;
   final bool hasExpectedDate;
+  // Carnet adulte « Moi » : expose une courbe de suivi de poids (sans OMS).
+  final bool hasWeightTracking;
 
   const NotebookType({
     required this.id,
@@ -83,5 +94,6 @@ class NotebookType {
     this.hasRecipient = false,
     this.hasFrequency = false,
     this.hasExpectedDate = false,
+    this.hasWeightTracking = false,
   });
 }

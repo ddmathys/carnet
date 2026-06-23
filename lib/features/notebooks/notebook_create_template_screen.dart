@@ -13,7 +13,7 @@ class NotebookCreateTemplateScreen extends StatefulWidget {
 
 class _NotebookCreateTemplateScreenState
     extends State<NotebookCreateTemplateScreen> {
-  String _selected = 'enfant';
+  String _selected = 'famille';
 
   @override
   Widget build(BuildContext context) {

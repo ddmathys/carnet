@@ -16,6 +16,12 @@ class MemoryModel {
   final List<String> mediaUrls;
   final String? audioUrl;
   final int? audioDurationMs;
+  // Vidéos souvenir : on stocke les CLÉS des objets R2 (videos/{uid}/…/x.mp4),
+  // pas les URLs — l'app et la page /watch reconstruisent l'URL publique depuis
+  // l'hôte R2. `videoDurationsMs` est parallèle à `videoKeys` (best-effort).
+  // Compat ascendante : les anciens souvenirs ont un `videoKey` unique.
+  final List<String> videoKeys;
+  final List<int> videoDurationsMs;
   final double? weightKg;
   final double? heightCm;
   final DateTime createdAt;
@@ -36,6 +42,8 @@ class MemoryModel {
     this.mediaUrls = const [],
     this.audioUrl,
     this.audioDurationMs,
+    this.videoKeys = const [],
+    this.videoDurationsMs = const [],
     this.weightKg,
     this.heightCm,
     required this.createdAt,
@@ -60,12 +68,33 @@ class MemoryModel {
       mediaUrls: List<String>.from(d['mediaUrls'] ?? []),
       audioUrl: d['audioUrl'],
       audioDurationMs: (d['audioDurationMs'] as num?)?.toInt(),
+      videoKeys: _readVideoKeys(d),
+      videoDurationsMs: _readVideoDurations(d),
       weightKg: (d['weightKg'] as num?)?.toDouble(),
       heightCm: (d['heightCm'] as num?)?.toDouble(),
       createdAt: d['createdAt'] != null
           ? (d['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
     );
+  }
+
+  /// Lit `videoKeys` (nouveau format multi) avec repli sur l'ancien `videoKey`.
+  static List<String> _readVideoKeys(Map<String, dynamic> d) {
+    final list = List<String>.from(d['videoKeys'] as List<dynamic>? ?? []);
+    if (list.isEmpty) {
+      final legacy = d['videoKey'] as String?;
+      if (legacy != null && legacy.isNotEmpty) return [legacy];
+    }
+    return list;
+  }
+
+  static List<int> _readVideoDurations(Map<String, dynamic> d) {
+    final raw = d['videoDurationsMs'] as List<dynamic>?;
+    if (raw != null && raw.isNotEmpty) {
+      return raw.map((e) => (e as num).toInt()).toList();
+    }
+    final legacy = (d['videoDurationMs'] as num?)?.toInt();
+    return legacy != null ? [legacy] : [];
   }
 
   Map<String, dynamic> toFirestore() => {
@@ -83,6 +112,12 @@ class MemoryModel {
         'mediaUrls': mediaUrls,
         'audioUrl': audioUrl,
         'audioDurationMs': audioDurationMs,
+        'videoKeys': videoKeys,
+        'videoDurationsMs': videoDurationsMs,
+        // Miroir hérité (lu par d'anciens clients / la page /watch d'origine).
+        'videoKey': videoKeys.isNotEmpty ? videoKeys.first : null,
+        'videoDurationMs':
+            videoDurationsMs.isNotEmpty ? videoDurationsMs.first : null,
         'weightKg': weightKg,
         'heightCm': heightCm,
         'createdAt': Timestamp.fromDate(createdAt),

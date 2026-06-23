@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'photo_service.dart';
 import 'audio_service.dart';
+import 'video_service.dart';
 
 /// Un travail d'upload de médias pour un souvenir déjà écrit en base.
 /// Immuable : peut être re-déclenché tel quel en cas d'échec (retry).
@@ -16,6 +17,13 @@ class MediaUploadJob {
   final String? existingAudioUrl;
   final bool audioRemoved;
   final int? audioDurationMs;
+  // Vidéos (multi). `existing*` = clips conservés, `removed*` = clips à supprimer
+  // de R2, `local*` = nouveaux clips à compresser + uploader.
+  final List<String> localVideoPaths;
+  final List<int?> localVideoDurations;
+  final List<String> existingVideoKeys;
+  final List<int> existingVideoDurations;
+  final List<String> removedVideoKeys;
 
   const MediaUploadJob({
     required this.memoryId,
@@ -27,6 +35,11 @@ class MediaUploadJob {
     required this.existingAudioUrl,
     required this.audioRemoved,
     required this.audioDurationMs,
+    this.localVideoPaths = const [],
+    this.localVideoDurations = const [],
+    this.existingVideoKeys = const [],
+    this.existingVideoDurations = const [],
+    this.removedVideoKeys = const [],
   });
 }
 
@@ -85,10 +98,40 @@ class MediaUploadQueue extends ChangeNotifier {
       // Suppression des médias retirés/remplacés (en parallèle des uploads).
       final deletions = <Future<void>>[
         ...job.removedPhotoUrls.map(PhotoService.deletePhotoByUrl),
+        ...job.removedVideoKeys.map(VideoService.deleteVideoByKey),
       ];
       if (job.existingAudioUrl != null &&
           (job.localAudioPath != null || job.audioRemoved)) {
         deletions.add(AudioService.deleteAudioByUrl(job.existingAudioUrl));
+      }
+
+      // Upload des nouvelles vidéos SÉQUENTIELLEMENT. `video_compress` ne gère
+      // qu'UNE session de compression globale à la fois : compresser plusieurs
+      // vidéos en parallèle fait échouer toutes les compressions concurrentes
+      // (les clips ne seraient alors pas sauvegardés). Les photos et l'audio,
+      // eux, continuent leur upload en parallèle pendant ce temps.
+      // Clés vidéo finales : conservées + nouvelles (uploads réussis), durées
+      // alignées. On retient les clips échoués pour les remettre en file ensuite.
+      final videoKeys = <String>[...job.existingVideoKeys];
+      final videoDurationsMs = <int>[...job.existingVideoDurations];
+      final failedVideoPaths = <String>[];
+      final failedVideoDurations = <int?>[];
+      for (var i = 0; i < job.localVideoPaths.length; i++) {
+        final r = await VideoService.uploadMemoryVideo(
+          video: File(job.localVideoPaths[i]),
+          notebookId: job.notebookId,
+        );
+        final localDur =
+            i < job.localVideoDurations.length ? job.localVideoDurations[i] : null;
+        if (r == null) {
+          // Upload échoué → on garde le chemin pour un réessai (sans doublon).
+          failedVideoPaths.add(job.localVideoPaths[i]);
+          failedVideoDurations.add(localDur);
+          continue;
+        }
+        videoKeys.add(r.key);
+        final dur = r.durationMs ?? localDur;
+        if (dur != null) videoDurationsMs.add(dur);
       }
 
       final newUrls = await photoFuture;
@@ -104,7 +147,35 @@ class MediaUploadQueue extends ChangeNotifier {
         'photoUrl': allUrls.isNotEmpty ? allUrls.first : null,
         'audioUrl': audioUrl,
         'audioDurationMs': audioUrl != null ? job.audioDurationMs : null,
+        'videoKeys': videoKeys,
+        'videoDurationsMs': videoDurationsMs,
+        // Miroir hérité (compat anciens lecteurs / page /watch d'origine).
+        'videoKey': videoKeys.isNotEmpty ? videoKeys.first : null,
+        'videoDurationMs':
+            videoDurationsMs.isNotEmpty ? videoDurationsMs.first : null,
       });
+
+      // Échec partiel d'upload vidéo → on signale (bannière « Réessayer ») en
+      // remettant en file UNIQUEMENT les clips manquants. Les médias déjà
+      // sauvegardés (photos, audio, vidéos réussies) sont préservés tels quels.
+      if (failedVideoPaths.isNotEmpty) {
+        _failed.add(MediaUploadJob(
+          memoryId: job.memoryId,
+          notebookId: job.notebookId,
+          localPhotos: const [],
+          existingPhotoUrls: allUrls,
+          removedPhotoUrls: const [],
+          localAudioPath: null,
+          existingAudioUrl: audioUrl,
+          audioRemoved: false,
+          audioDurationMs: job.audioDurationMs,
+          localVideoPaths: failedVideoPaths,
+          localVideoDurations: failedVideoDurations,
+          existingVideoKeys: videoKeys,
+          existingVideoDurations: videoDurationsMs,
+          removedVideoKeys: const [],
+        ));
+      }
     } catch (e) {
       debugPrint('MediaUploadQueue: échec upload souvenir ${job.memoryId} — $e');
       _failed.add(job);

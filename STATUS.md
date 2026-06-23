@@ -37,6 +37,118 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 > (dmathys.dev → bouton → redirect → APK, HTTP 206). Pour mettre à jour l'app :
 > `flutter build apk --release` puis
 > `gsutil cp build/app/outputs/flutter-apk/app-release.apk gs://bloom-bcb1f.firebasestorage.app/public/carnet.apk`.
+>
+> **MÀJ 21.06.2026** : **vidéos multiples par souvenir + lecture inline** (voir
+> section dédiée plus bas). Au passage, gros fix d'infra : le **backend Vercel
+> était hors ligne** (déploiement échoué — plan Hobby plafonné à **12 fonctions
+> serverless**, on était à 13-14). Endpoints fusionnés en route dynamique
+> `api/video/[action].ts` (upload-url + delete + config) → 12 pile, redéployé,
+> prod de nouveau en ligne. Et **R2 n'était configuré qu'à moitié** : il manquait
+> `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_PUBLIC_HOST` (d'où l'upload vidéo qui n'avait
+> jamais pu marcher). Les 3 ajoutées + bucket R2 passé en accès public
+> (`pub-e6f508…r2.dev`). **Reste à faire** : rebuild l'app et tester l'upload de
+> 2-3 vidéos de bout en bout sur device.
+>
+> **MÀJ 23.06.2026** : **sécurisation des vidéos par appartenance au carnet**
+> (bucket R2 privé + URLs signées), gros lot UX/produit, **refonte de la courbe de
+> croissance** et **nouveau type de carnet « Moi »**. Détails dans la section dédiée
+> ci-dessous. Tout compile (`flutter analyze` = 0 erreur), backend redéployé.
+> **Reste** : rebuild + redistribuer l'APK (indispensable pour que les
+> collaborateurs revoient les vidéos, le bucket étant désormais privé) + tests device.
+
+## ✅ Fait (23.06.2026) — Sécurité médias, UX, courbe, étude de marché
+
+### Vidéos : accès sécurisé (bucket R2 privé)
+- **Bug upload corrigé** : `R2_BUCKET` valait `bloom-videos` au lieu de
+  `carnet-videos` → R2 renvoyait **403 AccessDenied**. Corrigé sur Vercel. Ajout
+  aussi de `requestChecksumCalculation:'WHEN_REQUIRED'` sur le client S3 (compat R2
+  vs checksum CRC32 par défaut du SDK ≥ 3.729).
+- **Lecture sécurisée** : bucket R2 **passé en privé** (Public Dev URL désactivée).
+  Nouvel endpoint `POST /api/video/play` (auth + vérif membre via
+  `backend/lib/access.ts` `memoryIfMember` = propriétaire / `sharedWith` /
+  `invitedEmails`) → **URLs GET signées 1 h**. L'app
+  (`VideoService.playbackUrls(memoryId)`) et la page `/watch` passent par là ;
+  `resolveVideoUrls` + hôte public supprimés.
+- **Page `/watch` réécrite en page web authentifiée** (Firebase Auth JS : Google +
+  e-mail/mdp + création de compte). Config web injectée via env
+  `FIREBASE_WEB_API_KEY` / `FIREBASE_WEB_APP_ID` (projet `bloom-bcb1f`).
+- ⚠️ **Photos encore exposées** via leurs URLs tokenisées Firebase (même faille
+  que les vidéos avant — **Phase 3** : signer via Admin SDK + migrer les chemins).
+
+### Visualiseur plein écran réutilisable
+- `lib/core/widgets/media_fullscreen_viewer.dart` : photos (zoom) + vidéos
+  (lecture), fichiers **locaux ET distants**. Vignettes photo/vidéo cliquables dans
+  l'écran de création/édition.
+
+### Lot produit / UX
+- **Paiement MVP** : on reste « facture à réception », clarifié en **paiement TWINT
+  après livraison, détails par e-mail** — messages ajoutés (écran confirmation +
+  suivi de commande). Stripe abandonné pour le MVP (`paymentEnabled` reste `false`).
+- **Touche retour** (Android) sur le dashboard carnet → revient à `/home` (PopScope).
+- **Dashboard** : widget « Anecdotes » retiré ; CTA livre → « **un livre fait au
+  minimum 29 pages** » (fin du palier « 10 souvenirs »).
+- **Quotas** : **quota audio** ajouté (15 / 150) ; **compteurs photos + vidéos +
+  vocaux** sur l'accueil + alerte premium + **blocage à l'enregistrement** du mémo.
+- **Type de carnet par défaut = Famille**.
+- **Nouveau type « Moi / Adulte »** (`moi`, flag `hasWeightTracking`) → courbe de
+  **suivi de poids** (sans référentiel OMS).
+
+### Refonte de la courbe de croissance (l'écran s'affichait vide)
+- L'écran lisait les collections **legacy** `children`/`milestones`. Refondu sur
+  `notebooks`/`memories` (type `taille_poids`). **Enfant** = courbe **OMS**
+  taille + poids + toise visuelle ; **carnet Moi** = courbe de poids simple. Saisie
+  depuis l'écran (commentaire → l'IA extrait → souvenir `taille_poids`) **en plus**
+  du nouveau souvenir. Route `/notebook/:id/growth` (param `notebookId`).
+
+### Doc
+- `docs/Carnet-fonctionnement.pdf` (15 pages) : explicatif par section + **étude de
+  marché** (freemium/tarifs, positionnement, concurrents, différenciateurs),
+  renommé « **Carnet** », flux paiement = **facture TWINT**, et **section « Suivi de
+  croissance (enfant) »**. Régénérable : `docs/_pdfbuild/build.js`
+  (`npm i pdfkit && node build.js`).
+
+### ⬜ À tester sur device (lot 23.06)
+- [ ] Vidéo : enregistrer → upload OK ; lecture in-app (membre) ; `/watch` après login
+- [ ] Collaborateur sur **nouveau build** revoit les vidéos partagées
+- [ ] Compteurs photos/vidéos/vocaux + blocage premium
+- [ ] Courbe **enfant** (OMS + toise) ; carnet **Moi** → courbe poids ; saisie depuis l'écran
+- [ ] Création carnet : « Famille » présélectionné ; type « Moi » disponible
+
+## ✅ Fait (21.06.2026) — Vidéos multiples par souvenir + lecture inline
+
+- **Modèle** (`memory_model.dart`) : `videoKey` (unique) → **`videoKeys` (liste)**
+  + `videoDurationsMs`, avec **compat ascendante** (lecture de l'ancien
+  `videoKey`) et **miroir hérité** écrit en base (`videoKey`/`videoDurationMs` =
+  1er élément) pour ne casser aucun ancien client ni QR déjà imprimé.
+- **Ajout** (`memory_create_screen.dart`) : galerie de vignettes vidéo façon
+  photos (▶ + durée + suppression), **max 3/souvenir** (`maxVideosPerMemory`) en
+  plus du quota global (15 gratuit / 150 premium). Mention des conditions
+  affichée à l'utilisateur.
+- **Lecture** (`memories_list_screen.dart`) : `_PhotoViewer` → **`_MediaViewer`**
+  unifié (photos zoomables + **vidéos jouées inline** via `video_player`),
+  balayables ensemble ; pause auto au swipe. Vignette de souvenir : badge ▶ N si
+  vidéos, placeholder sombre si souvenir sans photo. Idem mini-vignette du
+  dashboard (`_MemoryPreviewTile`).
+- **File d'upload** (`media_upload_queue.dart`) : upload des N vidéos
+  **SÉQUENTIEL** — `video_compress` n'a qu'une session de compression globale,
+  le parallèle faisait échouer toutes les compressions (= clips non sauvegardés,
+  le bug initial). Échec partiel désormais **visible** (bannière « Réessayer »)
+  et re-mis en file **sans doublon** (seuls les clips manquants).
+- **Quota** (`quota_service.dart`) : comptage **total** des vidéos (somme des
+  clés, pas des souvenirs) + constante `maxVideosPerMemory = 3`.
+- **Livre** (`book_pdf_service.dart`) : **1 seul QR par souvenir → galerie** ;
+  libellés au pluriel quand >1 vidéo.
+- **Backend** : `api/watch.ts` liste **toutes** les vidéos d'un souvenir
+  (`videoKeys`, repli `videoKey`). **Route dynamique `api/video/[action].ts`**
+  regroupe `upload-url`, `delete` et **`config`** (l'app appelle
+  `/api/video/config` pour récupérer `R2_PUBLIC_HOST` et reconstruire les URLs de
+  lecture — l'hôte n'est jamais codé en dur dans l'app).
+- **Nouveau package** : `video_player: ^2.9.2`.
+- ⚠️ **Dette** : l'URL `pub-….r2.dev` (R2 public dev) est limitée en débit →
+  brancher un **domaine personnalisé** sur le bucket pour la prod (changer
+  `R2_PUBLIC_HOST` + redéployer suffit, rien d'autre ne casse). Les vignettes
+  vidéo de l'écran d'ajout sont des cartes sombres génériques (pas une image
+  extraite) — possible amélioration via `video_compress` thumbnail.
 
 ## ✅ Fait (16.06.2026) — UX sauvegarde & génération du livre
 
@@ -313,9 +425,16 @@ optimiste, fixes de spinners), et l'essentiel de **Phase 2 du livre**
 - Admin app = email `david.mathys24@gmail.com` (vérifié) dans les règles
 - **Env vars backend** : `DEEPSEEK_API_KEY`, `RESEND_API_KEY`,
   `FIREBASE_SERVICE_ACCOUNT`, `GELATO_API_KEY`,
-  `GELATO_PRODUCT_UID_SOFT`, `GELATO_PRODUCT_UID_HARD`
+  `GELATO_PRODUCT_UID_SOFT`, `GELATO_PRODUCT_UID_HARD`,
+  `R2_ACCOUNT_ID`, `R2_BUCKET` (=`carnet-videos`), `R2_ACCESS_KEY_ID`,
+  `R2_SECRET_ACCESS_KEY`, `R2_PUBLIC_HOST`, `FIREBASE_WEB_API_KEY`,
+  `FIREBASE_WEB_APP_ID` (config Firebase web pour `/watch`), `STRIPE_SECRET_KEY`
+  (paiement désactivé pour le MVP)
 - **Routes backend** : `/api/ai/chat`, `/api/email/order`, `/api/email/share`,
-  `/listen` (→ `/api/listen`, mémo vocal public), `/api/gelato/order` (admin)
+  `/listen` (→ `/api/listen`, mémo vocal public), `/api/gelato/order` (admin),
+  `/api/video/[action]` (`upload-url`, `delete`, `config`, **`play`** = lecture
+  signée membre-only), `/watch` (page web **authentifiée**, QR vidéo),
+  `/api/payment/*` (Stripe, désactivé MVP)
 - **Collections Firestore** : `notebooks`, `memories`, `orders`,
   `generatedBooks` (historique PDF), `books` (histoires IA legacy), `users`,
   `aiUsage`, + legacy `children`/`milestones`

@@ -31,6 +31,12 @@ dependencies:
   cached_network_image: ^3.4.1
   flutter_image_compress: ^2.3.0
 
+  # Vidéo souvenir (compression 720p avant upload R2)
+  video_compress: ^3.1.2
+
+  # Lecture vidéo inline dans l'app (galerie de souvenirs)
+  video_player: ^2.9.2
+
   # Charts (courbe croissance)
   fl_chart: ^0.69.0
 

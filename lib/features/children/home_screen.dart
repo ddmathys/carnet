@@ -19,6 +19,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   QuotaStatus? _quota;
+  QuotaStatus? _videoQuota;
+  QuotaStatus? _audioQuota;
   String _tier = 'free';
   List<NotebookModel> _ownNotebooks = [];
   List<NotebookModel> _sharedNotebooks = [];
@@ -103,8 +105,19 @@ class _HomeScreenState extends State<HomeScreen> {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final tier = await QuotaService.getSubscriptionTier(uid);
-    final quota = await QuotaService.checkQuota(uid);
-    if (mounted) setState(() { _quota = quota; _tier = tier; });
+    final results = await Future.wait([
+      QuotaService.checkQuota(uid),
+      QuotaService.checkVideoQuota(uid),
+      QuotaService.checkAudioQuota(uid),
+    ]);
+    if (mounted) {
+      setState(() {
+        _quota = results[0];
+        _videoQuota = results[1];
+        _audioQuota = results[2];
+        _tier = tier;
+      });
+    }
   }
 
   Widget _buildBody(BuildContext context) {
@@ -123,6 +136,8 @@ class _HomeScreenState extends State<HomeScreen> {
             notebookCount: allOwn.length + allShared.length,
             memoryCount: totalMemories,
             quota: _quota,
+            videoQuota: _videoQuota,
+            audioQuota: _audioQuota,
             tier: _tier,
             onProfile: () => context.push('/profile'),
             onSubscription: () => context.push('/subscription'),
@@ -240,6 +255,8 @@ class _HeroHeader extends StatelessWidget {
   final int notebookCount;
   final int memoryCount;
   final QuotaStatus? quota;
+  final QuotaStatus? videoQuota;
+  final QuotaStatus? audioQuota;
   final String tier;
   final VoidCallback onProfile;
   final VoidCallback onSubscription;
@@ -249,10 +266,30 @@ class _HeroHeader extends StatelessWidget {
     required this.notebookCount,
     required this.memoryCount,
     required this.quota,
+    required this.videoQuota,
+    required this.audioQuota,
     required this.tier,
     required this.onProfile,
     required this.onSubscription,
   });
+
+  // Message d'alerte pour la 1re ressource proche de sa limite (photos →
+  // vidéos → vocaux), ou null si tout va bien.
+  String? _firstQuotaAlert() {
+    final candidates = <(String, QuotaStatus?)>[
+      ('photos', quota),
+      ('vidéos', videoQuota),
+      ('vocaux', audioQuota),
+    ];
+    for (final (label, q) in candidates) {
+      if (q != null && q.nearLimit) {
+        return q.isAtLimit
+            ? 'Limite $label atteinte — Passer à Premium →'
+            : '${q.remaining} $label restant${q.remaining > 1 ? 's' : ''} — Passer à Premium →';
+      }
+    }
+    return null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -347,43 +384,75 @@ class _HeroHeader extends StatelessWidget {
                         icon: Icons.auto_stories_outlined,
                         label: '$memoryCount souvenir${memoryCount != 1 ? 's' : ''}',
                       ),
-                      if (quota != null && tier == 'free')
-                        GestureDetector(
-                          onTap: quota!.nearLimit ? onSubscription : null,
-                          child: _HeroChip(
-                            icon: Icons.photo_outlined,
-                            label: '${quota!.current}/${quota!.limit} photos',
-                            warn: quota!.nearLimit,
-                          ),
-                        ),
-                    ],
-                  ),
-                  // Quota alert — toujours dans le dégradé grâce au Container parent
-                  if (quota != null && quota!.nearLimit && tier == 'free') ...[
-                    const SizedBox(height: 10),
-                    GestureDetector(
-                      onTap: onSubscription,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.12),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.white.withOpacity(0.25)),
-                        ),
-                        child: Row(children: [
-                          const Icon(Icons.warning_amber_outlined, color: Colors.white, size: 14),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              quota!.isAtLimit
-                                  ? 'Limite atteinte — Passer à Premium →'
-                                  : '${quota!.remaining} photos restantes — Passer à Premium →',
-                              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                      if (tier == 'free') ...[
+                        if (quota != null)
+                          GestureDetector(
+                            onTap: quota!.nearLimit ? onSubscription : null,
+                            child: _HeroChip(
+                              icon: Icons.photo_outlined,
+                              label: '${quota!.current}/${quota!.limit} photos',
+                              warn: quota!.nearLimit,
                             ),
                           ),
-                        ]),
-                      ),
-                    ),
+                        if (videoQuota != null)
+                          GestureDetector(
+                            onTap: videoQuota!.nearLimit ? onSubscription : null,
+                            child: _HeroChip(
+                              icon: Icons.videocam_outlined,
+                              label:
+                                  '${videoQuota!.current}/${videoQuota!.limit} vidéos',
+                              warn: videoQuota!.nearLimit,
+                            ),
+                          ),
+                        if (audioQuota != null)
+                          GestureDetector(
+                            onTap: audioQuota!.nearLimit ? onSubscription : null,
+                            child: _HeroChip(
+                              icon: Icons.mic_none_outlined,
+                              label:
+                                  '${audioQuota!.current}/${audioQuota!.limit} vocaux',
+                              warn: audioQuota!.nearLimit,
+                            ),
+                          ),
+                      ],
+                    ],
+                  ),
+                  // Alerte premium — pour la 1re ressource proche de sa limite.
+                  if (tier == 'free') ...[
+                    Builder(builder: (_) {
+                      final alert = _firstQuotaAlert();
+                      if (alert == null) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 10),
+                        child: GestureDetector(
+                          onTap: onSubscription,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 12, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.12),
+                              borderRadius: BorderRadius.circular(8),
+                              border:
+                                  Border.all(color: Colors.white.withOpacity(0.25)),
+                            ),
+                            child: Row(children: [
+                              const Icon(Icons.warning_amber_outlined,
+                                  color: Colors.white, size: 14),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Text(
+                                  alert,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500),
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ),
+                      );
+                    }),
                   ],
                 ],
               ),

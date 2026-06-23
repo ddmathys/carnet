@@ -9,6 +9,20 @@ class QuotaService {
   static const int premiumPhotoLimit = 10000;
   static const double premiumPriceChf = 29.0;
 
+  // Vidéos souvenir. La durée par clip est plafonnée à 60 s à la capture
+  // (cf. memory_create_screen) — c'est le principal levier de coût de stockage.
+  // Le nombre de vidéos est le palier gratuit/premium.
+  static const int freeVideoLimit = 15;
+  static const int premiumVideoLimit = 150;
+  static const int maxVideoDurationSec = 60;
+  // Nombre max de vidéos attachées à UN même souvenir (en plus du quota global
+  // ci-dessus). Garde la page du livre lisible et maîtrise le coût de stockage.
+  static const int maxVideosPerMemory = 3;
+
+  // Mémos vocaux (un par souvenir). Même logique de palier gratuit/premium.
+  static const int freeAudioLimit = 15;
+  static const int premiumAudioLimit = 150;
+
   // Check subscription tier from users/{uid} document.
   static Future<String> getSubscriptionTier(String userId) async {
     try {
@@ -84,6 +98,111 @@ class QuotaService {
     final hardLimit = await getHardPhotoLimit(userId);
     final count = await countUserPhotos(userId);
     return (allowed: count + adding <= hardLimit, current: count, limit: hardLimit);
+  }
+
+  static Future<int> getVideoLimit(String userId) async {
+    return await isPremium(userId) ? premiumVideoLimit : freeVideoLimit;
+  }
+
+  // Compte le nombre TOTAL de vidéos (chaque souvenir peut en porter plusieurs)
+  // sur tous les carnets de l'utilisateur.
+  static Future<int> countUserVideos(String userId) async {
+    try {
+      final notebooksSnap = await FirebaseFirestore.instance
+          .collection('notebooks')
+          .where('userId', isEqualTo: userId)
+          .get();
+
+      if (notebooksSnap.docs.isEmpty) return 0;
+
+      final notebookIds = notebooksSnap.docs.map((d) => d.id).toList();
+      int count = 0;
+
+      for (int i = 0; i < notebookIds.length; i += 10) {
+        final batch = notebookIds.sublist(i, min(i + 10, notebookIds.length));
+        final memoriesSnap = await FirebaseFirestore.instance
+            .collection('memories')
+            .where('notebookId', whereIn: batch)
+            .get();
+
+        for (final doc in memoriesSnap.docs) {
+          final data = doc.data();
+          final keys = data['videoKeys'] as List<dynamic>?;
+          if (keys != null && keys.isNotEmpty) {
+            count += keys.length;
+          } else if ((data['videoKey'] as String?)?.isNotEmpty == true) {
+            count++; // ancien format mono-vidéo
+          }
+        }
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// Peut-on ajouter [adding] vidéo(s) ? (15 free / 150 premium).
+  static Future<({bool allowed, int current, int limit})> canAddVideos(
+    String userId, {
+    int adding = 1,
+  }) async {
+    final limit = await getVideoLimit(userId);
+    final count = await countUserVideos(userId);
+    return (allowed: count + adding <= limit, current: count, limit: limit);
+  }
+
+  // Compteur d'avancement vidéo (pour l'accueil), même forme que les photos.
+  static Future<QuotaStatus> checkVideoQuota(String userId) async {
+    final limit = await getVideoLimit(userId);
+    final count = await countUserVideos(userId);
+    return QuotaStatus(current: count, limit: limit);
+  }
+
+  static Future<int> getAudioLimit(String userId) async {
+    return await isPremium(userId) ? premiumAudioLimit : freeAudioLimit;
+  }
+
+  // Compte les mémos vocaux (souvenirs avec un audioUrl) sur tous les carnets.
+  static Future<int> countUserAudios(String userId) async {
+    try {
+      final notebooksSnap = await FirebaseFirestore.instance
+          .collection('notebooks')
+          .where('userId', isEqualTo: userId)
+          .get();
+      if (notebooksSnap.docs.isEmpty) return 0;
+
+      final notebookIds = notebooksSnap.docs.map((d) => d.id).toList();
+      int count = 0;
+      for (int i = 0; i < notebookIds.length; i += 10) {
+        final batch = notebookIds.sublist(i, min(i + 10, notebookIds.length));
+        final memoriesSnap = await FirebaseFirestore.instance
+            .collection('memories')
+            .where('notebookId', whereIn: batch)
+            .get();
+        for (final doc in memoriesSnap.docs) {
+          if ((doc.data()['audioUrl'] as String?)?.isNotEmpty == true) count++;
+        }
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  static Future<QuotaStatus> checkAudioQuota(String userId) async {
+    final limit = await getAudioLimit(userId);
+    final count = await countUserAudios(userId);
+    return QuotaStatus(current: count, limit: limit);
+  }
+
+  /// Peut-on ajouter un mémo vocal ? (15 free / 150 premium).
+  static Future<({bool allowed, int current, int limit})> canAddAudios(
+    String userId, {
+    int adding = 1,
+  }) async {
+    final limit = await getAudioLimit(userId);
+    final count = await countUserAudios(userId);
+    return (allowed: count + adding <= limit, current: count, limit: limit);
   }
 }
 

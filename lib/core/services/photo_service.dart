@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:uuid/uuid.dart';
 import 'audio_service.dart';
+import 'video_service.dart';
 
 class PhotoService {
   static final _storage = FirebaseStorage.instance;
@@ -86,9 +87,13 @@ class PhotoService {
         data['photoUrl'] as String?,
         ...List<String>.from(data['mediaUrls'] as List<dynamic>? ?? []),
       ];
+      final videoKeys = List<String>.from(
+          data['videoKeys'] as List<dynamic>? ??
+              [if (data['videoKey'] != null) data['videoKey']]);
       return <Future<void>>[
         ...urls.map(deletePhotoByUrl),
         AudioService.deleteAudioByUrl(data['audioUrl'] as String?),
+        VideoService.deleteVideosByKeys(videoKeys),
       ];
     });
     await Future.wait(mediaFutures);
@@ -110,7 +115,7 @@ class PhotoService {
   /// Delete a memory and ALL its photos (photoUrl + mediaUrls) + voice memo.
   static Future<void> deleteMemory(
       String memoryId, String? photoUrl, List<String> mediaUrls,
-      {String? audioUrl}) async {
+      {String? audioUrl, List<String> videoKeys = const []}) async {
     final allUrls = {
       if (photoUrl != null && photoUrl.isNotEmpty) photoUrl,
       ...mediaUrls,
@@ -118,6 +123,7 @@ class PhotoService {
     await Future.wait([
       ...allUrls.map(deletePhotoByUrl),
       AudioService.deleteAudioByUrl(audioUrl),
+      VideoService.deleteVideosByKeys(videoKeys),
       _firestore.collection('memories').doc(memoryId).delete(),
     ]);
   }

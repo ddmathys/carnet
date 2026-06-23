@@ -8,6 +8,7 @@ import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/constants/milestone_types.dart';
+import '../../core/constants/notebook_types.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/user_service.dart';
 import 'share_notebook_sheet.dart';
@@ -116,7 +117,14 @@ class _DashboardBodyState extends State<_DashboardBody> {
   Widget build(BuildContext context) {
     final total = memories.length;
 
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      // Touche « retour » du téléphone → revenir à la liste des carnets,
+      // plutôt que de quitter / dépiler vers un écran inattendu.
+      onPopInvoked: (didPop) {
+        if (!didPop) context.go('/home');
+      },
+      child: Scaffold(
       backgroundColor: AppColors.background,
       body: CustomScrollView(
         slivers: [
@@ -125,13 +133,12 @@ class _DashboardBodyState extends State<_DashboardBody> {
             padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // Book CTA or progress
-                if (total >= 10) ...[
+                // CTA livre — toujours accessible dès qu'il y a un souvenir.
+                // L'exigence n'est plus un nombre de souvenirs mais le minimum
+                // d'impression (29 pages), rappelé sur la carte.
+                if (total > 0) ...[
                   const SizedBox(height: 16),
                   _BookCta(count: total, notebookId: notebook.id),
-                ] else if (total > 0) ...[
-                  const SizedBox(height: 16),
-                  _BookProgressCta(count: total),
                 ],
                 const SizedBox(height: 16),
                 _buildSharedWith(context),
@@ -180,6 +187,7 @@ class _DashboardBodyState extends State<_DashboardBody> {
         icon: const Icon(Icons.add),
         label: const Text('Nouveau souvenir'),
         shape: const StadiumBorder(),
+      ),
       ),
     );
   }
@@ -514,7 +522,7 @@ class _BookCta extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '$count souvenirs capturés',
+                    '$count souvenir${count > 1 ? 's' : ''} capturé${count > 1 ? 's' : ''}',
                     style: const TextStyle(
                       fontWeight: FontWeight.w700,
                       color: AppColors.textDark,
@@ -522,7 +530,7 @@ class _BookCta extends StatelessWidget {
                     ),
                   ),
                   const Text(
-                    'Ton livre est prêt à être généré',
+                    'Attention : un livre fait au minimum 29 pages',
                     style: TextStyle(
                         color: AppColors.textMedium, fontSize: 12),
                   ),
@@ -539,59 +547,6 @@ class _BookCta extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _BookProgressCta extends StatelessWidget {
-  final int count;
-  const _BookProgressCta({required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    final remaining = 10 - count;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.sage.withOpacity(0.06),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.sage.withOpacity(0.25), width: 1),
-      ),
-      child: Row(
-        children: [
-          const Text('📖', style: TextStyle(fontSize: 28)),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '$count / 10 souvenirs',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textDark,
-                    fontSize: 15,
-                  ),
-                ),
-                Text(
-                  'Encore $remaining souvenir${remaining > 1 ? 's' : ''} pour créer ton livre',
-                  style: const TextStyle(color: AppColors.textMedium, fontSize: 12),
-                ),
-                const SizedBox(height: 8),
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(4),
-                  child: LinearProgressIndicator(
-                    value: count / 10.0,
-                    minHeight: 5,
-                    backgroundColor: AppColors.softGray.withOpacity(0.3),
-                    valueColor: const AlwaysStoppedAnimation<Color>(AppColors.sage),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
@@ -643,12 +598,9 @@ class _StatsGrid extends StatelessWidget {
         final measurements = memories
             .where((m) => m.type == 'taille_poids')
             .length;
-        final anecdotes =
-            memories.where((m) => m.type == 'anecdote').length;
         return [
           _Stat('Total', '$total', '📝'),
           _Stat('Mesures', '$measurements', '📏'),
-          _Stat('Anecdotes', '$anecdotes', '💬'),
           _Stat('Dernière saisie', lastLabel, '🕒'),
         ];
       case 'voyage':
@@ -740,7 +692,11 @@ class _ShortcutsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final showGrowth = notebook.type == 'enfant';
+    // Courbe OMS pour l'enfant ; courbe de poids pour le carnet « Moi » (adulte).
+    final isChild = notebook.type == 'enfant';
+    final hasWeight =
+        getNotebookTypeById(notebook.type).hasWeightTracking;
+    final showGrowth = isChild || hasWeight;
     return Row(
       children: [
         _ShortcutBtn(
@@ -751,7 +707,7 @@ class _ShortcutsRow extends StatelessWidget {
         const SizedBox(width: 10),
         _ShortcutBtn(
           emoji: showGrowth ? '📊' : '📈',
-          label: showGrowth ? 'Courbes' : 'Stats',
+          label: isChild ? 'Courbes' : (hasWeight ? 'Poids' : 'Stats'),
           onTap: showGrowth
               ? () => context.push('/notebook/${notebook.id}/growth')
               : null,
@@ -829,6 +785,11 @@ class _MemoryPreviewTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasPhoto = memory.photoUrl != null && memory.photoUrl!.isNotEmpty;
+    final hasVideo = memory.videoKeys.isNotEmpty;
+    const thumbRadius = BorderRadius.only(
+      topLeft: Radius.circular(12),
+      bottomLeft: Radius.circular(12),
+    );
     return GestureDetector(
       onTap: () => context.push('/notebook/$notebookId/memories?filter=${memory.type}'),
       child: Container(
@@ -843,23 +804,47 @@ class _MemoryPreviewTile extends StatelessWidget {
           children: [
             if (hasPhoto)
               ClipRRect(
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(12),
-                  bottomLeft: Radius.circular(12),
-                ),
-                child: CachedNetworkImage(
-                  imageUrl: memory.photoUrl!,
-                  width: 64,
-                  height: 64,
-                  fit: BoxFit.cover,
-                  placeholder: (_, __) => Container(
-                      width: 64, height: 64, color: AppColors.background),
-                  errorWidget: (_, __, ___) => Container(
+                borderRadius: thumbRadius,
+                child: Stack(
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: memory.photoUrl!,
                       width: 64,
                       height: 64,
-                      color: AppColors.background,
-                      child: const Icon(Icons.broken_image_outlined,
-                          color: AppColors.softGray, size: 20)),
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                          width: 64, height: 64, color: AppColors.background),
+                      errorWidget: (_, __, ___) => Container(
+                          width: 64,
+                          height: 64,
+                          color: AppColors.background,
+                          child: const Icon(Icons.broken_image_outlined,
+                              color: AppColors.softGray, size: 20)),
+                    ),
+                    // Petit badge ▶ si le souvenir porte aussi des vidéos.
+                    if (hasVideo)
+                      const Positioned(
+                        bottom: 3,
+                        right: 3,
+                        child: Icon(Icons.play_circle_fill,
+                            color: Colors.white, size: 18,
+                            shadows: [
+                              Shadow(color: Colors.black54, blurRadius: 3)
+                            ]),
+                      ),
+                  ],
+                ),
+              )
+            // Souvenir sans photo mais avec vidéo(s) : vignette placeholder.
+            else if (hasVideo)
+              ClipRRect(
+                borderRadius: thumbRadius,
+                child: Container(
+                  width: 64,
+                  height: 64,
+                  color: const Color(0xFF2D2D2D),
+                  child: const Icon(Icons.play_circle_outline,
+                      color: Colors.white, size: 26),
                 ),
               ),
             Expanded(

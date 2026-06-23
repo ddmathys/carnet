@@ -3,11 +3,13 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:video_player/video_player.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/video_service.dart';
 
 class MemoriesListScreen extends StatefulWidget {
   final String notebookId;
@@ -250,7 +252,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
 
   Future<void> _deleteMemory(MemoryModel memory) async {
     await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
-        audioUrl: memory.audioUrl);
+        audioUrl: memory.audioUrl, videoKeys: memory.videoKeys);
   }
 }
 
@@ -448,13 +450,19 @@ class _MemoryTile extends StatelessWidget {
     return result;
   }
 
-  void _openPhotos(BuildContext context, int index) {
+  /// Médias du souvenir dans l'ordre d'affichage : photos d'abord, puis vidéos.
+  List<_MediaItem> get _allMedia => [
+        for (final url in _allPhotos) _MediaItem.photo(url),
+        for (final key in memory.videoKeys) _MediaItem.video(key),
+      ];
+
+  void _openMedia(BuildContext context, int index) {
     Navigator.of(context).push(
       PageRouteBuilder(
         opaque: false,
         barrierColor: Colors.black87,
-        pageBuilder: (_, __, ___) =>
-            _PhotoViewer(urls: _allPhotos, initialIndex: index),
+        pageBuilder: (_, __, ___) => _MediaViewer(
+            items: _allMedia, initialIndex: index, memoryId: memory.id),
       ),
     );
   }
@@ -462,6 +470,7 @@ class _MemoryTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final photos = _allPhotos;
+    final videoCount = memory.videoKeys.length;
     return Dismissible(
       key: Key(memory.id),
       direction: DismissDirection.endToStart,
@@ -510,10 +519,10 @@ class _MemoryTile extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Photo thumbnail — tappable to open full-screen viewer
+              // Vignette média — photos et/ou vidéos, tap = visualiseur plein écran
               if (photos.isNotEmpty)
                 GestureDetector(
-                  onTap: () => _openPhotos(context, 0),
+                  onTap: () => _openMedia(context, 0),
                   child: Stack(
                     children: [
                       ClipRRect(
@@ -543,31 +552,50 @@ class _MemoryTile extends StatelessWidget {
                         Positioned(
                           bottom: 8,
                           right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: Colors.black54,
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                const Icon(Icons.photo_library_outlined,
-                                    size: 12, color: Colors.white),
-                                const SizedBox(width: 4),
-                                Text(
-                                  '${photos.length}',
-                                  style: const TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w600),
-                                ),
-                              ],
-                            ),
+                          child: _MediaCountBadge(
+                            icon: Icons.photo_library_outlined,
+                            count: photos.length,
+                          ),
+                        ),
+                      if (videoCount > 0)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: _MediaCountBadge(
+                            icon: Icons.play_circle_outline,
+                            count: videoCount,
                           ),
                         ),
                     ],
+                  ),
+                )
+              // Souvenir sans photo mais avec vidéo(s) : placeholder lisible
+              else if (videoCount > 0)
+                GestureDetector(
+                  onTap: () => _openMedia(context, 0),
+                  child: ClipRRect(
+                    borderRadius:
+                        const BorderRadius.vertical(top: Radius.circular(12)),
+                    child: Container(
+                      height: 160,
+                      width: double.infinity,
+                      color: const Color(0xFF2D2D2D),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.play_circle_outline,
+                              color: Colors.white, size: 44),
+                          const SizedBox(height: 6),
+                          Text(
+                            videoCount > 1
+                                ? '$videoCount vidéos'
+                                : '1 vidéo',
+                            style: const TextStyle(
+                                color: Colors.white, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
                 ),
               Padding(
@@ -651,30 +679,135 @@ class _MemoryTile extends StatelessWidget {
   }
 }
 
-class _PhotoViewer extends StatefulWidget {
-  final List<String> urls;
-  final int initialIndex;
-  const _PhotoViewer({required this.urls, required this.initialIndex});
-
-  @override
-  State<_PhotoViewer> createState() => _PhotoViewerState();
+/// Un média d'un souvenir : photo (URL directe) ou vidéo (clé R2 à résoudre).
+class _MediaItem {
+  final bool isVideo;
+  final String? photoUrl;
+  final String? videoKey;
+  const _MediaItem.photo(this.photoUrl)
+      : isVideo = false,
+        videoKey = null;
+  const _MediaItem.video(this.videoKey)
+      : isVideo = true,
+        photoUrl = null;
 }
 
-class _PhotoViewerState extends State<_PhotoViewer> {
+/// Petite pastille « icône + nombre » (compteur photos ou vidéos sur la vignette).
+class _MediaCountBadge extends StatelessWidget {
+  final IconData icon;
+  final int count;
+  const _MediaCountBadge({required this.icon, required this.count});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: Colors.black54,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 12, color: Colors.white),
+          const SizedBox(width: 4),
+          Text('$count',
+              style: const TextStyle(
+                  fontSize: 11,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+}
+
+/// Visualiseur plein écran : photos (zoom) et vidéos (lecture inline) dans une
+/// même galerie balayable. Les URLs vidéo sont reconstruites depuis les clés R2.
+class _MediaViewer extends StatefulWidget {
+  final List<_MediaItem> items;
+  final int initialIndex;
+  final String memoryId;
+  const _MediaViewer(
+      {required this.items,
+      required this.initialIndex,
+      required this.memoryId});
+
+  @override
+  State<_MediaViewer> createState() => _MediaViewerState();
+}
+
+class _MediaViewerState extends State<_MediaViewer> {
   late final PageController _page;
   late int _current;
+  // clé R2 → URL signée de lecture (absente = non autorisé / non résolu).
+  Map<String, String> _videoUrls = {};
+  bool _resolvingVideos = false;
 
   @override
   void initState() {
     super.initState();
     _current = widget.initialIndex;
     _page = PageController(initialPage: widget.initialIndex);
+    _resolveVideos();
+  }
+
+  Future<void> _resolveVideos() async {
+    final hasVideo = widget.items.any((m) => m.isVideo && m.videoKey != null);
+    if (!hasVideo) return;
+    setState(() => _resolvingVideos = true);
+    final urls = await VideoService.playbackUrls(widget.memoryId);
+    if (!mounted) return;
+    setState(() {
+      _videoUrls = urls;
+      _resolvingVideos = false;
+    });
   }
 
   @override
   void dispose() {
     _page.dispose();
     super.dispose();
+  }
+
+  Widget _buildPhoto(String url) => InteractiveViewer(
+        minScale: 1,
+        maxScale: 4,
+        child: Center(
+          child: CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.contain,
+            placeholder: (_, __) => const Center(
+              child: CircularProgressIndicator(color: Colors.white),
+            ),
+            errorWidget: (_, __, ___) => const Icon(
+              Icons.broken_image_outlined,
+              color: Colors.white54,
+              size: 64,
+            ),
+          ),
+        ),
+      );
+
+  Widget _buildVideo(_MediaItem item, bool active) {
+    if (_resolvingVideos && !_videoUrls.containsKey(item.videoKey)) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
+    }
+    final url = _videoUrls[item.videoKey];
+    if (url == null) {
+      return const Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, color: Colors.white54, size: 56),
+            SizedBox(height: 12),
+            Text('Vidéo indisponible',
+                style: TextStyle(color: Colors.white54)),
+          ],
+        ),
+      );
+    }
+    return _VideoPage(url: url, active: active);
   }
 
   @override
@@ -685,26 +818,14 @@ class _PhotoViewerState extends State<_PhotoViewer> {
         children: [
           PageView.builder(
             controller: _page,
-            itemCount: widget.urls.length,
+            itemCount: widget.items.length,
             onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (_, i) => InteractiveViewer(
-              minScale: 1,
-              maxScale: 4,
-              child: Center(
-                child: CachedNetworkImage(
-                  imageUrl: widget.urls[i],
-                  fit: BoxFit.contain,
-                  placeholder: (_, __) => const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  ),
-                  errorWidget: (_, __, ___) => const Icon(
-                    Icons.broken_image_outlined,
-                    color: Colors.white54,
-                    size: 64,
-                  ),
-                ),
-              ),
-            ),
+            itemBuilder: (_, i) {
+              final item = widget.items[i];
+              return item.isVideo
+                  ? _buildVideo(item, _current == i)
+                  : _buildPhoto(item.photoUrl!);
+            },
           ),
           // Close button
           SafeArea(
@@ -719,8 +840,8 @@ class _PhotoViewerState extends State<_PhotoViewer> {
               ),
             ),
           ),
-          // Page dots (only if multiple photos)
-          if (widget.urls.length > 1)
+          // Page dots (only if multiple media)
+          if (widget.items.length > 1)
             Positioned(
               bottom: 28,
               left: 0,
@@ -728,7 +849,7 @@ class _PhotoViewerState extends State<_PhotoViewer> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: List.generate(
-                  widget.urls.length,
+                  widget.items.length,
                   (i) => AnimatedContainer(
                     duration: const Duration(milliseconds: 150),
                     width: _current == i ? 18 : 6,
@@ -743,6 +864,111 @@ class _PhotoViewerState extends State<_PhotoViewer> {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// Lecteur vidéo inline (une page du visualiseur). Se met en pause dès qu'on
+/// balaie vers un autre média (`active` passe à false).
+class _VideoPage extends StatefulWidget {
+  final String url;
+  final bool active;
+  const _VideoPage({required this.url, required this.active});
+
+  @override
+  State<_VideoPage> createState() => _VideoPageState();
+}
+
+class _VideoPageState extends State<_VideoPage> {
+  VideoPlayerController? _controller;
+  bool _ready = false;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _init();
+  }
+
+  Future<void> _init() async {
+    try {
+      final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
+      await c.initialize();
+      if (!mounted) {
+        c.dispose();
+        return;
+      }
+      c.addListener(() {
+        if (mounted) setState(() {});
+      });
+      setState(() {
+        _controller = c;
+        _ready = true;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _error = true);
+    }
+  }
+
+  @override
+  void didUpdateWidget(_VideoPage old) {
+    super.didUpdateWidget(old);
+    // Pause automatique quand on quitte cette page du carrousel.
+    if (old.active && !widget.active) _controller?.pause();
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  void _togglePlay() {
+    final c = _controller;
+    if (c == null) return;
+    setState(() => c.value.isPlaying ? c.pause() : c.play());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_error) {
+      return const Center(
+        child: Icon(Icons.error_outline, color: Colors.white54, size: 56),
+      );
+    }
+    final c = _controller;
+    if (!_ready || c == null) {
+      return const Center(child: CircularProgressIndicator(color: Colors.white));
+    }
+    final playing = c.value.isPlaying;
+    return GestureDetector(
+      onTap: _togglePlay,
+      child: Center(
+        child: AspectRatio(
+          aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              VideoPlayer(c),
+              Align(
+                alignment: Alignment.bottomCenter,
+                child: VideoProgressIndicator(c, allowScrubbing: true),
+              ),
+              // Icône play visible à l'arrêt (tap n'importe où pour (re)lancer).
+              if (!playing)
+                Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.black38,
+                    shape: BoxShape.circle,
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: const Icon(Icons.play_arrow,
+                      color: Colors.white, size: 48),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }

@@ -366,8 +366,35 @@ class _PayButtonState extends State<_PayButton> {
         ]),
       );
     }
-    // Paiement en ligne désactivé → on reste sur la facture (« à réception »).
-    if (!AppConfig.paymentEnabled) return const SizedBox.shrink();
+    // Paiement en ligne désactivé (MVP) → on n'affiche pas de bouton « Payer »
+    // mais une note : règlement par TWINT après réception, détails par e-mail.
+    if (!AppConfig.paymentEnabled) {
+      return Container(
+        width: double.infinity,
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: AppColors.amber.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: AppColors.amber.withOpacity(0.4)),
+        ),
+        child: const Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('🧾', style: TextStyle(fontSize: 18)),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Paiement après réception : tu régleras par TWINT une fois le '
+                'livre reçu. Les détails te seront envoyés par e-mail.',
+                style: TextStyle(
+                    fontSize: 13, color: AppColors.textDark, height: 1.5),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: SizedBox(

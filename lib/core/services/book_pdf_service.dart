@@ -239,8 +239,12 @@ class BookPdfService {
       final isLastOfMemory = lastPhotoIndexByMemory[e.memory.id] == i;
       final hasAudio =
           e.memory.audioUrl != null && e.memory.audioUrl!.isNotEmpty;
+      final hasVideo = e.memory.videoKeys.isNotEmpty;
       final listenUrl = (isLastOfMemory && hasAudio && backendUrl.isNotEmpty)
           ? '$backendUrl/listen?m=${e.memory.id}'
+          : null;
+      final watchUrl = (isLastOfMemory && hasVideo && backendUrl.isNotEmpty)
+          ? '$backendUrl/watch?m=${e.memory.id}'
           : null;
       return _PhotoPageEntry(
         bytes: bytesByUrl[e.url]!,
@@ -250,6 +254,8 @@ class BookPdfService {
         locationComment: showCaption ? locationComments[e.memory.id] : null,
         isPortrait: isPortraitAt(i),
         listenUrl: listenUrl,
+        watchUrl: watchUrl,
+        videoCount: e.memory.videoKeys.length,
       );
     }
 
@@ -498,8 +504,8 @@ class BookPdfService {
         style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium)),
     );
 
-    // QR « écouter le mémo vocal » — placé au coin bas-gauche de la demi-page
-    pw.Widget qrBadge(String url) => pw.Container(
+    // QR média (écouter / regarder) — placé au coin bas-gauche de la demi-page
+    pw.Widget qrBadge(String url, String line1, String line2) => pw.Container(
       color: PdfColors.white,
       padding: const pw.EdgeInsets.fromLTRB(6, 6, 8, 6),
       child: pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
@@ -514,13 +520,28 @@ class BookPdfService {
           mainAxisSize: pw.MainAxisSize.min,
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
-            pw.Text('Écouter', style: pw.TextStyle(font: pB, fontSize: 7.5, color: cover)),
+            pw.Text(line1, style: pw.TextStyle(font: pB, fontSize: 7.5, color: cover)),
             pw.SizedBox(height: 1),
-            pw.Text('le mémo vocal',
+            pw.Text(line2,
               style: pw.TextStyle(font: pR, fontSize: 6.5, color: _textMedium)),
           ],
         ),
       ]),
+    );
+
+    // Empile les QR présents (vidéo au-dessus, audio en dessous).
+    int badgeCount(_PhotoPageEntry e) =>
+        (e.watchUrl != null ? 1 : 0) + (e.listenUrl != null ? 1 : 0);
+    pw.Widget mediaBadges(_PhotoPageEntry e) => pw.Column(
+      mainAxisSize: pw.MainAxisSize.min,
+      crossAxisAlignment: pw.CrossAxisAlignment.start,
+      children: [
+        if (e.watchUrl != null)
+          qrBadge(e.watchUrl!, 'Regarder',
+              e.videoCount > 1 ? 'les vidéos' : 'la vidéo'),
+        if (e.watchUrl != null && e.listenUrl != null) pw.SizedBox(height: 4),
+        if (e.listenUrl != null) qrBadge(e.listenUrl!, 'Écouter', 'le mémo vocal'),
+      ],
     );
 
     // ── Photo portrait en pleine page A4 (pas de coupe horizontale) ──
@@ -540,9 +561,9 @@ class BookPdfService {
           // Légende encadrée en haut (rentrée du fond perdu)
           pw.Positioned(top: _bleed, left: _bleed, right: _bleed,
               child: captionBox(e, maxChars: 240)),
-          // QR « écouter » en bas-gauche si présent
-          if (e.listenUrl != null)
-            pw.Positioned(bottom: _bleed, left: _bleed, child: qrBadge(e.listenUrl!)),
+          // QR média (vidéo / audio) en bas-gauche si présents
+          if (e.listenUrl != null || e.watchUrl != null)
+            pw.Positioned(bottom: _bleed, left: _bleed, child: mediaBadges(e)),
           // Numéro de page
           pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
         ],
@@ -587,11 +608,16 @@ class BookPdfService {
           pw.Positioned(top: halfH, left: _bleed, right: _bleed,
             child: captionBox(e1, maxChars: 120)),
 
-        // QR « écouter » en fin de souvenir, coin bas-gauche de la demi-page
-        if (e0.listenUrl != null)
-          pw.Positioned(top: halfH - 60, left: _bleed, child: qrBadge(e0.listenUrl!)),
-        if (e1 != null && e1.listenUrl != null)
-          pw.Positioned(bottom: _bleed, left: _bleed, child: qrBadge(e1.listenUrl!)),
+        // QR média en fin de souvenir, coin bas-gauche de la demi-page.
+        // La demi-page haute s'ancre juste au-dessus du séparateur (offset
+        // selon le nombre de badges pour ne pas mordre sur l'image du bas).
+        if (e0.listenUrl != null || e0.watchUrl != null)
+          pw.Positioned(
+              top: halfH - (badgeCount(e0) >= 2 ? 124 : 64),
+              left: _bleed,
+              child: mediaBadges(e0)),
+        if (e1 != null && (e1.listenUrl != null || e1.watchUrl != null))
+          pw.Positioned(bottom: _bleed, left: _bleed, child: mediaBadges(e1)),
 
         // Numéro de page
         pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
@@ -790,6 +816,30 @@ class BookPdfService {
     final listenUrl = (hasAudio && backendUrl.isNotEmpty)
         ? '$backendUrl/listen?m=${memory.id}'
         : null;
+    final hasVideo = memory.videoKeys.isNotEmpty;
+    final watchUrl = (hasVideo && backendUrl.isNotEmpty)
+        ? '$backendUrl/watch?m=${memory.id}'
+        : null;
+
+    // QR média (texte seul) : un bloc QR + libellé, réutilisé pour vidéo/audio.
+    pw.Widget mediaQr(String url, String line1, String line2) => pw.Row(children: [
+      pw.BarcodeWidget(
+        barcode: pw.Barcode.qrCode(),
+        data: url,
+        width: 56, height: 56,
+        color: _textDark,
+      ),
+      pw.SizedBox(width: 10),
+      pw.Column(
+        mainAxisSize: pw.MainAxisSize.min,
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          pw.Text(line1, style: pw.TextStyle(font: pB, fontSize: 9, color: cover)),
+          pw.SizedBox(height: 2),
+          pw.Text(line2, style: pw.TextStyle(font: pR, fontSize: 7.5, color: _textMedium)),
+        ],
+      ),
+    ]);
 
     return pw.Container(
       color: _cream,
@@ -827,28 +877,21 @@ class BookPdfService {
                 style: pw.TextStyle(font: pR, fontSize: 8, color: cover, fontStyle: pw.FontStyle.italic)),
             ]),
           ],
+          if (watchUrl != null) ...[
+            pw.SizedBox(height: 16),
+            mediaQr(
+                watchUrl,
+                memory.videoKeys.length > 1
+                    ? 'Regarder les vidéos'
+                    : 'Regarder la vidéo',
+                memory.videoKeys.length > 1
+                    ? 'Scanne ce code pour voir les vidéos.'
+                    : 'Scanne ce code pour voir la vidéo.'),
+          ],
           if (listenUrl != null) ...[
             pw.SizedBox(height: 16),
-            pw.Row(children: [
-              pw.BarcodeWidget(
-                barcode: pw.Barcode.qrCode(),
-                data: listenUrl,
-                width: 56, height: 56,
-                color: _textDark,
-              ),
-              pw.SizedBox(width: 10),
-              pw.Column(
-                mainAxisSize: pw.MainAxisSize.min,
-                crossAxisAlignment: pw.CrossAxisAlignment.start,
-                children: [
-                  pw.Text('Écouter le mémo vocal',
-                    style: pw.TextStyle(font: pB, fontSize: 9, color: cover)),
-                  pw.SizedBox(height: 2),
-                  pw.Text('Scanne ce code pour écouter le message.',
-                    style: pw.TextStyle(font: pR, fontSize: 7.5, color: _textMedium)),
-                ],
-              ),
-            ]),
+            mediaQr(listenUrl, 'Écouter le mémo vocal',
+                'Scanne ce code pour écouter le message.'),
           ],
           pw.SizedBox(height: 8),
           pw.Align(
@@ -1223,5 +1266,7 @@ class _PhotoPageEntry {
   final String? locationComment;
   final bool isPortrait;
   final String? listenUrl;
-  const _PhotoPageEntry({required this.bytes, required this.date, this.title, this.caption, this.locationComment, this.isPortrait = true, this.listenUrl});
+  final String? watchUrl;
+  final int videoCount;
+  const _PhotoPageEntry({required this.bytes, required this.date, this.title, this.caption, this.locationComment, this.isPortrait = true, this.listenUrl, this.watchUrl, this.videoCount = 0});
 }

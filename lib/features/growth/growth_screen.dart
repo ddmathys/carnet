@@ -7,15 +7,24 @@ import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/models/child_model.dart';
-import '../../core/models/milestone_model.dart';
+import '../../core/models/notebook_model.dart';
+import '../../core/models/memory_model.dart';
 import '../../core/data/growth_data.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/services/deepseek_service.dart';
 
+// Animaux disponibles en asset SVG (companion du carnet). Repli sur « bear ».
+const _animalAssets = {'bear', 'dino', 'fox', 'mouse', 'penguin', 'rabbit'};
+String _animalId(NotebookModel nb) =>
+    _animalAssets.contains(nb.companion) ? nb.companion! : 'bear';
+
+/// Écran Croissance / Suivi, branché sur le modèle Notebook/Memory.
+/// - Carnet « enfant » : courbe OMS (taille + poids) + toise visuelle.
+/// - Autres carnets : courbe de poids simple (suivi), sans percentiles.
+/// Les mesures sont des `memories` de type `taille_poids` du carnet.
 class GrowthScreen extends StatefulWidget {
-  final String childId;
-  const GrowthScreen({super.key, required this.childId});
+  final String notebookId;
+  const GrowthScreen({super.key, required this.notebookId});
 
   @override
   State<GrowthScreen> createState() => _GrowthScreenState();
@@ -41,20 +50,62 @@ class _GrowthScreenState extends State<GrowthScreen>
   Widget build(BuildContext context) {
     return FutureBuilder<DocumentSnapshot>(
       future: FirebaseFirestore.instance
-          .collection('children')
-          .doc(widget.childId)
+          .collection('notebooks')
+          .doc(widget.notebookId)
           .get(),
-      builder: (context, childSnap) {
-        if (!childSnap.hasData) {
+      builder: (context, nbSnap) {
+        if (!nbSnap.hasData) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }
-        final child = ChildModel.fromFirestore(childSnap.data!);
+        if (!nbSnap.data!.exists) {
+          return const Scaffold(
+              body: Center(child: Text('Carnet introuvable.')));
+        }
+        final notebook = NotebookModel.fromFirestore(nbSnap.data!);
+        final isChild = notebook.type == 'enfant';
+        final name = notebook.title;
+
+        final body = StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance
+              .collection('memories')
+              .where('notebookId', isEqualTo: widget.notebookId)
+              .where('type', isEqualTo: 'taille_poids')
+              .snapshots(),
+          builder: (context, snap) {
+            if (!snap.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final measures = snap.data!.docs
+                .map((d) => MemoryModel.fromFirestore(d))
+                .where((m) => m.heightCm != null || m.weightKg != null)
+                .toList()
+              ..sort((a, b) => a.date.compareTo(b.date));
+
+            if (measures.isEmpty) {
+              return _EmptyState(notebook: notebook, isChild: isChild);
+            }
+
+            if (!isChild) {
+              // Suivi adulte : courbe de poids simple + historique + saisie.
+              return _AdultWeightTab(notebook: notebook, measures: measures);
+            }
+
+            return TabBarView(
+              controller: _tabController,
+              children: [
+                _CurvesTab(notebook: notebook, measures: measures),
+                _ToiseTab(notebook: notebook, measures: measures),
+              ],
+            );
+          },
+        );
 
         return Scaffold(
           backgroundColor: AppColors.cream,
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: () => context.push('/child/${widget.childId}/add-milestone'),
+            onPressed: () =>
+                context.push('/notebook/${widget.notebookId}/add-memory'),
             backgroundColor: AppColors.sage,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.add),
@@ -67,63 +118,33 @@ class _GrowthScreenState extends State<GrowthScreen>
               icon: const Icon(Icons.arrow_back),
               onPressed: () => context.pop(),
             ),
-            title: Text('Croissance de ${child.firstName}'),
-            bottom: TabBar(
-              controller: _tabController,
-              labelColor: AppColors.sage,
-              unselectedLabelColor: AppColors.softGray,
-              indicatorColor: AppColors.sage,
-              tabs: const [
-                Tab(icon: Icon(Icons.show_chart), text: 'Courbes'),
-                Tab(icon: Icon(Icons.straighten), text: 'Toise'),
-              ],
-            ),
+            title: Text(isChild ? 'Croissance de $name' : 'Suivi du poids'),
+            bottom: isChild
+                ? TabBar(
+                    controller: _tabController,
+                    labelColor: AppColors.sage,
+                    unselectedLabelColor: AppColors.softGray,
+                    indicatorColor: AppColors.sage,
+                    tabs: const [
+                      Tab(icon: Icon(Icons.show_chart), text: 'Courbes'),
+                      Tab(icon: Icon(Icons.straighten), text: 'Toise'),
+                    ],
+                  )
+                : null,
           ),
-          body: StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('milestones')
-                .where('childId', isEqualTo: widget.childId)
-                .where('type', isEqualTo: 'taille_poids')
-                .snapshots(),
-            builder: (context, snap) {
-              if (!snap.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              final milestones = snap.data!.docs
-                  .map((d) => MilestoneModel.fromFirestore(d))
-                  .where((m) => m.heightCm != null || m.weightKg != null)
-                  .toList()
-                ..sort((a, b) => a.date.compareTo(b.date));
-
-              if (milestones.isEmpty) {
-                return _EmptyState(child: child, childId: widget.childId);
-              }
-
-              return TabBarView(
-                controller: _tabController,
-                children: [
-                  _CurvesTab(child: child, milestones: milestones),
-                  _ToiseTab(
-                    child: child,
-                    milestones: milestones,
-                    childId: widget.childId,
-                  ),
-                ],
-              );
-            },
-          ),
+          body: body,
         );
       },
     );
   }
 }
 
-// ─── Curves Tab ───────────────────────────────────────────────────────────────
+// ─── Curves Tab (enfant) ───────────────────────────────────────────────────────
 
 class _CurvesTab extends StatefulWidget {
-  final ChildModel child;
-  final List<MilestoneModel> milestones;
-  const _CurvesTab({required this.child, required this.milestones});
+  final NotebookModel notebook;
+  final List<MemoryModel> measures;
+  const _CurvesTab({required this.notebook, required this.measures});
 
   @override
   State<_CurvesTab> createState() => _CurvesTabState();
@@ -145,13 +166,13 @@ class _CurvesTabState extends State<_CurvesTab> {
           ),
           const SizedBox(height: 20),
           _MultiPointChart(
-            child: widget.child,
-            milestones: widget.milestones,
+            notebook: widget.notebook,
+            measures: widget.measures,
             showWeight: _showWeight,
           ),
           const SizedBox(height: 24),
           _MeasurementList(
-            milestones: widget.milestones,
+            measures: widget.measures,
             showWeight: _showWeight,
           ),
           const SizedBox(height: 20),
@@ -217,29 +238,34 @@ class _ToggleBar extends StatelessWidget {
 }
 
 class _MultiPointChart extends StatelessWidget {
-  final ChildModel child;
-  final List<MilestoneModel> milestones;
+  final NotebookModel notebook;
+  final List<MemoryModel> measures;
   final bool showWeight;
 
   const _MultiPointChart({
-    required this.child,
-    required this.milestones,
+    required this.notebook,
+    required this.measures,
     required this.showWeight,
   });
 
   @override
   Widget build(BuildContext context) {
-    final refData = getGrowthData(gender: child.gender, isWeight: showWeight);
+    final gender = notebook.gender ?? 'boy';
+    // Date de naissance : si absente, on retombe sur la 1re mesure (axe d'âge
+    // approximatif mais sans plantage).
+    final birth = notebook.birthdate ?? measures.first.date;
+
+    final refData = getGrowthData(gender: gender, isWeight: showWeight);
     final p3 = refData.map((p) => FlSpot(p.month.toDouble(), p.p3)).toList();
     final p50 = refData.map((p) => FlSpot(p.month.toDouble(), p.p50)).toList();
     final p97 = refData.map((p) => FlSpot(p.month.toDouble(), p.p97)).toList();
 
-    final childSpots = milestones
+    final childSpots = measures
         .where((m) => showWeight ? m.weightKg != null : m.heightCm != null)
         .map((m) {
-          final ageM = ((m.date.year - child.birthDate.year) * 12 +
+          final ageM = ((m.date.year - birth.year) * 12 +
                   m.date.month -
-                  child.birthDate.month)
+                  birth.month)
               .toDouble()
               .clamp(0.0, double.infinity);
           return FlSpot(ageM, showWeight ? m.weightKg! : m.heightCm!);
@@ -248,13 +274,11 @@ class _MultiPointChart extends StatelessWidget {
 
     final unit = showWeight ? 'kg' : 'cm';
 
-    // X axis: adapt to actual child age, minimum 12 months shown
     final maxChildAge = childSpots.isEmpty
         ? 24.0
         : childSpots.map((s) => s.x).reduce(max);
     final maxX = (maxChildAge * 1.05).ceilToDouble().clamp(12.0, double.infinity);
 
-    // Y axis: child values + WHO reference (capped at their max month)
     final refYs = [...p3.map((s) => s.y), ...p97.map((s) => s.y)];
     final childYs = childSpots.map((s) => s.y);
     final allYs = [...refYs, ...childYs];
@@ -309,7 +333,7 @@ class _MultiPointChart extends StatelessWidget {
               ),
               const Spacer(),
               Text(
-                child.gender == 'boy' ? '👦' : '👧',
+                gender == 'boy' ? '👦' : '👧',
                 style: const TextStyle(fontSize: 16),
               ),
             ],
@@ -425,20 +449,180 @@ class _MultiPointChart extends StatelessWidget {
       );
 }
 
+// ─── Suivi de poids (adulte / autres carnets) ──────────────────────────────────
+
+class _AdultWeightTab extends StatelessWidget {
+  final NotebookModel notebook;
+  final List<MemoryModel> measures;
+  const _AdultWeightTab({required this.notebook, required this.measures});
+
+  @override
+  Widget build(BuildContext context) {
+    final wMeasures =
+        measures.where((m) => m.weightKg != null).toList();
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _SimpleWeightChart(measures: wMeasures),
+          const SizedBox(height: 24),
+          _MeasurementList(measures: measures, showWeight: true),
+          const SizedBox(height: 20),
+          _AddMeasureButton(notebook: notebook, measures: measures),
+        ],
+      ),
+    );
+  }
+}
+
+/// Courbe de poids simple (sans percentiles OMS) : poids dans le temps.
+class _SimpleWeightChart extends StatelessWidget {
+  final List<MemoryModel> measures;
+  const _SimpleWeightChart({required this.measures});
+
+  @override
+  Widget build(BuildContext context) {
+    if (measures.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(24),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade100),
+        ),
+        child: Center(
+          child: Text('Aucun poids enregistré',
+              style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+        ),
+      );
+    }
+    // X = ordre chronologique (0,1,2…), Y = poids. Labels de date sous l'axe.
+    final spots = <FlSpot>[];
+    for (var i = 0; i < measures.length; i++) {
+      spots.add(FlSpot(i.toDouble(), measures[i].weightKg!));
+    }
+    final ys = measures.map((m) => m.weightKg!);
+    final minY = (ys.reduce(min) - 2).clamp(0.0, double.infinity);
+    final maxY = ys.reduce(max) + 2;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          )
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Poids (kg) dans le temps',
+            style: TextStyle(
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+                color: AppColors.textDark),
+          ),
+          const SizedBox(height: 14),
+          SizedBox(
+            height: 220,
+            child: LineChart(
+              LineChartData(
+                lineBarsData: [
+                  LineChartBarData(
+                    spots: spots,
+                    isCurved: spots.length > 1,
+                    color: AppColors.sage,
+                    barWidth: 2.5,
+                    dotData: FlDotData(
+                      show: true,
+                      getDotPainter: (_, __, ___, ____) => FlDotCirclePainter(
+                        radius: 5,
+                        color: AppColors.sage,
+                        strokeWidth: 2,
+                        strokeColor: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+                minX: 0,
+                maxX: (measures.length - 1).toDouble().clamp(1.0, double.infinity),
+                minY: minY,
+                maxY: maxY,
+                gridData: FlGridData(
+                  show: true,
+                  drawVerticalLine: false,
+                  getDrawingHorizontalLine: (_) =>
+                      FlLine(color: Colors.grey.shade100, strokeWidth: 1),
+                ),
+                borderData: FlBorderData(show: false),
+                titlesData: FlTitlesData(
+                  leftTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      reservedSize: 40,
+                      getTitlesWidget: (v, _) => Text(
+                        v.toStringAsFixed(0),
+                        style: TextStyle(
+                            fontSize: 9, color: Colors.grey.shade400),
+                      ),
+                    ),
+                  ),
+                  bottomTitles: AxisTitles(
+                    sideTitles: SideTitles(
+                      showTitles: true,
+                      interval: 1,
+                      getTitlesWidget: (v, _) {
+                        final i = v.toInt();
+                        if (i < 0 || i >= measures.length) {
+                          return const SizedBox.shrink();
+                        }
+                        final d = measures[i].date;
+                        return Padding(
+                          padding: const EdgeInsets.only(top: 4),
+                          child: Text(
+                            '${d.day}/${d.month}',
+                            style: TextStyle(
+                                fontSize: 8, color: Colors.grey.shade400),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  rightTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                  topTitles: const AxisTitles(
+                      sideTitles: SideTitles(showTitles: false)),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _MeasurementList extends StatelessWidget {
-  final List<MilestoneModel> milestones;
+  final List<MemoryModel> measures;
   final bool showWeight;
 
-  const _MeasurementList({required this.milestones, required this.showWeight});
+  const _MeasurementList({required this.measures, required this.showWeight});
 
-  String _label(MilestoneModel m) =>
+  String _label(MemoryModel m) =>
       m.dateLabel ??
       formatDateWithPrecision(
           m.date, datePrecisionFromString(m.datePrecision));
 
   @override
   Widget build(BuildContext context) {
-    final items = milestones
+    final items = measures
         .where((m) => showWeight ? m.weightKg != null : m.heightCm != null)
         .toList()
         .reversed
@@ -562,34 +746,29 @@ class _MeasurementList extends StatelessWidget {
   }
 }
 
-// ─── Toise Tab ────────────────────────────────────────────────────────────────
+// ─── Toise Tab (enfant) ─────────────────────────────────────────────────────────
 
 class _ToiseTab extends StatelessWidget {
-  final ChildModel child;
-  final List<MilestoneModel> milestones;
-  final String childId;
+  final NotebookModel notebook;
+  final List<MemoryModel> measures;
 
-  const _ToiseTab({
-    required this.child,
-    required this.milestones,
-    required this.childId,
-  });
+  const _ToiseTab({required this.notebook, required this.measures});
 
   @override
   Widget build(BuildContext context) {
-    final hMeasurements = milestones
+    final hMeasures = measures
         .where((m) => m.heightCm != null)
         .toList()
       ..sort((a, b) => a.date.compareTo(b.date));
 
     final latestHeight =
-        hMeasurements.isNotEmpty ? hMeasurements.last.heightCm! : null;
+        hMeasures.isNotEmpty ? hMeasures.last.heightCm! : null;
+    final name = notebook.title;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
       child: Column(
         children: [
-          // Header card
           if (latestHeight != null)
             Container(
               padding: const EdgeInsets.all(20),
@@ -621,7 +800,7 @@ class _ToiseTab extends StatelessWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Dernière mesure de ${child.firstName}',
+                        'Dernière mesure de $name',
                         style: TextStyle(
                             fontSize: 13, color: Colors.grey.shade600),
                       ),
@@ -629,25 +808,19 @@ class _ToiseTab extends StatelessWidget {
                   ),
                   const Spacer(),
                   SvgPicture.asset(
-                    'assets/images/animals/${child.animalId}.svg',
+                    'assets/images/animals/${_animalId(notebook)}.svg',
                     width: 80,
                   ),
                 ],
               ),
             ),
           const SizedBox(height: 20),
-          // Toise visuelle
-          if (hMeasurements.isNotEmpty)
-            _ToiseVisual(child: child, measurements: hMeasurements)
+          if (hMeasures.isNotEmpty)
+            _ToiseVisual(notebook: notebook, measurements: hMeasures)
           else
-            _NoHeightHint(childName: child.firstName),
+            _NoHeightHint(name: name),
           const SizedBox(height: 20),
-          // Bouton photo
-          _PhotoButton(
-            child: child,
-            childId: childId,
-            milestones: milestones,
-          ),
+          _AddMeasureButton(notebook: notebook, measures: measures),
         ],
       ),
     );
@@ -655,8 +828,8 @@ class _ToiseTab extends StatelessWidget {
 }
 
 class _NoHeightHint extends StatelessWidget {
-  final String childName;
-  const _NoHeightHint({required this.childName});
+  final String name;
+  const _NoHeightHint({required this.name});
 
   @override
   Widget build(BuildContext context) {
@@ -681,7 +854,7 @@ class _NoHeightHint extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            'Ajoute une première mesure via le bouton photo ci-dessous',
+            'Ajoute une première mesure via le bouton ci-dessous',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
           ),
@@ -694,10 +867,10 @@ class _NoHeightHint extends StatelessWidget {
 // ─── Toise Visuelle ────────────────────────────────────────────────────────────
 
 class _ToiseVisual extends StatelessWidget {
-  final ChildModel child;
-  final List<MilestoneModel> measurements;
+  final NotebookModel notebook;
+  final List<MemoryModel> measurements;
 
-  const _ToiseVisual({required this.child, required this.measurements});
+  const _ToiseVisual({required this.notebook, required this.measurements});
 
   @override
   Widget build(BuildContext context) {
@@ -749,7 +922,7 @@ class _ToiseVisual extends StatelessWidget {
                           size: Size(w, canvasH),
                           painter: _ToisePainter(
                             measurements: measurements,
-                            childName: child.firstName,
+                            childName: notebook.title,
                             minH: minDisplayH,
                             maxH: maxDisplayH,
                             scale: scale,
@@ -760,7 +933,7 @@ class _ToiseVisual extends StatelessWidget {
                           right: 0,
                           bottom: 0,
                           child: SvgPicture.asset(
-                            'assets/images/animals/${child.animalId}.svg',
+                            'assets/images/animals/${_animalId(notebook)}.svg',
                             width: animalAreaW,
                             height: animalH,
                             fit: BoxFit.contain,
@@ -781,7 +954,7 @@ class _ToiseVisual extends StatelessWidget {
 }
 
 class _ToisePainter extends CustomPainter {
-  final List<MilestoneModel> measurements;
+  final List<MemoryModel> measurements;
   final String childName;
   final double minH;
   final double maxH;
@@ -813,12 +986,10 @@ class _ToisePainter extends CustomPainter {
     final lineEndX = size.width - animalAreaW - 8;
     final labelStartX = _rulerStripW + 8.0;
 
-    // Ruler strip background
     canvas.drawRect(
       Rect.fromLTWH(0, 0, _rulerStripW, size.height),
       Paint()..color = const Color(0xFFEDE3D0),
     );
-    // Ruler right border
     canvas.drawLine(
       Offset(_rulerStripW, 0),
       Offset(_rulerStripW, size.height),
@@ -827,7 +998,6 @@ class _ToisePainter extends CustomPainter {
         ..strokeWidth = 1.5,
     );
 
-    // Tick marks on ruler
     for (double h = minH; h <= maxH; h += 5) {
       final y = _y(h);
       final isMajor = h % 10 == 0;
@@ -847,7 +1017,6 @@ class _ToisePainter extends CustomPainter {
       }
     }
 
-    // Measurement lines + labels
     for (int i = 0; i < measurements.length; i++) {
       final m = measurements[i];
       final h = m.heightCm!;
@@ -855,7 +1024,6 @@ class _ToisePainter extends CustomPainter {
       final isLatest = i == measurements.length - 1;
       final color = _palette[i % _palette.length];
 
-      // Horizontal line
       if (isLatest) {
         canvas.drawLine(
           Offset(_rulerStripW, y),
@@ -876,13 +1044,11 @@ class _ToisePainter extends CustomPainter {
         );
       }
 
-      // Dot on ruler
       canvas.drawCircle(
           Offset(_rulerStripW, y), isLatest ? 7.0 : 5.5, Paint()..color = color);
       canvas.drawCircle(
           Offset(_rulerStripW, y), isLatest ? 3.2 : 2.4, Paint()..color = Colors.white);
 
-      // Labels
       final valStr = '${h.toStringAsFixed(0)} cm';
       final dateStr = m.dateLabel ?? _fmt(m.date);
       _text(canvas, valStr, Offset(labelStartX, y - 18),
@@ -963,18 +1129,13 @@ class _ToisePainter extends CustomPainter {
       old.animalAreaW != animalAreaW;
 }
 
-// ─── Bouton Photo ─────────────────────────────────────────────────────────────
+// ─── Bouton ajout de mesure ─────────────────────────────────────────────────────
 
-class _PhotoButton extends StatelessWidget {
-  final ChildModel child;
-  final String childId;
-  final List<MilestoneModel> milestones;
+class _AddMeasureButton extends StatelessWidget {
+  final NotebookModel notebook;
+  final List<MemoryModel> measures;
 
-  const _PhotoButton({
-    required this.child,
-    required this.childId,
-    required this.milestones,
-  });
+  const _AddMeasureButton({required this.notebook, required this.measures});
 
   @override
   Widget build(BuildContext context) {
@@ -996,10 +1157,10 @@ class _PhotoButton extends StatelessWidget {
         child: const Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.camera_alt_outlined, color: Colors.white, size: 22),
+            Icon(Icons.add, color: Colors.white, size: 22),
             SizedBox(width: 10),
             Text(
-              'Ajouter une mesure par photo',
+              'Nouvelle mesure',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -1017,38 +1178,31 @@ class _PhotoButton extends StatelessWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _PhotoMeasureSheet(
-        child: child,
-        childId: childId,
-        previousMeasurements: milestones,
+      builder: (_) => _MeasureSheet(
+        notebook: notebook,
+        previousMeasures: measures,
       ),
     );
   }
 }
 
-// ─── Sheet Photo + Commentaire + IA ──────────────────────────────────────────
+// ─── Sheet : commentaire + IA → mesure (enregistrée dans memories) ──────────────
 
 enum _SheetState { composing, analyzing, result }
 
-class _PhotoMeasureSheet extends StatefulWidget {
-  final ChildModel child;
-  final String childId;
-  final List<MilestoneModel> previousMeasurements;
+class _MeasureSheet extends StatefulWidget {
+  final NotebookModel notebook;
+  final List<MemoryModel> previousMeasures;
 
-  const _PhotoMeasureSheet({
-    required this.child,
-    required this.childId,
-    required this.previousMeasurements,
-  });
+  const _MeasureSheet({required this.notebook, required this.previousMeasures});
 
   @override
-  State<_PhotoMeasureSheet> createState() => _PhotoMeasureSheetState();
+  State<_MeasureSheet> createState() => _MeasureSheetState();
 }
 
-class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
+class _MeasureSheetState extends State<_MeasureSheet> {
   _SheetState _state = _SheetState.composing;
 
-  XFile? _photo;
   Uint8List? _photoBytes;
   GrowthAnalysis? _analysis;
   bool _aiSuccess = false;
@@ -1058,6 +1212,8 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
   final _heightCtrl = TextEditingController();
   final _weightCtrl = TextEditingController();
   DateTime _date = DateTime.now();
+
+  bool get _isChild => widget.notebook.type == 'enfant';
 
   @override
   void dispose() {
@@ -1078,7 +1234,6 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
     if (xfile == null || !mounted) return;
     final bytes = await xfile.readAsBytes();
     setState(() {
-      _photo = xfile;
       _photoBytes = bytes;
     });
   }
@@ -1094,8 +1249,8 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
     final service = DeepSeekService();
     final result = await service.analyzeGrowthComment(
       comment: comment,
-      childName: widget.child.firstName,
-      previousMeasurements: widget.previousMeasurements,
+      childName: widget.notebook.title,
+      previousMeasurements: const [],
     );
 
     if (!mounted) return;
@@ -1130,18 +1285,19 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
 
     setState(() => _saving = true);
     try {
-      await FirebaseFirestore.instance.collection('milestones').add({
-        'childId': widget.childId,
+      // Mesure = souvenir de type taille_poids dans le carnet courant.
+      await FirebaseFirestore.instance.collection('memories').add({
+        'notebookId': widget.notebook.id,
         'type': 'taille_poids',
         'subType': null,
         'date': Timestamp.fromDate(_date),
         'datePrecision': 'exact',
         'dateLabel': null,
         'rawContent': comment.isNotEmpty ? comment : parts.join(', '),
-        'aiNarration': _analysis?.notes.isNotEmpty == true
-            ? _analysis!.notes
-            : null,
+        'aiNarration':
+            _analysis?.notes.isNotEmpty == true ? _analysis!.notes : null,
         'photoUrl': null,
+        'mediaUrls': <String>[],
         'weightKg': weightKg,
         'heightCm': heightCm,
         'createdAt': Timestamp.now(),
@@ -1156,7 +1312,7 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
     final picked = await showDatePicker(
       context: context,
       initialDate: _date,
-      firstDate: widget.child.birthDate,
+      firstDate: widget.notebook.birthdate ?? DateTime(2000),
       lastDate: DateTime.now(),
     );
     if (picked != null) setState(() => _date = picked);
@@ -1201,8 +1357,6 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
     );
   }
 
-  // ── Étape 1 : Photo + commentaire ─────────────────────────────────────────
-
   Widget _buildComposing() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1218,13 +1372,13 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Décris la mesure en texte libre — l\'IA extrait la taille et le poids pour toi.',
+          _isChild
+              ? 'Décris la mesure en texte libre — l\'IA extrait la taille et le poids pour toi.'
+              : 'Décris la mesure en texte libre — l\'IA extrait le poids pour toi.',
           style: TextStyle(
               fontSize: 13, color: Colors.grey.shade500, height: 1.5),
         ),
         const SizedBox(height: 20),
-
-        // Zone photo optionnelle
         GestureDetector(
           onTap: _takePhoto,
           child: AnimatedContainer(
@@ -1251,8 +1405,7 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
                           top: 8,
                           right: 8,
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => _photoBytes = null),
+                            onTap: () => setState(() => _photoBytes = null),
                             child: Container(
                               padding: const EdgeInsets.all(4),
                               decoration: const BoxDecoration(
@@ -1261,32 +1414,6 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
                               ),
                               child: const Icon(Icons.close,
                                   color: Colors.white, size: 16),
-                            ),
-                          ),
-                        ),
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: GestureDetector(
-                            onTap: _takePhoto,
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: Colors.black54,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(Icons.camera_alt_outlined,
-                                      color: Colors.white, size: 14),
-                                  SizedBox(width: 4),
-                                  Text('Changer',
-                                      style: TextStyle(
-                                          color: Colors.white, fontSize: 11)),
-                                ],
-                              ),
                             ),
                           ),
                         ),
@@ -1309,18 +1436,17 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           ),
         ),
         const SizedBox(height: 16),
-
-        // Commentaire
         TextField(
           controller: _commentCtrl,
           minLines: 3,
           maxLines: 5,
           onChanged: (_) => setState(() {}),
           decoration: InputDecoration(
-            hintText:
-                'Ex : "Nathan mesure 78 cm et pèse 11,5 kg chez le pédiatre"\nOu : "toise à la maison, 80 cm"',
-            hintStyle:
-                TextStyle(color: Colors.grey.shade400, fontSize: 13, height: 1.5),
+            hintText: _isChild
+                ? 'Ex : "Nathan mesure 78 cm et pèse 11,5 kg chez le pédiatre"'
+                : 'Ex : "Je pèse 72,3 kg ce matin"',
+            hintStyle: TextStyle(
+                color: Colors.grey.shade400, fontSize: 13, height: 1.5),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: BorderSide(color: Colors.grey.shade200),
@@ -1331,8 +1457,7 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide:
-                  const BorderSide(color: AppColors.sage, width: 2),
+              borderSide: const BorderSide(color: AppColors.sage, width: 2),
             ),
             filled: true,
             fillColor: Colors.grey.shade50,
@@ -1340,8 +1465,6 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           ),
         ),
         const SizedBox(height: 20),
-
-        // Bouton Envoyer
         ElevatedButton.icon(
           onPressed: _canSend ? _send : null,
           style: ElevatedButton.styleFrom(
@@ -1362,8 +1485,6 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
     );
   }
 
-  // ── Étape 2 : Analyse en cours ────────────────────────────────────────────
-
   Widget _buildAnalyzing() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -1381,7 +1502,7 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           ),
         SizedBox(height: _photoBytes != null ? 28 : 60),
         SvgPicture.asset(
-          'assets/images/animals/${widget.child.animalId}.svg',
+          'assets/images/animals/${_animalId(widget.notebook)}.svg',
           width: 90,
         ),
         const SizedBox(height: 20),
@@ -1395,22 +1516,14 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
             fontWeight: FontWeight.w600,
           ),
         ),
-        const SizedBox(height: 6),
-        Text(
-          'Extraction des mesures pour ${widget.child.firstName}',
-          style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-        ),
       ],
     );
   }
-
-  // ── Étape 3 : Résultat éditable ───────────────────────────────────────────
 
   Widget _buildResult() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // Photo si prise
         if (_photoBytes != null) ...[
           ClipRRect(
             borderRadius: BorderRadius.circular(14),
@@ -1423,18 +1536,13 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           ),
           const SizedBox(height: 14),
         ],
-
-        // Badge IA
         Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: _aiSuccess ? Colors.green.shade50 : Colors.orange.shade50,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: _aiSuccess
-                  ? Colors.green.shade200
-                  : Colors.orange.shade200,
+              color: _aiSuccess ? Colors.green.shade200 : Colors.orange.shade200,
             ),
           ),
           child: Row(
@@ -1442,9 +1550,8 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
               Icon(
                 _aiSuccess ? Icons.auto_awesome : Icons.edit_note,
                 size: 16,
-                color: _aiSuccess
-                    ? Colors.green.shade700
-                    : Colors.orange.shade700,
+                color:
+                    _aiSuccess ? Colors.green.shade700 : Colors.orange.shade700,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -1466,8 +1573,6 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           ),
         ),
         const SizedBox(height: 20),
-
-        // Champs taille / poids
         const Text(
           'Valeurs mesurées',
           style: TextStyle(
@@ -1479,15 +1584,17 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
         const SizedBox(height: 12),
         Row(
           children: [
-            Expanded(
-              child: _MeasureField(
-                controller: _heightCtrl,
-                label: 'Taille',
-                unit: 'cm',
-                icon: Icons.height,
+            if (_isChild) ...[
+              Expanded(
+                child: _MeasureField(
+                  controller: _heightCtrl,
+                  label: 'Taille',
+                  unit: 'cm',
+                  icon: Icons.height,
+                ),
               ),
-            ),
-            const SizedBox(width: 12),
+              const SizedBox(width: 12),
+            ],
             Expanded(
               child: _MeasureField(
                 controller: _weightCtrl,
@@ -1499,13 +1606,10 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           ],
         ),
         const SizedBox(height: 14),
-
-        // Date
         GestureDetector(
           onTap: _pickDate,
           child: Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
               border: Border.all(color: Colors.grey.shade200),
               borderRadius: BorderRadius.circular(12),
@@ -1519,20 +1623,16 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
                 Text(
                   '${_date.day.toString().padLeft(2, '0')}/${_date.month.toString().padLeft(2, '0')}/${_date.year}',
                   style: const TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textDark),
+                      fontWeight: FontWeight.w600, color: AppColors.textDark),
                 ),
                 const Spacer(),
                 Text('Modifier',
-                    style: TextStyle(
-                        fontSize: 12, color: Colors.grey.shade400)),
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
               ],
             ),
           ),
         ),
         const SizedBox(height: 24),
-
-        // Enregistrer
         ElevatedButton(
           onPressed: _saving ? null : _save,
           style: ElevatedButton.styleFrom(
@@ -1551,13 +1651,10 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
                 )
               : const Text(
                   'Enregistrer la mesure',
-                  style:
-                      TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                 ),
         ),
         const SizedBox(height: 10),
-
-        // Recommencer
         TextButton.icon(
           onPressed: () => setState(() {
             _state = _SheetState.composing;
@@ -1567,8 +1664,7 @@ class _PhotoMeasureSheetState extends State<_PhotoMeasureSheet> {
           }),
           icon: const Icon(Icons.arrow_back, size: 16),
           label: const Text('Modifier le commentaire'),
-          style:
-              TextButton.styleFrom(foregroundColor: Colors.grey.shade500),
+          style: TextButton.styleFrom(foregroundColor: Colors.grey.shade500),
         ),
       ],
     );
@@ -1629,9 +1725,9 @@ class _MeasureField extends StatelessWidget {
 // ─── Empty State ───────────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
-  final ChildModel child;
-  final String childId;
-  const _EmptyState({required this.child, required this.childId});
+  final NotebookModel notebook;
+  final bool isChild;
+  const _EmptyState({required this.notebook, required this.isChild});
 
   @override
   Widget build(BuildContext context) {
@@ -1642,12 +1738,14 @@ class _EmptyState extends StatelessWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             SvgPicture.asset(
-              'assets/images/animals/${child.animalId}.svg',
+              'assets/images/animals/${_animalId(notebook)}.svg',
               width: 120,
             ),
             const SizedBox(height: 24),
             Text(
-              'Aucune mesure enregistrée',
+              isChild
+                  ? 'Aucune mesure enregistrée'
+                  : 'Aucun poids enregistré',
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey.shade500,
@@ -1656,7 +1754,9 @@ class _EmptyState extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Ajoute la première mesure de ${child.firstName}\navec le bouton photo !',
+              isChild
+                  ? 'Ajoute la première mesure de ${notebook.title}'
+                  : 'Ajoute un premier poids pour suivre l\'évolution',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
             ),
@@ -1666,15 +1766,14 @@ class _EmptyState extends StatelessWidget {
                 context: context,
                 isScrollControlled: true,
                 backgroundColor: Colors.transparent,
-                builder: (_) => _PhotoMeasureSheet(
-                  child: child,
-                  childId: childId,
-                  previousMeasurements: const [],
+                builder: (_) => _MeasureSheet(
+                  notebook: notebook,
+                  previousMeasures: const [],
                 ),
               ),
               child: Container(
-                padding: const EdgeInsets.symmetric(
-                    vertical: 14, horizontal: 24),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 14, horizontal: 24),
                 decoration: BoxDecoration(
                   color: AppColors.sage,
                   borderRadius: BorderRadius.circular(14),
@@ -1682,11 +1781,10 @@ class _EmptyState extends StatelessWidget {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.camera_alt_outlined,
-                        color: Colors.white, size: 20),
+                    Icon(Icons.add, color: Colors.white, size: 20),
                     SizedBox(width: 8),
                     Text(
-                      'Prendre une photo',
+                      'Ajouter une mesure',
                       style: TextStyle(
                           color: Colors.white,
                           fontWeight: FontWeight.w700,

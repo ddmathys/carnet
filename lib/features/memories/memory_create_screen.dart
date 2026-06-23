@@ -17,11 +17,13 @@ import '../../core/models/draft_milestone.dart';
 import '../../core/services/deepseek_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/quota_service.dart';
+import '../../core/services/video_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/constants/notebook_types.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/widgets/date_mask_field.dart';
+import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../milestones/widgets/growth_curve_chart.dart';
 import '../milestones/widgets/flexible_date_sheet.dart';
 
@@ -67,6 +69,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool _audioRemoved = false; // l'utilisateur a supprimé l'audio existant
   int? _audioDurationMs;
   DateTime? _recordStartedAt;
+
+  // Vidéos souvenir (jusqu'à maxVideosPerMemory clips ≤ 60 s, stockés sur R2).
+  final List<String> _localVideoPaths = []; // nouvelles vidéos non uploadées
+  final List<int?> _localVideoDurations = []; // parallèle à _localVideoPaths
+  final List<String> _existingVideoKeys = []; // clés R2 conservées (édition)
+  final List<int> _existingVideoDurations = []; // parallèle à _existingVideoKeys
+  final List<String> _removedVideoKeys = []; // clés existantes supprimées
+  bool _preparingVideo = false; // sélection/contrôle de durée en cours
 
   // Step 1: form
   String? _selectedCategory;
@@ -169,6 +179,23 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _existingPhotoUrls.addAll(existing);
       _existingAudioUrl = data['audioUrl'] as String?;
       _audioDurationMs = (data['audioDurationMs'] as num?)?.toInt();
+      // Vidéos (nouveau format multi, avec repli sur l'ancien videoKey unique).
+      final videoKeys =
+          List<String>.from(data['videoKeys'] as List<dynamic>? ?? []);
+      final videoDurations = (data['videoDurationsMs'] as List<dynamic>?)
+              ?.map((e) => (e as num).toInt())
+              .toList() ??
+          <int>[];
+      if (videoKeys.isEmpty) {
+        final legacyKey = data['videoKey'] as String?;
+        if (legacyKey != null && legacyKey.isNotEmpty) {
+          videoKeys.add(legacyKey);
+          final legacyDur = (data['videoDurationMs'] as num?)?.toInt();
+          if (legacyDur != null) videoDurations.add(legacyDur);
+        }
+      }
+      _existingVideoKeys.addAll(videoKeys);
+      _existingVideoDurations.addAll(videoDurations);
       _dateNeedsConfirmation = false; // editing: date already confirmed
       _step = 1;
       if (data['type'] == 'taille_poids') {
@@ -468,6 +495,21 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       return;
     }
 
+    // Quota mémo vocal : on ne bloque que pour un NOUVEAU mémo (le
+    // remplacement d'un audio déjà compté ne change pas le total).
+    final replacingExisting = _localAudioPath != null ||
+        (_existingAudioUrl != null && !_audioRemoved);
+    if (!replacingExisting) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid != null) {
+        final q = await QuotaService.canAddAudios(uid);
+        if (!q.allowed) {
+          if (mounted) _showAudioQuotaDialog();
+          return;
+        }
+      }
+    }
+
     try {
       if (!await _recorder.hasPermission()) {
         _showSnack('Micro non autorisé');
@@ -532,6 +574,216 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     final m = totalSec ~/ 60;
     final s = totalSec % 60;
     return '${m.toString().padLeft(1, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  // ── Vidéo souvenir ────────────────────────────────────────────────────────
+
+  int get _videoCount => _existingVideoKeys.length + _localVideoPaths.length;
+  bool get _hasVideo => _videoCount > 0;
+  bool get _canAddVideo => _videoCount < QuotaService.maxVideosPerMemory;
+
+  Future<void> _pickVideo(ImageSource source) async {
+    // Limite par souvenir (max 3) — au-delà, on informe et on bloque.
+    if (!_canAddVideo) {
+      _showSnack(
+          'Maximum ${QuotaService.maxVideosPerMemory} vidéos par souvenir.');
+      return;
+    }
+    // Quota global (15 gratuit / 150 premium), en comptant les vidéos déjà
+    // ajoutées localement dans ce souvenir.
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final q = await QuotaService.canAddVideos(
+          uid, adding: _localVideoPaths.length + 1);
+      if (!q.allowed) {
+        if (mounted) _showVideoQuotaDialog();
+        return;
+      }
+    }
+    setState(() => _preparingVideo = true);
+    try {
+      final picked = await _picker.pickVideo(
+        source: source,
+        maxDuration: const Duration(seconds: QuotaService.maxVideoDurationSec),
+      );
+      if (picked == null) {
+        if (mounted) setState(() => _preparingVideo = false);
+        return;
+      }
+      final file = File(picked.path);
+
+      // Cap de durée : `maxDuration` n'est pas garanti depuis la galerie selon
+      // les plateformes → on revérifie. (best-effort, ne bloque jamais à tort).
+      final durMs = await VideoService.probeDurationMs(file);
+      if (durMs != null &&
+          durMs > (QuotaService.maxVideoDurationSec + 5) * 1000) {
+        if (mounted) {
+          setState(() => _preparingVideo = false);
+          _showSnack(
+              'Vidéo trop longue (max ${QuotaService.maxVideoDurationSec}s).');
+        }
+        return;
+      }
+
+      if (mounted) {
+        setState(() {
+          _localVideoPaths.add(picked.path);
+          _localVideoDurations.add(durMs);
+          _preparingVideo = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _preparingVideo = false);
+        _showSnack('Impossible d\'accéder à la vidéo');
+      }
+    }
+  }
+
+  void _removeLocalVideo(int index) {
+    setState(() {
+      _localVideoPaths.removeAt(index);
+      _localVideoDurations.removeAt(index);
+    });
+  }
+
+  void _removeExistingVideo(int index) {
+    setState(() {
+      _removedVideoKeys.add(_existingVideoKeys[index]);
+      _existingVideoKeys.removeAt(index);
+      if (index < _existingVideoDurations.length) {
+        _existingVideoDurations.removeAt(index);
+      }
+    });
+  }
+
+  // Ouvre la galerie plein écran sur les photos (existantes + locales), centrée
+  // sur la vignette touchée. Ordre identique à l'affichage des vignettes.
+  void _openPhotoViewer(int index) {
+    final items = <FullscreenMedia>[
+      for (final url in _existingPhotoUrls) FullscreenMedia.photoUrl(url),
+      for (final f in _localPhotos) FullscreenMedia.photoFile(f),
+    ];
+    MediaFullscreenViewer.open(context, items: items, initialIndex: index);
+  }
+
+  // Idem pour les vidéos. Les clés R2 des vidéos existantes sont résolues en URLs
+  // publiques avant ouverture ; les vidéos locales jouent depuis le fichier.
+  Future<void> _openVideoViewer(int index) async {
+    // Les vidéos déjà uploadées (édition) sont servies via des URLs signées
+    // délivrées par le backend après contrôle d'accès au carnet ; les vidéos
+    // locales pas encore uploadées se lisent depuis le fichier.
+    Map<String, String> resolved = const {};
+    if (_existingVideoKeys.isNotEmpty && widget.memoryId != null) {
+      resolved = await VideoService.playbackUrls(widget.memoryId!);
+    }
+    if (!mounted) return;
+    final items = <FullscreenMedia>[
+      for (final key in _existingVideoKeys)
+        FullscreenMedia.videoUrl(resolved[key]),
+      for (final p in _localVideoPaths) FullscreenMedia.videoFile(p),
+    ];
+    MediaFullscreenViewer.open(context, items: items, initialIndex: index);
+  }
+
+  void _showVideoQuotaDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Limite de vidéos atteinte'),
+        content: Text(
+          'Le forfait gratuit est limité à ${QuotaService.freeVideoLimit} vidéos. '
+          'Passe en premium pour ${QuotaService.premiumVideoLimit} vidéos '
+          '(${QuotaService.premiumPriceChf.toStringAsFixed(0)} CHF/an).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Plus tard'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.push('/subscription');
+            },
+            child: const Text('Passer premium'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAudioQuotaDialog() {
+    showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Limite de mémos vocaux atteinte'),
+        content: Text(
+          'Le forfait gratuit est limité à ${QuotaService.freeAudioLimit} mémos vocaux. '
+          'Passe en premium pour ${QuotaService.premiumAudioLimit} mémos '
+          '(${QuotaService.premiumPriceChf.toStringAsFixed(0)} CHF/an).',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Plus tard'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              context.push('/subscription');
+            },
+            child: const Text('Passer premium'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showVideoSourceSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36, height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.softGray.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined, color: AppColors.sage),
+              title: const Text('Filmer une vidéo'),
+              subtitle: const Text('60 secondes max'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.video_library_outlined, color: AppColors.sage),
+              title: const Text('Choisir depuis la galerie'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.gallery);
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _analyzeAndFill() async {
@@ -745,6 +997,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // ses photos arrivent toutes seules ensuite.
       final knownPhotoUrls = List<String>.of(_existingPhotoUrls);
       final knownAudioUrl = _audioRemoved ? null : _existingAudioUrl;
+      // Vidéos déjà uploadées et conservées (les nouvelles partent en file).
+      final knownVideoKeys = List<String>.of(_existingVideoKeys);
+      final knownVideoDurations = List<int>.of(_existingVideoDurations);
 
       final titleValue = _titleController.text.trim();
       final locationValue = _locationController.text.trim();
@@ -762,6 +1017,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'photoUrl': knownPhotoUrls.isNotEmpty ? knownPhotoUrls.first : null,
         'audioUrl': knownAudioUrl,
         'audioDurationMs': knownAudioUrl != null ? _audioDurationMs : null,
+        'videoKeys': knownVideoKeys,
+        'videoDurationsMs': knownVideoDurations,
+        // Miroir hérité (compat anciens lecteurs / page /watch d'origine).
+        'videoKey': knownVideoKeys.isNotEmpty ? knownVideoKeys.first : null,
+        'videoDurationMs':
+            knownVideoDurations.isNotEmpty ? knownVideoDurations.first : null,
         'weightKg': weightKg,
         'heightCm': heightCm,
       };
@@ -793,7 +1054,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // Y a-t-il des médias à uploader/supprimer en arrière-plan ?
       final hasMediaWork = _localPhotos.isNotEmpty ||
           _localAudioPath != null ||
+          _localVideoPaths.isNotEmpty ||
           _removedPhotoUrls.isNotEmpty ||
+          _removedVideoKeys.isNotEmpty ||
           (_audioRemoved && _existingAudioUrl != null);
       if (hasMediaWork) {
         MediaUploadQueue.instance.enqueue(MediaUploadJob(
@@ -806,6 +1069,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           existingAudioUrl: _existingAudioUrl,
           audioRemoved: _audioRemoved,
           audioDurationMs: _audioDurationMs,
+          localVideoPaths: List<String>.of(_localVideoPaths),
+          localVideoDurations: List<int?>.of(_localVideoDurations),
+          existingVideoKeys: knownVideoKeys,
+          existingVideoDurations: knownVideoDurations,
+          removedVideoKeys: List<String>.of(_removedVideoKeys),
         ));
       }
 
@@ -1025,8 +1293,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             ),
           ],
           const SizedBox(height: 20),
-          // ── Photos (visible dès l'étape 0)
+          // ── Photos + vidéo (visibles dès l'étape 0, comme les photos)
           _buildPhotoSection(),
+          const SizedBox(height: 20),
+          _buildVideoSection(),
           const SizedBox(height: 20),
 
           if (_isAnalyzing)
@@ -1195,6 +1465,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 16),
           _buildVoiceMemoSection(),
           const SizedBox(height: 16),
+          _buildVideoSection(),
+          const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
@@ -1256,6 +1528,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _buildPhotoSection(),
           const SizedBox(height: 16),
           _buildVoiceMemoSection(),
+          const SizedBox(height: 16),
+          _buildVideoSection(),
           const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
@@ -1371,6 +1645,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 16),
           _buildVoiceMemoSection(),
           const SizedBox(height: 16),
+          _buildVideoSection(),
+          const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
@@ -1427,6 +1703,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 16),
           _buildVoiceMemoSection(),
           const SizedBox(height: 16),
+          _buildVideoSection(),
+          const SizedBox(height: 16),
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
@@ -1457,6 +1735,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               children: [
                 for (int i = 0; i < _existingPhotoUrls.length; i++)
                   _PhotoThumb(
+                    onTap: () => _openPhotoViewer(i),
                     child: Image.network(
                       _existingPhotoUrls[i],
                       width: 90, height: 90, fit: BoxFit.cover,
@@ -1467,6 +1746,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                   ),
                 for (int i = 0; i < _localPhotos.length; i++)
                   _PhotoThumb(
+                    onTap: () =>
+                        _openPhotoViewer(_existingPhotoUrls.length + i),
                     child: Image.file(_localPhotos[i], width: 90, height: 90, fit: BoxFit.cover),
                     onRemove: () => _removeLocalPhoto(i),
                   ),
@@ -1627,6 +1908,122 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
+  // ── Vidéo widget ──────────────────────────────────────────────────────────
+
+  Widget _buildVideoSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _SectionTitle(
+            '🎬 Vidéos (optionnel · ${QuotaService.maxVideosPerMemory} max)'),
+        const SizedBox(height: 8),
+        if (_hasVideo || _preparingVideo) ...[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                for (int i = 0; i < _existingVideoKeys.length; i++)
+                  _VideoThumb(
+                    durationLabel: i < _existingVideoDurations.length
+                        ? _formatAudioDuration(_existingVideoDurations[i])
+                        : '',
+                    onTap: () => _openVideoViewer(i),
+                    onRemove: () => _removeExistingVideo(i),
+                  ),
+                for (int i = 0; i < _localVideoPaths.length; i++)
+                  _VideoThumb(
+                    durationLabel: _formatAudioDuration(_localVideoDurations[i]),
+                    onTap: () =>
+                        _openVideoViewer(_existingVideoKeys.length + i),
+                    onRemove: () => _removeLocalVideo(i),
+                  ),
+                if (_preparingVideo)
+                  Container(
+                    width: 90, height: 90,
+                    margin: const EdgeInsets.only(right: 8),
+                    decoration: BoxDecoration(
+                      color: AppColors.white,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                          color: const Color(0xFFDDD8CC), width: 0.5),
+                    ),
+                    child: const Center(
+                      child: SizedBox(
+                        width: 20, height: 20,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.sage),
+                      ),
+                    ),
+                  )
+                else if (_canAddVideo)
+                  GestureDetector(
+                    onTap: _showVideoSourceSheet,
+                    child: Container(
+                      width: 90, height: 90,
+                      margin: const EdgeInsets.only(right: 8),
+                      decoration: BoxDecoration(
+                        color: AppColors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: AppColors.sage, width: 1),
+                      ),
+                      child: const Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.video_call_outlined,
+                              color: AppColors.sage, size: 22),
+                          SizedBox(height: 4),
+                          Text('Ajouter',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: AppColors.sage,
+                                  fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ] else ...[
+          GestureDetector(
+            onTap: _showVideoSourceSheet,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.video_call_outlined,
+                      color: AppColors.sage, size: 20),
+                  SizedBox(width: 8),
+                  Text('Ajouter des vidéos',
+                      style: TextStyle(
+                          color: AppColors.sage,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14)),
+                  SizedBox(width: 6),
+                  Text('· 60 s max', style: TextStyle(color: AppColors.softGray, fontSize: 12)),
+                ],
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 6),
+        Text(
+          'Jusqu\'à ${QuotaService.maxVideosPerMemory} vidéos de '
+          '${QuotaService.maxVideoDurationSec} s. Un QR code dans le livre '
+          'mène à toutes les vidéos du souvenir.',
+          style: const TextStyle(color: AppColors.softGray, fontSize: 12),
+        ),
+      ],
+    );
+  }
+
   Widget _buildLocationField() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1722,7 +2119,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 class _PhotoThumb extends StatelessWidget {
   final Widget child;
   final VoidCallback onRemove;
-  const _PhotoThumb({required this.child, required this.onRemove});
+  final VoidCallback? onTap;
+  const _PhotoThumb({required this.child, required this.onRemove, this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1730,10 +2128,78 @@ class _PhotoThumb extends StatelessWidget {
       margin: const EdgeInsets.only(right: 8),
       child: Stack(
         children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(10),
-            child: child,
+          GestureDetector(
+            onTap: onTap,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(10),
+              child: child,
+            ),
           ),
+          Positioned(
+            top: 4,
+            right: 4,
+            child: GestureDetector(
+              onTap: onRemove,
+              child: Container(
+                padding: const EdgeInsets.all(3),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.close, color: Colors.white, size: 14),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Vignette d'une vidéo dans l'écran de création (carte sombre + ▶ + durée).
+/// On n'extrait pas de miniature réelle (coûteux) : un visuel cohérent suffit.
+class _VideoThumb extends StatelessWidget {
+  final String durationLabel;
+  final VoidCallback onRemove;
+  final VoidCallback? onTap;
+  const _VideoThumb(
+      {required this.durationLabel, required this.onRemove, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(right: 8),
+      child: Stack(
+        children: [
+          GestureDetector(
+            onTap: onTap,
+            child: Container(
+              width: 90, height: 90,
+              decoration: BoxDecoration(
+                color: const Color(0xFF2D2D2D),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Center(
+                child: Icon(Icons.play_circle_outline,
+                    color: Colors.white, size: 32),
+              ),
+            ),
+          ),
+          if (durationLabel.isNotEmpty)
+            Positioned(
+              bottom: 4,
+              left: 4,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.55),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(durationLabel,
+                    style: const TextStyle(color: Colors.white, fontSize: 10)),
+              ),
+            ),
           Positioned(
             top: 4,
             right: 4,

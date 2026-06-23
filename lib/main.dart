@@ -120,7 +120,7 @@ final _router = GoRouter(
     GoRoute(
       path: '/notebook/:notebookId/growth',
       builder: (_, state) =>
-          GrowthScreen(childId: state.pathParameters['notebookId']!),
+          GrowthScreen(notebookId: state.pathParameters['notebookId']!),
     ),
     GoRoute(
       path: '/notebook/:notebookId/scan',
@@ -167,7 +167,7 @@ final _router = GoRouter(
     GoRoute(
       path: '/child/:childId/growth',
       builder: (_, state) =>
-          GrowthScreen(childId: state.pathParameters['childId']!),
+          GrowthScreen(notebookId: state.pathParameters['childId']!),
     ),
     GoRoute(
       path: '/child/:childId/summary',
