@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/services/book_pricing.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -187,6 +188,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 8),
 
+            // Tarifs d'impression (transparence)
+            _ProfileTile(
+              icon: Icons.receipt_long_outlined,
+              label: 'Tarifs d\'impression',
+              onTap: () => _showPricingSheet(context),
+            ),
+            const SizedBox(height: 8),
+
             // Admin (visible uniquement pour david.mathys24@gmail.com)
             if (user.email == 'david.mathys24@gmail.com') ...[
               _ProfileTile(
@@ -231,6 +240,163 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  // Tableau de transparence des coûts d'impression (souple / rigide × pages).
+  // Affiche tes prix réels, sans comparaison concurrents.
+  void _showPricingSheet(BuildContext context) {
+    const samples = [28, 40, 60, 80, 100, 150, 200];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.white,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.softGray.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Tarifs d\'impression',
+                style: TextStyle(
+                  fontFamily: 'PlayfairDisplay',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Prix de base ${BookPricing.format(BookPricing.softBase)} (souple) / '
+                '${BookPricing.format(BookPricing.hardBase)} (rigide) jusqu\'à '
+                '${BookPricing.includedPages} pages, puis '
+                '+${BookPricing.format(BookPricing.perExtraPage)} par page au-delà. '
+                'Les livres imprimés font 28 pages minimum.',
+                style: const TextStyle(
+                    color: AppColors.textMedium, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              // En-tête du tableau
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.cream,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(
+                        flex: 2,
+                        child: Text('Pages',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppColors.textDark))),
+                    Expanded(
+                        flex: 3,
+                        child: Text('Souple',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppColors.textDark))),
+                    Expanded(
+                        flex: 3,
+                        child: Text('Rigide',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppColors.textDark))),
+                  ],
+                ),
+              ),
+              for (final p in samples)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          '$p',
+                          style: const TextStyle(
+                              fontSize: 13,
+                              color: AppColors.textDark,
+                              fontWeight: FontWeight.w500),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          BookPricing.format(
+                              BookPricing.price(coverType: 'soft', pages: p)),
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textMedium),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          BookPricing.format(
+                              BookPricing.price(coverType: 'hard', pages: p)),
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textMedium),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.sage.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppColors.sage.withOpacity(0.25)),
+                ),
+                child: const Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.verified_outlined, size: 16, color: AppColors.sage),
+                    SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Le PDF numérique est toujours gratuit. Pour l\'imprimé, '
+                        'tu paies uniquement le prix ci-dessus — sans abonnement '
+                        'ni frais cachés.',
+                        style: TextStyle(
+                            fontSize: 12,
+                            color: AppColors.textMedium,
+                            height: 1.4),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
