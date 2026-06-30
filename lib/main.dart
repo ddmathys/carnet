@@ -127,8 +127,10 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/notebook/:notebookId/growth',
-      builder: (_, state) =>
-          GrowthScreen(notebookId: state.pathParameters['notebookId']!),
+      builder: (_, state) => GrowthScreen(
+        notebookId: state.pathParameters['notebookId']!,
+        startAddMeasure: state.uri.queryParameters['add'] == '1',
+      ),
     ),
 
     // ── Orders ──

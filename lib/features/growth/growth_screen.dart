@@ -23,26 +23,30 @@ String _animalId(NotebookModel nb) =>
 /// Les mesures sont des `memories` de type `taille_poids` du carnet.
 class GrowthScreen extends StatefulWidget {
   final String notebookId;
-  const GrowthScreen({super.key, required this.notebookId});
+  /// Ouvre directement la saisie d'une mesure au chargement (depuis le menu
+  /// « + » du carnet → Nouveau poids & taille).
+  final bool startAddMeasure;
+  const GrowthScreen({
+    super.key,
+    required this.notebookId,
+    this.startAddMeasure = false,
+  });
 
   @override
   State<GrowthScreen> createState() => _GrowthScreenState();
 }
 
-class _GrowthScreenState extends State<GrowthScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+class _GrowthScreenState extends State<GrowthScreen> {
+  bool _autoOpened = false;
 
-  @override
-  void initState() {
-    super.initState();
-    _tabController = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabController.dispose();
-    super.dispose();
+  void _openMeasureSheet(NotebookModel notebook) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) =>
+          _MeasureSheet(notebook: notebook, previousMeasures: const []),
+    );
   }
 
   @override
@@ -90,25 +94,26 @@ class _GrowthScreenState extends State<GrowthScreen>
               return _AdultWeightTab(notebook: notebook, measures: measures);
             }
 
-            return TabBarView(
-              controller: _tabController,
-              children: [
-                _CurvesTab(notebook: notebook, measures: measures),
-                _ToiseTab(notebook: notebook, measures: measures),
-              ],
-            );
+            return _CurvesTab(notebook: notebook, measures: measures);
           },
         );
+
+        // Ouverture auto de la saisie de mesure (depuis le menu « + » du carnet).
+        if (widget.startAddMeasure && !_autoOpened) {
+          _autoOpened = true;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _openMeasureSheet(notebook);
+          });
+        }
 
         return Scaffold(
           backgroundColor: AppColors.cream,
           floatingActionButton: FloatingActionButton.extended(
-            onPressed: () =>
-                context.push('/notebook/${widget.notebookId}/add-memory'),
+            onPressed: () => _openMeasureSheet(notebook),
             backgroundColor: AppColors.sage,
             foregroundColor: Colors.white,
             icon: const Icon(Icons.add),
-            label: const Text('Nouveau souvenir'),
+            label: const Text('Nouvelle mesure'),
           ),
           appBar: AppBar(
             backgroundColor: AppColors.cream,
@@ -118,18 +123,6 @@ class _GrowthScreenState extends State<GrowthScreen>
               onPressed: () => context.pop(),
             ),
             title: Text(isChild ? 'Croissance de $name' : 'Suivi du poids'),
-            bottom: isChild
-                ? TabBar(
-                    controller: _tabController,
-                    labelColor: AppColors.sage,
-                    unselectedLabelColor: AppColors.softGray,
-                    indicatorColor: AppColors.sage,
-                    tabs: const [
-                      Tab(icon: Icon(Icons.show_chart), text: 'Courbes'),
-                      Tab(icon: Icon(Icons.straighten), text: 'Toise'),
-                    ],
-                  )
-                : null,
           ),
           body: body,
         );
@@ -743,389 +736,6 @@ class _MeasurementList extends StatelessWidget {
       ],
     );
   }
-}
-
-// ─── Toise Tab (enfant) ─────────────────────────────────────────────────────────
-
-class _ToiseTab extends StatelessWidget {
-  final NotebookModel notebook;
-  final List<MemoryModel> measures;
-
-  const _ToiseTab({required this.notebook, required this.measures});
-
-  @override
-  Widget build(BuildContext context) {
-    final hMeasures = measures
-        .where((m) => m.heightCm != null)
-        .toList()
-      ..sort((a, b) => a.date.compareTo(b.date));
-
-    final latestHeight =
-        hMeasures.isNotEmpty ? hMeasures.last.heightCm! : null;
-    final name = notebook.title;
-
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
-      child: Column(
-        children: [
-          if (latestHeight != null)
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    AppColors.sage.withOpacity(0.15),
-                    AppColors.sage.withOpacity(0.03),
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: AppColors.sage.withOpacity(0.2)),
-              ),
-              child: Row(
-                children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        '${latestHeight.toStringAsFixed(0)} cm',
-                        style: const TextStyle(
-                          fontSize: 52,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.sage,
-                          height: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Dernière mesure de $name',
-                        style: TextStyle(
-                            fontSize: 13, color: Colors.grey.shade600),
-                      ),
-                    ],
-                  ),
-                  const Spacer(),
-                  SvgPicture.asset(
-                    'assets/images/animals/${_animalId(notebook)}.svg',
-                    width: 80,
-                  ),
-                ],
-              ),
-            ),
-          const SizedBox(height: 20),
-          if (hMeasures.isNotEmpty)
-            _ToiseVisual(notebook: notebook, measurements: hMeasures)
-          else
-            _NoHeightHint(name: name),
-          const SizedBox(height: 20),
-          _AddMeasureButton(notebook: notebook, measures: measures),
-        ],
-      ),
-    );
-  }
-}
-
-class _NoHeightHint extends StatelessWidget {
-  final String name;
-  const _NoHeightHint({required this.name});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade100),
-      ),
-      child: Column(
-        children: [
-          const Text('📏', style: TextStyle(fontSize: 40)),
-          const SizedBox(height: 12),
-          Text(
-            'Aucune taille enregistrée',
-            style: TextStyle(
-              fontSize: 14,
-              color: Colors.grey.shade500,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            'Ajoute une première mesure via le bouton ci-dessous',
-            textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade400),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ─── Toise Visuelle ────────────────────────────────────────────────────────────
-
-class _ToiseVisual extends StatelessWidget {
-  final NotebookModel notebook;
-  final List<MemoryModel> measurements;
-
-  const _ToiseVisual({required this.notebook, required this.measurements});
-
-  @override
-  Widget build(BuildContext context) {
-    final latestH = measurements.last.heightCm!;
-    const double minDisplayH = 40.0;
-    final double maxDisplayH = (latestH + 15).clamp(90.0, 160.0);
-    const double canvasH = 600.0;
-    final double scale = canvasH / (maxDisplayH - minDisplayH);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(bottom: 8),
-          child: Row(
-            children: [
-              const Icon(Icons.pinch_outlined, size: 14, color: AppColors.softGray),
-              const SizedBox(width: 4),
-              Text(
-                'Pince pour zoomer',
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade400),
-              ),
-            ],
-          ),
-        ),
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFFAF6EE),
-            borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xFFE8DECC)),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: SizedBox(
-              height: canvasH,
-              child: InteractiveViewer(
-                minScale: 1.0,
-                maxScale: 4.0,
-                boundaryMargin: const EdgeInsets.all(double.infinity),
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final w = constraints.maxWidth;
-                    final animalAreaW = w * 0.38;
-                    final animalH = (animalAreaW * 225 / 200).clamp(0.0, canvasH * 0.78);
-
-                    return Stack(
-                      children: [
-                        CustomPaint(
-                          size: Size(w, canvasH),
-                          painter: _ToisePainter(
-                            measurements: measurements,
-                            childName: notebook.title,
-                            minH: minDisplayH,
-                            maxH: maxDisplayH,
-                            scale: scale,
-                            animalAreaW: animalAreaW,
-                          ),
-                        ),
-                        Positioned(
-                          right: 0,
-                          bottom: 0,
-                          child: SvgPicture.asset(
-                            'assets/images/animals/${_animalId(notebook)}.svg',
-                            width: animalAreaW,
-                            height: animalH,
-                            fit: BoxFit.contain,
-                            alignment: Alignment.bottomCenter,
-                          ),
-                        ),
-                      ],
-                    );
-                  },
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _ToisePainter extends CustomPainter {
-  final List<MemoryModel> measurements;
-  final String childName;
-  final double minH;
-  final double maxH;
-  final double scale;
-  final double animalAreaW;
-
-  _ToisePainter({
-    required this.measurements,
-    required this.childName,
-    required this.minH,
-    required this.maxH,
-    required this.scale,
-    required this.animalAreaW,
-  });
-
-  double _y(double h) => (maxH - h) * scale;
-
-  static const _rulerStripW = 28.0;
-  static const _palette = [
-    Color(0xFF7A9E7E),
-    Color(0xFF7A9EC8),
-    Color(0xFFD4956A),
-    Color(0xFFB07AB8),
-    Color(0xFFD47A7A),
-  ];
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final lineEndX = size.width - animalAreaW - 8;
-    final labelStartX = _rulerStripW + 8.0;
-
-    canvas.drawRect(
-      Rect.fromLTWH(0, 0, _rulerStripW, size.height),
-      Paint()..color = const Color(0xFFEDE3D0),
-    );
-    canvas.drawLine(
-      Offset(_rulerStripW, 0),
-      Offset(_rulerStripW, size.height),
-      Paint()
-        ..color = const Color(0xFFBFAA95)
-        ..strokeWidth = 1.5,
-    );
-
-    for (double h = minH; h <= maxH; h += 5) {
-      final y = _y(h);
-      final isMajor = h % 10 == 0;
-      canvas.drawLine(
-        Offset(isMajor ? 0 : 8, y),
-        Offset(_rulerStripW, y),
-        Paint()
-          ..color = isMajor ? const Color(0xFF8B7355) : const Color(0xFFBFAA95)
-          ..strokeWidth = isMajor ? 1.5 : 1.0,
-      );
-      if (isMajor) {
-        _text(canvas, '${h.toInt()}',
-            Offset(1, y - 7),
-            fontSize: 10.0,
-            color: const Color(0xFF8B7355),
-            bold: true);
-      }
-    }
-
-    for (int i = 0; i < measurements.length; i++) {
-      final m = measurements[i];
-      final h = m.heightCm!;
-      final y = _y(h);
-      final isLatest = i == measurements.length - 1;
-      final color = _palette[i % _palette.length];
-
-      if (isLatest) {
-        canvas.drawLine(
-          Offset(_rulerStripW, y),
-          Offset(lineEndX, y),
-          Paint()
-            ..color = color
-            ..strokeWidth = 2.5,
-        );
-        _drawArrow(canvas, Offset(lineEndX, y), color);
-      } else {
-        _dashed(
-          canvas,
-          Offset(_rulerStripW, y),
-          Offset(lineEndX - 10, y),
-          Paint()
-            ..color = color.withOpacity(0.55)
-            ..strokeWidth = 1.5,
-        );
-      }
-
-      canvas.drawCircle(
-          Offset(_rulerStripW, y), isLatest ? 7.0 : 5.5, Paint()..color = color);
-      canvas.drawCircle(
-          Offset(_rulerStripW, y), isLatest ? 3.2 : 2.4, Paint()..color = Colors.white);
-
-      final valStr = '${h.toStringAsFixed(0)} cm';
-      final dateStr = m.dateLabel ?? _fmt(m.date);
-      _text(canvas, valStr, Offset(labelStartX, y - 18),
-          fontSize: isLatest ? 17.0 : 14.0, color: color, bold: true);
-      _text(canvas, isLatest ? '$dateStr — $childName' : dateStr,
-          Offset(labelStartX, y + 2),
-          fontSize: 12.0,
-          color: isLatest
-              ? color.withOpacity(0.8)
-              : const Color(0xFF9E9E9E));
-    }
-  }
-
-  void _drawArrow(Canvas canvas, Offset tip, Color color) {
-    final paint = Paint()
-      ..color = color
-      ..strokeWidth = 2.0
-      ..style = PaintingStyle.stroke;
-    final path = Path()
-      ..moveTo(tip.dx - 8, tip.dy - 5)
-      ..lineTo(tip.dx, tip.dy)
-      ..lineTo(tip.dx - 8, tip.dy + 5);
-    canvas.drawPath(path, paint);
-  }
-
-  void _text(
-    Canvas canvas,
-    String text,
-    Offset offset, {
-    required double fontSize,
-    required Color color,
-    bool bold = false,
-  }) {
-    (TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          fontSize: fontSize,
-          color: color,
-          fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
-        ),
-      ),
-      textDirection: TextDirection.ltr,
-    )..layout())
-        .paint(canvas, offset);
-  }
-
-  void _dashed(Canvas canvas, Offset start, Offset end, Paint paint) {
-    const dash = 6.0;
-    const gap = 4.0;
-    double x = start.dx;
-    bool drawing = true;
-    while (x < end.dx) {
-      final next = x + (drawing ? dash : gap);
-      if (drawing) {
-        canvas.drawLine(
-          Offset(x, start.dy),
-          Offset(next.clamp(start.dx, end.dx), start.dy),
-          paint,
-        );
-      }
-      x = next;
-      drawing = !drawing;
-    }
-  }
-
-  String _fmt(DateTime d) {
-    const months = [
-      'janv', 'févr', 'mars', 'avr', 'mai', 'juin',
-      'juil', 'août', 'sept', 'oct', 'nov', 'déc'
-    ];
-    return '${months[d.month - 1]} ${d.year}';
-  }
-
-  @override
-  bool shouldRepaint(_ToisePainter old) =>
-      old.measurements.length != measurements.length ||
-      old.animalAreaW != animalAreaW;
 }
 
 // ─── Bouton ajout de mesure ─────────────────────────────────────────────────────

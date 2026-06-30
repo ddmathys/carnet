@@ -180,12 +180,21 @@ class _DashboardBodyState extends State<_DashboardBody> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () =>
-            context.push('/notebook/${notebook.id}/add-memory'),
+        onPressed: () {
+          // Carnets avec suivi de croissance (enfant / poids) → menu de choix ;
+          // ailleurs, accès direct au nouveau souvenir.
+          final showGrowth = notebook.type == 'enfant' ||
+              getNotebookTypeById(notebook.type).hasWeightTracking;
+          if (showGrowth) {
+            _showAddMenu(context);
+          } else {
+            context.push('/notebook/${notebook.id}/add-memory');
+          }
+        },
         backgroundColor: AppColors.sage,
         foregroundColor: AppColors.white,
         icon: const Icon(Icons.add),
-        label: const Text('Nouveau souvenir'),
+        label: const Text('Ajouter'),
         shape: const StadiumBorder(),
       ),
       ),
@@ -287,6 +296,54 @@ class _DashboardBodyState extends State<_DashboardBody> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => ShareNotebookSheet(notebook: notebook),
+    );
+  }
+
+  // Menu « + » pour les carnets avec suivi de croissance : nouveau souvenir
+  // ou nouvelle mesure (poids & taille → courbe de croissance).
+  void _showAddMenu(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.softGray.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 8),
+            ListTile(
+              leading: const Icon(Icons.edit_note_outlined, color: AppColors.sage),
+              title: const Text('Nouveau souvenir'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/notebook/${notebook.id}/add-memory');
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.monitor_weight_outlined,
+                  color: AppColors.sage),
+              title: const Text('Nouveau poids & taille'),
+              subtitle: const Text('Pour la courbe de croissance'),
+              onTap: () {
+                Navigator.pop(context);
+                context.push('/notebook/${notebook.id}/growth?add=1');
+              },
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
     );
   }
 

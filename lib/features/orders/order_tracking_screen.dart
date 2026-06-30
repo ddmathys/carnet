@@ -90,9 +90,34 @@ class OrderDetailScreen extends StatelessWidget {
             ? OrderService.userOrdersStream(FirebaseAuth.instance.currentUser!.uid)
             : const Stream.empty(),
         builder: (context, snap) {
-          final order = snap.data?.where((o) => o.id == orderId).firstOrNull;
-          if (order == null) {
+          if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
+          }
+          final order = snap.data!.where((o) => o.id == orderId).firstOrNull;
+          if (order == null) {
+            // Commande supprimée/introuvable → message + retour, jamais un
+            // spinner infini.
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text('✅', style: TextStyle(fontSize: 40)),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'Commande supprimée.',
+                      style: TextStyle(color: AppColors.textMedium),
+                    ),
+                    const SizedBox(height: 16),
+                    ElevatedButton(
+                      onPressed: () => context.go('/orders'),
+                      child: const Text('Mes commandes'),
+                    ),
+                  ],
+                ),
+              ),
+            );
           }
           return SingleChildScrollView(
             padding: const EdgeInsets.all(20),
@@ -533,6 +558,10 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
     );
     if (confirmed != true || !mounted) return;
 
+    // On capture le routeur AVANT les await : la suppression met à jour le
+    // stream, ce qui retire ce widget de l'arbre (donc `mounted` devient false
+    // et `context` est invalide). Le routeur, lui, reste valable.
+    final router = GoRouter.of(context);
     setState(() => _deleting = true);
     try {
       // 1. Supprimer le PDF de Storage si présent
@@ -549,8 +578,7 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
           .doc(widget.order.id)
           .delete();
 
-      if (!mounted) return;
-      context.go('/orders');
+      router.go('/orders');
     } catch (e) {
       if (mounted) {
         setState(() => _deleting = false);
