@@ -66,7 +66,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   int _previewPageCount = 0;
 
   late final TextEditingController _titleCtrl;
-  late final TextEditingController _subtitleCtrl;
 
   // ── Adresse livraison ──────────────────────────────────────────────────────
   final _addressKey = GlobalKey<FormState>();
@@ -131,7 +130,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   void initState() {
     super.initState();
     _titleCtrl = TextEditingController();
-    _subtitleCtrl = TextEditingController();
     _firstNameCtrl = TextEditingController();
     _lastNameCtrl = TextEditingController();
     _streetCtrl = TextEditingController();
@@ -152,7 +150,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   @override
   void dispose() {
     _titleCtrl.dispose();
-    _subtitleCtrl.dispose();
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _streetCtrl.dispose();
@@ -208,7 +205,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // défaut sur la couverture (ex. « Léa & Nala »), pour que le champ soit
       // cohérent avec l'aperçu et directement modifiable.
       _titleCtrl.text = _defaultCoverTitle(nb);
-      _subtitleCtrl.text = nb.subtitle;
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
       // infini, sans message — la cause des « le spinner tourne ».
@@ -235,8 +231,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
-      customSubtitle:
-          _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null,
+      customSubtitle: null,
       backendUrl: AppConfig.backendUrl,
     ).timeout(const Duration(seconds: 60));
   }
@@ -286,7 +281,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     setState(() => _exporting = true);
 
     final customTitle = _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
-    final customSubtitle = _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null;
     final bookTitle = customTitle ?? _notebook!.title;
 
     // 1. Génération des octets du PDF (étape lourde mais bornée). Le spinner
@@ -307,7 +301,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         coverPhotoUrl: _coverPhotoUrl,
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
-        customSubtitle: customSubtitle,
+        customSubtitle: null,
         backendUrl: AppConfig.backendUrl,
       ).timeout(const Duration(seconds: 60));
       pdfBytes = gen.bytes;
@@ -326,7 +320,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     _uploadPdfToStorage(
       pdfBytes: pdfBytes,
       bookTitle: bookTitle,
-      subtitle: customSubtitle,
+      subtitle: null,
       coverType: _coverType,
       notebookId: widget.notebookId,
       memoriesCount: _selectedMemories.length,
@@ -411,7 +405,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           ? _titleCtrl.text.trim()
           : _notebook!.title;
       final customTitle = _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
-      final customSubtitle = _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null;
 
       // 1. Générer le PDF en premier
       final coverColor = Color(int.parse(
@@ -424,7 +417,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         coverPhotoUrl: _coverPhotoUrl,
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
-        customSubtitle: customSubtitle,
+        customSubtitle: null,
         backendUrl: AppConfig.backendUrl,
         padForPrint: true, // pages valides Gelato (pair, ≥28)
       );
@@ -478,7 +471,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       await BookHistoryService.recordBook(
         notebookId: widget.notebookId,
         title: bookTitle,
-        subtitle: customSubtitle,
+        subtitle: null,
         format: 'printed',
         coverType: _coverType,
         pdfUrl: pdfUrl,
@@ -645,12 +638,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               title: _titleCtrl.text.trim().isEmpty
                   ? _defaultCoverTitle(_notebook!)
                   : _titleCtrl.text.trim(),
-              subtitle: _subtitleCtrl.text.trim(),
             ),
           ),
           const SizedBox(height: 24),
 
-          // ── Personnalise ton livre (titre + sous-titre éditables) ──────
+          // ── Personnalise ton livre (titre éditable) ────────────────────
           const Align(
             alignment: Alignment.centerLeft,
             child: Text(
@@ -676,20 +668,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             decoration: _bookFieldDecoration(
               label: 'Titre du livre',
               icon: Icons.edit_outlined,
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _subtitleCtrl,
-            textAlign: TextAlign.center,
-            textCapitalization: TextCapitalization.sentences,
-            minLines: 1,
-            maxLines: 2,
-            style: const TextStyle(fontSize: 13, color: AppColors.textMedium),
-            decoration: _bookFieldDecoration(
-              label: 'Sous-titre (sur la couverture)',
-              hint: 'Ex. Nos aventures 2025',
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -1327,13 +1305,11 @@ class _BookCoverPreview extends StatelessWidget {
   final String yearRange;
   final List<String> highlights;
   final String title;
-  final String? subtitle;
 
   const _BookCoverPreview({
     required this.notebook,
     required this.coverColor,
     required this.title,
-    this.subtitle,
     this.coverPhotoUrl,
     this.yearRange = '',
     this.highlights = const [],
@@ -1342,7 +1318,6 @@ class _BookCoverPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final titleText = title;
-    final hasSubtitle = subtitle != null && subtitle!.trim().isNotEmpty;
 
     return Center(
       child: Container(
@@ -1411,16 +1386,6 @@ class _BookCoverPreview extends StatelessWidget {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            if (hasSubtitle) ...[
-                              const SizedBox(height: 2),
-                              Text(
-                                subtitle!,
-                                style: const TextStyle(
-                                    fontSize: 7.5, color: Color(0xFF6B6B6B)),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
                             const SizedBox(height: 3),
                             Container(width: 16, height: 1, color: coverColor),
                             const SizedBox(height: 3),
@@ -1475,20 +1440,6 @@ class _BookCoverPreview extends StatelessWidget {
                       textAlign: TextAlign.center,
                     ),
                   ),
-                  if (hasSubtitle) ...[
-                    const SizedBox(height: 6),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: Text(
-                        subtitle!,
-                        style: TextStyle(
-                            fontSize: 9, color: Colors.white.withOpacity(0.85)),
-                        textAlign: TextAlign.center,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
                   const SizedBox(height: 10),
                   Container(width: 30, height: 1, color: Colors.white.withOpacity(0.6)),
                   const SizedBox(height: 7),
