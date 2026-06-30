@@ -98,11 +98,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     super.dispose();
   }
 
-  // Carnets bébé/grossesse : on propose d'abord un choix de type (étape 0).
-  // Ailleurs (famille, voyage, moi, libre) : on va directement au formulaire
-  // « souvenir » (anecdote) — un seul écran, simple.
+  // Choix de type (étape 0) : uniquement pour la grossesse (étapes dédiées).
+  // Partout ailleurs — y compris les carnets enfant — on va directement au
+  // formulaire « souvenir » (texte libre), comme un carnet normal.
   bool get _hasTypePicker =>
       _notebook != null &&
+      _notebook!.type != 'enfant' &&
       manualCategoriesForNotebook(_notebook!.type).isNotEmpty;
 
   Future<void> _loadNotebook() async {
