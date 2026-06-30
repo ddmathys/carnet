@@ -115,8 +115,10 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/notebook/:notebookId/book',
-      builder: (_, state) =>
-          BookGenerateScreen(notebookId: state.pathParameters['notebookId']!),
+      builder: (_, state) => BookGenerateScreen(
+        notebookId: state.pathParameters['notebookId']!,
+        startAtOrder: state.uri.queryParameters['order'] == '1',
+      ),
     ),
     GoRoute(
       path: '/notebook/:notebookId/books',

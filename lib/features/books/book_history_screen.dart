@@ -112,8 +112,8 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
               book: books[i],
               busy: _busyId == books[i].id,
               onShare: () => _share(books[i]),
-              onOrder: () =>
-                  context.push('/notebook/${books[i].notebookId}/book'),
+              onOrder: () => context
+                  .push('/notebook/${books[i].notebookId}/book?order=1'),
               onDelete: () => _confirmDelete(books[i]),
             ),
           );

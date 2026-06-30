@@ -22,11 +22,15 @@ class BookGenerateScreen extends StatefulWidget {
   /// Multi-notebook mode: pass [notebookIds] (notebookId is ignored when notebookIds is non-empty)
   final String notebookId;
   final List<String> notebookIds;
+  /// Démarre directement sur les options d'achat (format + adresse), en sautant
+  /// l'étape couverture/aperçu. Utilisé depuis « Mes livres » → Commander.
+  final bool startAtOrder;
 
   const BookGenerateScreen({
     super.key,
     this.notebookId = '',
     this.notebookIds = const [],
+    this.startAtOrder = false,
   });
 
   List<String> get _ids =>
@@ -214,6 +218,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
         _coverPhotoUrl = defaultCover;
         _loadError = null;
+        // Commande depuis « Mes livres » : on saute directement aux options
+        // d'achat (format imprimé pré-sélectionné).
+        if (widget.startAtOrder) {
+          _step = 1;
+          _selectedFormat = 'printed';
+          _coverType = 'soft';
+        }
       });
       // Initialise les champs éditables : le titre = ce qui s'affiche par
       // défaut sur la couverture (ex. « Léa & Nala »), pour que le champ soit
