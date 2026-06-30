@@ -9,6 +9,7 @@ import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/data/growth_data.dart';
 import '../../core/utils/date_precision.dart';
+import '../../core/widgets/date_mask_field.dart';
 
 // Animaux disponibles en asset SVG (companion du carnet). Repli sur « bear ».
 const _animalAssets = {'bear', 'dino', 'fox', 'mouse', 'penguin', 'rabbit'};
@@ -866,16 +867,6 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     }
   }
 
-  Future<void> _pickDate() async {
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: _date,
-      firstDate: widget.notebook.birthdate ?? DateTime(2000),
-      lastDate: DateTime.now(),
-    );
-    if (picked != null) setState(() => _date = picked);
-  }
-
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -970,32 +961,15 @@ class _MeasureSheetState extends State<_MeasureSheet> {
         ),
         const SizedBox(height: 14),
 
-        // Date
-        GestureDetector(
-          onTap: _pickDate,
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            decoration: BoxDecoration(
-              border: Border.all(color: Colors.grey.shade200),
-              borderRadius: BorderRadius.circular(12),
-              color: Colors.grey.shade50,
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.calendar_today_outlined,
-                    size: 18, color: AppColors.sage),
-                const SizedBox(width: 10),
-                Text(
-                  '${_date.day.toString().padLeft(2, '0')}/${_date.month.toString().padLeft(2, '0')}/${_date.year}',
-                  style: const TextStyle(
-                      fontWeight: FontWeight.w600, color: AppColors.textDark),
-                ),
-                const Spacer(),
-                Text('Modifier',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
-              ],
-            ),
-          ),
+        // Date — saisie directe « JJ/MM/AAAA » (comme pour un nouveau souvenir).
+        DateMaskField(
+          label: 'Date',
+          initialDate: _date,
+          firstDate: widget.notebook.birthdate ?? DateTime(2000),
+          lastDate: DateTime.now(),
+          onChanged: (d) {
+            if (d != null) setState(() => _date = d);
+          },
         ),
         const SizedBox(height: 14),
 
