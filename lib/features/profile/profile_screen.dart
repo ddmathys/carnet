@@ -284,13 +284,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                'Prix de base ${BookPricing.format(BookPricing.softBase)} (souple) / '
-                '${BookPricing.format(BookPricing.hardBase)} (rigide) jusqu\'à '
-                '${BookPricing.includedPages} pages, puis '
-                '+${BookPricing.format(BookPricing.perExtraPage)} par page au-delà. '
-                'Les livres imprimés font 28 pages minimum.',
-                style: const TextStyle(
+              const Text(
+                'Prix tout compris : impression + livraison en Suisse + TVA. '
+                'Il dépend de la couverture (souple / rigide) et du nombre de '
+                'pages. Les livres imprimés font 28 pages minimum.',
+                style: TextStyle(
                     color: AppColors.textMedium, fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 16),
