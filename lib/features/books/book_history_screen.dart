@@ -112,6 +112,8 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
               book: books[i],
               busy: _busyId == books[i].id,
               onShare: () => _share(books[i]),
+              onOrder: () =>
+                  context.push('/notebook/${books[i].notebookId}/book'),
               onDelete: () => _confirmDelete(books[i]),
             ),
           );
@@ -199,12 +201,14 @@ class _BookTile extends StatelessWidget {
   final GeneratedBookModel book;
   final bool busy;
   final VoidCallback onShare;
+  final VoidCallback onOrder;
   final VoidCallback onDelete;
 
   const _BookTile({
     required this.book,
     required this.busy,
     required this.onShare,
+    required this.onOrder,
     required this.onDelete,
   });
 
@@ -299,6 +303,7 @@ class _BookTile extends StatelessWidget {
                           color: AppColors.textMedium),
                       onSelected: (v) {
                         if (v == 'share') onShare();
+                        if (v == 'order') onOrder();
                         if (v == 'delete') onDelete();
                       },
                       itemBuilder: (_) => const [
@@ -309,6 +314,15 @@ class _BookTile extends StatelessWidget {
                                 size: 18, color: AppColors.sage),
                             SizedBox(width: 10),
                             Text('Partager'),
+                          ]),
+                        ),
+                        PopupMenuItem(
+                          value: 'order',
+                          child: Row(children: [
+                            Icon(Icons.local_shipping_outlined,
+                                size: 18, color: AppColors.amber),
+                            SizedBox(width: 10),
+                            Text('Commander l\'impression'),
                           ]),
                         ),
                         PopupMenuItem(
