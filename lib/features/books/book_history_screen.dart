@@ -275,10 +275,14 @@ class _BookTile extends StatelessWidget {
                               : AppColors.sage,
                         ),
                         const SizedBox(width: 8),
-                        Text(
-                          '$dateStr · ${book.memoriesCount} souvenir${book.memoriesCount != 1 ? 's' : ''}',
-                          style: const TextStyle(
-                              fontSize: 11, color: AppColors.textMedium),
+                        Expanded(
+                          child: Text(
+                            '$dateStr · ${book.memoriesCount} souvenir${book.memoriesCount != 1 ? 's' : ''}',
+                            style: const TextStyle(
+                                fontSize: 11, color: AppColors.textMedium),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                     ),
