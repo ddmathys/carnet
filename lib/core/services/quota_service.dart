@@ -6,15 +6,18 @@ class QuotaService {
   // Blocage réel (marge de tolérance au-dessus de la limite affichée) : on
   // n'empêche l'ajout qu'à partir de 350, mais l'UI annonce 300.
   static const int freePhotoHardLimit = 350;
-  static const int premiumPhotoLimit = 10000;
+  static const int premiumPhotoLimit = 15000;
   static const double premiumPriceChf = 29.0;
 
-  // Vidéos souvenir. La durée par clip est plafonnée à 60 s à la capture
+  // Vidéos souvenir. La durée par clip est plafonnée à 120 s à la capture
   // (cf. memory_create_screen) — c'est le principal levier de coût de stockage.
-  // Le nombre de vidéos est le palier gratuit/premium.
-  static const int freeVideoLimit = 15;
+  // Le nombre de vidéos est le palier gratuit/premium (plafond au NOMBRE de
+  // clips, pas à la durée cumulée).
+  // Estimation stockage (clip 2 min ~ 25 Mo) : gratuit 30 ≈ 0,75 Go ;
+  // premium 150 ≈ 3,75 Go par utilisateur.
+  static const int freeVideoLimit = 30;
   static const int premiumVideoLimit = 150;
-  static const int maxVideoDurationSec = 60;
+  static const int maxVideoDurationSec = 120;
   // Nombre max de vidéos attachées à UN même souvenir (en plus du quota global
   // ci-dessus). Garde la page du livre lisible et maîtrise le coût de stockage.
   static const int maxVideosPerMemory = 3;
