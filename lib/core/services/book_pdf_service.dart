@@ -25,6 +25,12 @@ class BookPdfService {
   static const _a4W = 21.0 * PdfPageFormat.cm + 2 * _bleed; // 218 mm (doc)
   static const _a4H = 28.0 * PdfPageFormat.cm + 2 * _bleed; // 288 mm (doc)
 
+  // Mise en page album : images BORD À BORD (full-bleed), sans marge ni
+  // espacement blanc entre photos. (Mettre une valeur > 0 réintroduirait un
+  // liseré crème — cf. spec « Moteur de mise en page A4 ».)
+  static const _pageMargin = 0.0; // 0 = photos jusqu'au bord
+  static const _gap = 0.0; // 0 = pas de blanc entre photos
+
   static PdfColor _toPdf(Color c) =>
       PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0);
 
@@ -208,42 +214,29 @@ class BookPdfService {
     // Up to 5 memory titles for cover subtitle
     final highlights = _coverHighlights(sorted);
 
-    // Orientation de chaque photo : portrait → page pleine, paysage → demi-page.
-    // Dimensions de chaque photo → orientation + éligibilité « pleine page ».
-    // Une photo portrait ne passe en PLEINE PAGE que si elle est assez nette
-    // (largeur ≥ _fullPageMinWidthPx) ; sinon, agrandie plein cadre elle serait
-    // pixelisée → on la met en demi-page (plus petite, défaut moins visible).
+    // Orientation de chaque photo : portrait vs paysage. Les portraits sont
+    // regroupés 2 par 2 côte à côte (au lieu d'une page pleine chacun) ; les
+    // paysages 2 par 2 empilés en demi-pages.
     final dimsList =
         successfulPhotos.map((e) => _imgDims(bytesByUrl[e.url]!)).toList();
     bool isPortraitAt(int i) {
       final d = dimsList[i];
       return d == null ? true : d.h > d.w;
     }
-    bool fullPageAt(int i) {
-      final d = dimsList[i];
-      return d != null && d.h > d.w && d.w >= _fullPageMinWidthPx;
-    }
 
-    // Index of the LAST successful photo per memory → QR placed at end of memory.
-    final lastPhotoIndexByMemory = <String, int>{};
-    for (int i = 0; i < successfulPhotos.length; i++) {
-      lastPhotoIndexByMemory[successfulPhotos[i].memory.id] = i;
-    }
-
-    // Construit l'entrée d'une photo : titre + description seulement sur la 1ʳᵉ
-    // photo du souvenir ; QR (lien d'écoute) seulement sur sa dernière photo.
-    final shownMemoryIds = <String>{};
-    _PhotoPageEntry entryAt(int i) {
+    // Construit l'entrée d'une photo. `showCaption` : pose titre + description
+    // (1ʳᵉ page du souvenir). `showQr` : pose le QR média (dernière page du
+    // souvenir).
+    _PhotoPageEntry buildEntry(int i,
+        {required bool showCaption, required bool showQr}) {
       final e = successfulPhotos[i];
-      final showCaption = shownMemoryIds.add(e.memory.id);
-      final isLastOfMemory = lastPhotoIndexByMemory[e.memory.id] == i;
       final hasAudio =
           e.memory.audioUrl != null && e.memory.audioUrl!.isNotEmpty;
       final hasVideo = e.memory.videoKeys.isNotEmpty;
-      final listenUrl = (isLastOfMemory && hasAudio && backendUrl.isNotEmpty)
+      final listenUrl = (showQr && hasAudio && backendUrl.isNotEmpty)
           ? '$backendUrl/listen?m=${e.memory.id}'
           : null;
-      final watchUrl = (isLastOfMemory && hasVideo && backendUrl.isNotEmpty)
+      final watchUrl = (showQr && hasVideo && backendUrl.isNotEmpty)
           ? '$backendUrl/watch?m=${e.memory.id}'
           : null;
       return _PhotoPageEntry(
@@ -256,35 +249,109 @@ class BookPdfService {
         listenUrl: listenUrl,
         watchUrl: watchUrl,
         videoCount: e.memory.videoKeys.length,
+        showCaption: showCaption,
       );
     }
 
-    // Pagination : 1 portrait = 1 page pleine ; les paysages sont regroupés par
-    // 2 en demi-pages. L'ordre chronologique est préservé (un portrait qui
-    // s'intercale vide d'abord la paire paysage en cours).
+    // Moteur de mise en page (cf. « Moteur de mise en page A4 pour Carnet ») :
+    // un souvenir à la fois (jamais deux souvenirs sur une page), photos
+    // séparées en VERTICALES (h>w) et HORIZONTALES (w>=h). On émet d'abord les
+    // pages verticales, puis les horizontales. Catalogue de 6 templates :
+    //   Verticales : V4 (≥4 → grille 2×2), V3 (3 → 1 grande + 2), V2 (2 →
+    //   empilées), V1 (1 → pleine page).
+    //   Horizontales : H2 (≥2 → 2 empilées), H1 (1 → pleine page).
+    // Légende posée sur la 1ʳᵉ page du souvenir ; QR média sur la DERNIÈRE.
     final photoPages = <_BookPhotoPage>[];
-    final pendingLandscape = <_PhotoPageEntry>[];
-    void flushLandscape() {
-      if (pendingLandscape.isEmpty) return;
-      photoPages.add(
-          _BookPhotoPage(entries: List.of(pendingLandscape), fullPage: false));
-      pendingLandscape.clear();
-    }
+    int idx = 0;
+    while (idx < successfulPhotos.length) {
+      final memId = successfulPhotos[idx].memory.id;
+      final group = <int>[];
+      while (idx < successfulPhotos.length &&
+          successfulPhotos[idx].memory.id == memId) {
+        group.add(idx);
+        idx++;
+      }
+      final verticals = group.where(isPortraitAt).toList();
+      final horizontals = group.where((j) => !isPortraitAt(j)).toList();
+      // Ordre d'émission : verticales d'abord, horizontales ensuite.
+      final emission = [...verticals, ...horizontals];
+      if (emission.isEmpty) continue;
+      final firstIdx = emission.first;
+      final lastIdx = emission.last;
 
-    for (int i = 0; i < successfulPhotos.length; i++) {
-      final entry = entryAt(i);
-      if (fullPageAt(i)) {
-        flushLandscape();
-        photoPages.add(_BookPhotoPage(entries: [entry], fullPage: true));
-      } else {
-        pendingLandscape.add(entry);
-        if (pendingLandscape.length == 2) flushLandscape();
+      _BookPhotoPage pageFor(List<int> slice, _Tpl tpl) => _BookPhotoPage(
+            entries: [
+              for (final j in slice)
+                buildEntry(j, showCaption: j == firstIdx, showQr: j == lastIdx)
+            ],
+            tpl: tpl,
+          );
+
+      // Verticales : V4 tant qu'il reste ≥4, puis V3 / V2 / V1 sur le reste.
+      var v = 0;
+      while (verticals.length - v >= 4) {
+        photoPages.add(pageFor(verticals.sublist(v, v + 4), _Tpl.v4));
+        v += 4;
+      }
+      switch (verticals.length - v) {
+        case 3:
+          photoPages.add(pageFor(verticals.sublist(v, v + 3), _Tpl.v3));
+          break;
+        case 2:
+          photoPages.add(pageFor(verticals.sublist(v, v + 2), _Tpl.v2));
+          break;
+        case 1:
+          photoPages.add(pageFor(verticals.sublist(v, v + 1), _Tpl.v1));
+          break;
+      }
+
+      // Horizontales : H2 tant qu'il reste ≥2, puis H1 sur le dernier.
+      var h = 0;
+      while (horizontals.length - h >= 2) {
+        photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
+        h += 2;
+      }
+      if (horizontals.length - h == 1) {
+        photoPages.add(pageFor(horizontals.sublist(h, h + 1), _Tpl.h1));
       }
     }
-    flushLandscape();
 
     final pdfCover = _toPdf(coverColor);
-    final totalPages = 1 + photoPages.length + textOnlyMemories.length;
+
+    // Page courbe de croissance (carnet enfant uniquement) : dès 2 mesures
+    // taille/poids, une page récap placée à la fin du livre (réf. OMS).
+    final growthMilestones = sorted
+        .where((m) =>
+            m.type == 'taille_poids' &&
+            (m.heightCm != null || m.weightKg != null))
+        .map((m) => MilestoneModel(
+              id: m.id,
+              childId: notebook.id,
+              type: 'taille_poids',
+              date: m.date,
+              rawContent: '',
+              createdAt: m.date,
+              weightKg: m.weightKg,
+              heightCm: m.heightCm,
+            ))
+        .toList();
+    final hasGrowth =
+        notebook.type == 'enfant' && growthMilestones.length >= 2;
+    final childForGrowth = ChildModel(
+      id: notebook.id,
+      parentId: '',
+      firstName: notebook.title,
+      birthDate: notebook.birthdate ?? DateTime.now(),
+      animalId: notebook.companion ?? 'fox',
+      animalName: notebook.companionName ?? '',
+      coverColor: notebook.coverColor,
+      gender: notebook.gender ?? 'boy',
+    );
+
+    final totalPages = 1 +
+        photoPages.length +
+        textOnlyMemories.length +
+        (hasGrowth ? 1 : 0);
     // A4 full-bleed — margins handled inside each widget
     final fmt = PdfPageFormat(_a4W, _a4H, marginAll: 0);
 
@@ -308,7 +375,7 @@ class BookPdfService {
         ),
       ));
 
-      // 2. Photo pages (portrait pleine page, ou 1-2 paysages par page)
+      // 2. Photo pages (templates V4/V3/V2/V1 verticales, H2/H1 horizontales)
       for (int p = 0; p < photoPages.length; p++) {
         final pageNum = p + 2;
         final page = photoPages[p];
@@ -316,7 +383,7 @@ class BookPdfService {
           pageFormat: fmt,
           build: (_) => _photoPage(
             entries: page.entries,
-            fullPage: page.fullPage,
+            tpl: page.tpl,
             cover: pdfCover,
             pR: playfairR,
             pB: playfairB,
@@ -341,6 +408,23 @@ class BookPdfService {
             pageNum: pageNum,
             total: totalPages,
             backendUrl: backendUrl,
+          ),
+        ));
+      }
+
+      // 3b. Page courbe de croissance (enfant) — en fin de livre.
+      if (hasGrowth) {
+        doc.addPage(pw.Page(
+          pageFormat: fmt,
+          build: (_) => _growthPage(
+            child: childForGrowth,
+            milestones: growthMilestones,
+            cover: pdfCover,
+            coverFlutter: coverColor,
+            pB: playfairB,
+            dm: dmSans,
+            pageNum: 1 + photoPages.length + textOnlyMemories.length + 1,
+            total: totalPages,
           ),
         ));
       }
@@ -383,10 +467,6 @@ class BookPdfService {
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
-
-  // Largeur min (px) d'une photo portrait pour la passer en pleine page (21 cm
-  // de large → ~1400 px ≈ 170 DPI). En-dessous, on la met en demi-page.
-  static const int _fullPageMinWidthPx = 1400;
 
   // Lit (largeur, hauteur) en pixels depuis les en-têtes PNG/JPEG — sans package.
   static ({int w, int h})? _imgDims(Uint8List bytes) {
@@ -451,7 +531,7 @@ class BookPdfService {
     required pw.Font dm,
     required int pageNum,
     required int total,
-    bool fullPage = false,
+    _Tpl tpl = _Tpl.h1,
   }) {
     if (entries.isEmpty) return pw.Container();
 
@@ -530,8 +610,6 @@ class BookPdfService {
     );
 
     // Empile les QR présents (vidéo au-dessus, audio en dessous).
-    int badgeCount(_PhotoPageEntry e) =>
-        (e.watchUrl != null ? 1 : 0) + (e.listenUrl != null ? 1 : 0);
     pw.Widget mediaBadges(_PhotoPageEntry e) => pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       crossAxisAlignment: pw.CrossAxisAlignment.start,
@@ -544,81 +622,87 @@ class BookPdfService {
       ],
     );
 
-    // ── Photo portrait en pleine page A4 (pas de coupe horizontale) ──
-    if (fullPage) {
-      final e = entries[0];
-      return pw.Stack(
-        children: [
-          pw.SizedBox(width: _a4W, height: _a4H),
-          pw.Positioned(
-            left: 0, top: 0,
-            child: pw.SizedBox(
-              width: _a4W, height: _a4H,
-              child: pw.Image(pw.MemoryImage(e.bytes),
-                  fit: pw.BoxFit.cover, alignment: pw.Alignment.center),
-            ),
-          ),
-          // Légende encadrée en haut (rentrée du fond perdu)
-          pw.Positioned(top: _bleed, left: _bleed, right: _bleed,
-              child: captionBox(e, maxChars: 240)),
-          // QR média (vidéo / audio) en bas-gauche si présents
-          if (e.listenUrl != null || e.watchUrl != null)
-            pw.Positioned(bottom: _bleed, left: _bleed, child: mediaBadges(e)),
-          // Numéro de page
-          pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
-        ],
-      );
+    // ── Rendu des 6 templates ────────────────────────────────────────────────
+    // Zone imprimable = page moins la marge album ; espacement `_gap` uniforme
+    // entre photos. Chaque photo remplit sa case en `cover` (ratio conservé,
+    // léger recadrage), comme demandé dans la spec.
+    const margin = _pageMargin;
+    const gap = _gap;
+    final cx = margin, cy = margin;
+    final cw = _a4W - 2 * margin;
+    final ch = _a4H - 2 * margin;
+
+    pw.Widget cell(double x, double y, double w, double h, _PhotoPageEntry e) =>
+        pw.Positioned(left: x, top: y,
+          child: pw.SizedBox(width: w, height: h,
+            child: pw.Image(pw.MemoryImage(e.bytes),
+                fit: pw.BoxFit.cover,
+                alignment: e.isPortrait
+                    ? pw.Alignment.topCenter
+                    : pw.Alignment.center)));
+
+    final photos = <pw.Widget>[];
+    switch (tpl) {
+      case _Tpl.v4: // grille 2×2, 4 cases identiques
+        final w = (cw - gap) / 2, h = (ch - gap) / 2;
+        photos.addAll([
+          cell(cx, cy, w, h, entries[0]),
+          cell(cx + w + gap, cy, w, h, entries[1]),
+          cell(cx, cy + h + gap, w, h, entries[2]),
+          cell(cx + w + gap, cy + h + gap, w, h, entries[3]),
+        ]);
+        break;
+      case _Tpl.v3: // 1 grande en haut + 2 en bas
+        final topH = (ch - gap) * 0.56;
+        final botH = ch - gap - topH;
+        final w = (cw - gap) / 2;
+        final botY = cy + topH + gap;
+        photos.addAll([
+          cell(cx, cy, cw, topH, entries[0]),
+          cell(cx, botY, w, botH, entries[1]),
+          cell(cx + w + gap, botY, w, botH, entries[2]),
+        ]);
+        break;
+      case _Tpl.v2: // 2 empilées (demi-page chacune)
+      case _Tpl.h2:
+        final h = (ch - gap) / 2;
+        photos.add(cell(cx, cy, cw, h, entries[0]));
+        if (entries.length > 1) {
+          photos.add(cell(cx, cy + h + gap, cw, h, entries[1]));
+        }
+        break;
+      case _Tpl.v1: // 1 photo pleine surface imprimable
+      case _Tpl.h1:
+        photos.add(cell(cx, cy, cw, ch, entries[0]));
+        break;
     }
 
-    // Toujours demi-page : photo du haut, photo (ou fond crème) du bas
-    final halfH = _a4H / 2;
-    final e0 = entries[0];
-    final e1 = entries.length > 1 ? entries[1] : null;
+    // QR média : une seule entrée le porte (dernière page du souvenir).
+    _PhotoPageEntry? qrEntry;
+    for (final e in entries) {
+      if (e.listenUrl != null || e.watchUrl != null) qrEntry = e;
+    }
+    // Carte légende sur la 1ʳᵉ page du souvenir (au moins la date).
+    final hasCaption = entries[0].showCaption;
 
     return pw.Stack(
       children: [
         // Base — fixe la taille du Stack au format A4
         pw.SizedBox(width: _a4W, height: _a4H),
-
-        // Demi-page haute : photo 1
-        // Portrait → alignement haut (crop sur les pieds, pas sur la tête)
+        // Fond crème : marges album + remplissage des vides éventuels.
         pw.Positioned(left: 0, top: 0,
-          child: pw.SizedBox(width: _a4W, height: halfH,
-            child: pw.Image(pw.MemoryImage(e0.bytes),
-              fit: pw.BoxFit.cover,
-              alignment: e0.isPortrait ? pw.Alignment.topCenter : pw.Alignment.center))),
-
-        // Demi-page basse : photo 2 ou fond crème si impair
-        pw.Positioned(left: 0, top: halfH,
-          child: pw.SizedBox(width: _a4W, height: halfH,
-            child: e1 != null
-                ? pw.Image(pw.MemoryImage(e1.bytes),
-                    fit: pw.BoxFit.cover,
-                    alignment: e1.isPortrait ? pw.Alignment.topCenter : pw.Alignment.center)
-                : pw.Container(color: _cream))),
-
-        // Séparateur blanc entre les deux moitiés
-        pw.Positioned(left: 0, right: 0, top: halfH - 0.5,
-          child: pw.Container(height: 1, color: PdfColors.white)),
-
-        // Captions au-dessus de chaque demi-page (rentrées du fond perdu)
-        pw.Positioned(top: _bleed, left: _bleed, right: _bleed,
-          child: captionBox(e0, maxChars: 120)),
-        if (e1 != null)
-          pw.Positioned(top: halfH, left: _bleed, right: _bleed,
-            child: captionBox(e1, maxChars: 120)),
-
-        // QR média en fin de souvenir, coin bas-gauche de la demi-page.
-        // La demi-page haute s'ancre juste au-dessus du séparateur (offset
-        // selon le nombre de badges pour ne pas mordre sur l'image du bas).
-        if (e0.listenUrl != null || e0.watchUrl != null)
-          pw.Positioned(
-              top: halfH - (badgeCount(e0) >= 2 ? 124 : 64),
-              left: _bleed,
-              child: mediaBadges(e0)),
-        if (e1 != null && (e1.listenUrl != null || e1.watchUrl != null))
-          pw.Positioned(bottom: _bleed, left: _bleed, child: mediaBadges(e1)),
-
+          child: pw.SizedBox(width: _a4W, height: _a4H,
+            child: pw.Container(color: _cream))),
+        // Photos du template
+        ...photos,
+        // Légende — 1ʳᵉ page du souvenir, encadrée en haut-gauche (rentrée du
+        // fond perdu pour ne pas être rognée).
+        if (hasCaption)
+          pw.Positioned(top: _bleed, left: _bleed, right: _a4W * 0.42,
+              child: captionBox(entries[0], maxChars: 150)),
+        // QR média — DERNIÈRE page du souvenir, bas-gauche.
+        if (qrEntry != null)
+          pw.Positioned(bottom: _bleed, left: _bleed, child: mediaBadges(qrEntry)),
         // Numéro de page
         pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
       ],
@@ -1250,12 +1334,15 @@ class _PhotoEntry {
   const _PhotoEntry({required this.memory, required this.url});
 }
 
-/// Une page de photos : soit un portrait en pleine page (`fullPage`), soit
-/// 1 à 2 photos paysage en demi-pages.
+/// Catalogue des 6 templates de mise en page (cf. spec « Moteur de mise en
+/// page A4 pour Carnet »). Verticales : v4/v3/v2/v1 ; horizontales : h2/h1.
+enum _Tpl { v4, v3, v2, v1, h2, h1 }
+
+/// Une page de photos d'un même souvenir, avec son template.
 class _BookPhotoPage {
   final List<_PhotoPageEntry> entries;
-  final bool fullPage;
-  const _BookPhotoPage({required this.entries, required this.fullPage});
+  final _Tpl tpl;
+  const _BookPhotoPage({required this.entries, required this.tpl});
 }
 
 class _PhotoPageEntry {
@@ -1268,5 +1355,8 @@ class _PhotoPageEntry {
   final String? listenUrl;
   final String? watchUrl;
   final int videoCount;
-  const _PhotoPageEntry({required this.bytes, required this.date, this.title, this.caption, this.locationComment, this.isPortrait = true, this.listenUrl, this.watchUrl, this.videoCount = 0});
+  /// Vraie sur la 1ʳᵉ photo du souvenir → porte la carte légende (date + titre
+  /// + description), même si le souvenir n'a pas de texte (au moins la date).
+  final bool showCaption;
+  const _PhotoPageEntry({required this.bytes, required this.date, this.title, this.caption, this.locationComment, this.isPortrait = true, this.listenUrl, this.watchUrl, this.videoCount = 0, this.showCaption = false});
 }
