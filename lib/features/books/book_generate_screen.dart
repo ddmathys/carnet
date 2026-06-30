@@ -195,10 +195,24 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
       if (!mounted) return;
       final nb = NotebookModel.fromFirestore(nbDoc);
+      // Photo de couverture par défaut : la première photo trouvée parmi les
+      // souvenirs (ordre chronologique). L'utilisateur peut en changer ensuite.
+      String? defaultCover;
+      for (final m in allMemories) {
+        if (m.mediaUrls.isNotEmpty) {
+          defaultCover = m.mediaUrls.first;
+          break;
+        }
+        if (m.photoUrl != null && m.photoUrl!.isNotEmpty) {
+          defaultCover = m.photoUrl;
+          break;
+        }
+      }
       setState(() {
         _notebook = nb;
         _memories = allMemories;
         _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
+        _coverPhotoUrl = defaultCover;
         _loadError = null;
       });
       // Initialise les champs éditables : le titre = ce qui s'affiche par
@@ -1383,7 +1397,7 @@ class _BookCoverPreview extends StatelessWidget {
                                 fontFamily: 'PlayfairDisplay', fontSize: 11,
                                 fontWeight: FontWeight.bold, color: Color(0xFF2D2416),
                               ),
-                              maxLines: 1,
+                              maxLines: 3,
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 3),
