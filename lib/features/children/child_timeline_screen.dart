@@ -56,17 +56,6 @@ class _ChildTimelineScreenState extends State<ChildTimelineScreen> {
                 color: AppColors.sage,
                 tooltip: 'Résumé',
               ),
-              TextButton.icon(
-                onPressed: () => context.push('/child/${widget.childId}/story'),
-                icon: const Text('📖', style: TextStyle(fontSize: 16)),
-                label: const Text(
-                  'Histoire',
-                  style: TextStyle(
-                    color: AppColors.sage,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
             ],
           ),
           body: StreamBuilder<QuerySnapshot>(

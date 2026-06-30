@@ -1,16 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:go_router/go_router.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import '../../core/models/child_model.dart';
-import '../../core/services/deepseek_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/widgets/date_mask_field.dart';
 import 'widgets/growth_curve_chart.dart';
 import 'widgets/flexible_date_sheet.dart';
-import 'scan_milestone_screen.dart';
 
 class AddMilestoneScreen extends StatefulWidget {
   final String childId;
@@ -34,15 +31,6 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
   // ── Données enfant ─────────────────────────────────────────────────────────
   ChildModel? _child;
 
-  // ── Étape 0 : saisie libre ─────────────────────────────────────────────────
-  final _smartController = TextEditingController();
-  bool _isAnalyzing = false;
-  bool _showManualGrid = false;
-
-  // ── Vocal ──────────────────────────────────────────────────────────────────
-  final SpeechToText _speech = SpeechToText();
-  bool _isListening = false;
-
   // ── Étape 1 : formulaire ───────────────────────────────────────────────────
   String? _selectedCategory;
   String? _selectedSubType;
@@ -54,8 +42,6 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
   final _heightController = TextEditingController();
   bool _loading = false;
 
-  final _deepseek = DeepSeekService();
-
   // ── Init / dispose ─────────────────────────────────────────────────────────
 
   @override
@@ -66,11 +52,9 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
 
   @override
   void dispose() {
-    _smartController.dispose();
     _textController.dispose();
     _weightController.dispose();
     _heightController.dispose();
-    _speech.stop();
     super.dispose();
   }
 
@@ -126,108 +110,6 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
         _textController.text = textValue;
       }
     });
-  }
-
-  // ── Vocal ──────────────────────────────────────────────────────────────────
-
-  Future<void> _toggleListening() async {
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-      return;
-    }
-
-    bool available = false;
-    try {
-      available = await _speech.initialize(
-        onError: (e) {
-          if (mounted) {
-            setState(() => _isListening = false);
-            _showSnack('Erreur vocale: ${e.errorMsg}');
-          }
-        },
-      );
-    } catch (_) {
-      if (mounted) _showSnack('Vocal non disponible — redémarre l\'app');
-      return;
-    }
-
-    if (!available) {
-      _showSnack('Reconnaissance vocale non disponible sur cet appareil');
-      return;
-    }
-
-    setState(() => _isListening = true);
-    await _speech.listen(
-      onResult: (result) {
-        if (mounted) {
-          setState(() => _smartController.text = result.recognizedWords);
-          if (result.finalResult) setState(() => _isListening = false);
-        }
-      },
-      localeId: 'fr_FR',
-      cancelOnError: true,
-      partialResults: true,
-    );
-  }
-
-  // ── Analyse IA ─────────────────────────────────────────────────────────────
-
-  Future<void> _analyzeAndFill() async {
-    final text = _smartController.text.trim();
-    if (text.isEmpty) return;
-
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-    }
-
-    setState(() => _isAnalyzing = true);
-    try {
-      final results = await _deepseek.extractAllMilestonesFromText(text: text);
-      if (!mounted) return;
-      if (results == null || results.isEmpty) {
-        _showSnack('Impossible d\'analyser — réessaie');
-        return;
-      }
-
-      // Plusieurs souvenirs → page de liste (ScanMilestoneScreen)
-      if (results.length > 1) {
-        if (!mounted) return;
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => ScanMilestoneScreen(
-              childId: widget.childId,
-              initialDrafts: results,
-            ),
-          ),
-        );
-        return;
-      }
-
-      // Un seul souvenir → formulaire pré-rempli
-      final r = results.first;
-      setState(() {
-        _selectedCategory = r.type;
-        _selectedSubType = r.subType;
-        if (r.date != null) {
-          _selectedDate = r.date!;
-          _datePrecision = r.datePrecision;
-          _dateNeedsConfirmation = false;
-        } else {
-          _selectedDate = DateTime.now();
-          _datePrecision = DatePrecision.exact;
-          _dateNeedsConfirmation = true;
-        }
-        _textController.text = r.type != 'taille_poids' ? r.rawContent : '';
-        if (r.weightKg != null) _weightController.text = r.weightKg!.toStringAsFixed(1);
-        if (r.heightCm != null) _heightController.text = r.heightCm!.toStringAsFixed(1);
-        _step = 1;
-      });
-    } finally {
-      if (mounted) setState(() => _isAnalyzing = false);
-    }
   }
 
   // ── Date picker ────────────────────────────────────────────────────────────
@@ -440,9 +322,7 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
   void _goBack() {
-    if (_step == 0) {
-      context.go('/child/${widget.childId}');
-    } else {
+    if (_step == 1 && !_isEditing) {
       setState(() {
         _step = 0;
         _selectedCategory = null;
@@ -452,6 +332,8 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
         _weightController.clear();
         _heightController.clear();
       });
+    } else {
+      context.go('/child/${widget.childId}');
     }
   }
 
@@ -464,32 +346,26 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
     }
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isEditing
-            ? 'Modifier le souvenir'
-            : _step == 0
-                ? 'Nouveau souvenir'
-                : 'Vérifier & confirmer'),
+        title: Text(_isEditing ? 'Modifier le souvenir' : 'Nouveau souvenir'),
         leading: IconButton(
           icon: Icon(_step == 0 ? Icons.close : Icons.arrow_back),
           onPressed: _goBack,
         ),
       ),
-      body: _step == 0 ? _buildSmartInputStep() : _buildDetailsStep(),
+      body: _step == 0 ? _buildTypePickerStep() : _buildDetailsStep(),
     );
   }
 
-  // ── Étape 0 : saisie libre + vocal + import ────────────────────────────────
+  // ── Étape 0 : choix du type ────────────────────────────────────────────────
 
-  Widget _buildSmartInputStep() {
-    final hasText = _smartController.text.trim().isNotEmpty;
-
+  Widget _buildTypePickerStep() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Qu\'as-tu à noter ?',
+            'Quel souvenir veux-tu ajouter ?',
             style: TextStyle(
               fontFamily: 'PlayfairDisplay',
               fontSize: 26,
@@ -499,194 +375,43 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Écris ou dicte librement — l\'IA classe automatiquement.',
+            'Choisis un type, ou « Autre souvenir » pour écrire librement.',
             style: TextStyle(color: AppColors.textMedium, fontSize: 14),
           ),
           const SizedBox(height: 20),
-
-          // Zone de texte + bouton micro
-          Stack(
-            children: [
-              TextField(
-                controller: _smartController,
-                maxLines: 6,
-                onChanged: (_) => setState(() {}),
-                autofocus: true,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: const InputDecoration(
-                  hintText:
-                      'Ex : "Léa a dit maman pour la première fois ce matin…"',
-                  alignLabelWithHint: true,
-                  contentPadding:
-                      EdgeInsets.fromLTRB(16, 14, 52, 14),
-                ),
-              ),
-              Positioned(
-                right: 8,
-                top: 8,
-                child: GestureDetector(
-                  onTap: _toggleListening,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: _isListening
-                          ? const Color(0xFFD64045)
-                          : AppColors.sage,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _isListening ? Icons.stop : Icons.mic,
-                      color: Colors.white,
-                      size: 18,
-                    ),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: 1.3,
+            children: kMilestoneCategories.where((c) => !c.isLegacy).map((cat) {
+              return GestureDetector(
+                onTap: () => setState(() {
+                  _selectedCategory = cat.id;
+                  _step = 1;
+                }),
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(20),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.04),
+                        blurRadius: 10,
+                        offset: const Offset(0, 3),
+                      ),
+                    ],
                   ),
-                ),
-              ),
-            ],
-          ),
-
-          if (_isListening) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFD64045),
-                    shape: BoxShape.circle,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Écoute en cours… parle maintenant',
-                  style: TextStyle(
-                      color: Color(0xFFD64045), fontSize: 13),
-                ),
-              ],
-            ),
-          ],
-
-          const SizedBox(height: 20),
-
-          // Bouton analyser
-          if (_isAnalyzing)
-            const Center(child: CircularProgressIndicator())
-          else
-            ElevatedButton.icon(
-              onPressed: hasText ? _analyzeAndFill : null,
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('Analyser avec l\'IA'),
-              style: ElevatedButton.styleFrom(
-                disabledBackgroundColor: AppColors.beige,
-                disabledForegroundColor: AppColors.softGray,
-              ),
-            ),
-
-          const SizedBox(height: 20),
-
-          // Séparateur
-          const Row(
-            children: [
-              Expanded(child: Divider(color: AppColors.beige)),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Text('ou',
-                    style: TextStyle(
-                        color: AppColors.softGray, fontSize: 13)),
-              ),
-              Expanded(child: Divider(color: AppColors.beige)),
-            ],
-          ),
-
-          const SizedBox(height: 16),
-
-          // Import depuis une note
-          GestureDetector(
-            onTap: () => context
-                .push('/child/${widget.childId}/scan-milestone'),
-            child: Container(
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.white,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.beige, width: 1.5),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.document_scanner_outlined,
-                      color: AppColors.earth, size: 20),
-                  SizedBox(width: 10),
-                  Text(
-                    'Importer depuis une note',
-                    style: TextStyle(
-                      color: AppColors.earth,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  SizedBox(width: 6),
-                  Text('· photo ou texte long',
-                      style: TextStyle(
-                          color: AppColors.softGray, fontSize: 12)),
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 12),
-
-          // Choix manuel (repli)
-          Center(
-            child: TextButton(
-              onPressed: () =>
-                  setState(() => _showManualGrid = !_showManualGrid),
-              child: Text(
-                _showManualGrid
-                    ? 'Masquer le choix manuel'
-                    : 'Choisir le type manuellement',
-                style: const TextStyle(
-                    color: AppColors.softGray, fontSize: 13),
-              ),
-            ),
-          ),
-
-          if (_showManualGrid) ...[
-            const SizedBox(height: 8),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              children: kMilestoneCategories.where((c) => !c.isLegacy).map((cat) {
-                return GestureDetector(
-                  onTap: () => setState(() {
-                    _selectedCategory = cat.id;
-                    _step = 1;
-                  }),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 10,
-                          offset: const Offset(0, 3),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(cat.emoji,
-                            style: const TextStyle(fontSize: 40)),
-                        const SizedBox(height: 10),
-                        Text(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(cat.emoji, style: const TextStyle(fontSize: 36)),
+                      const SizedBox(height: 8),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        child: Text(
                           cat.label,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
@@ -695,13 +420,25 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
                             fontSize: 13,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                );
-              }).toList(),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                _selectedCategory = 'anecdote';
+                _step = 1;
+              }),
+              icon: const Icon(Icons.edit_outlined, size: 16),
+              label: const Text('Autre souvenir'),
+              style: TextButton.styleFrom(foregroundColor: AppColors.sage),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -932,8 +669,8 @@ class _AddMilestoneScreenState extends State<AddMilestoneScreen> {
             controller: _textController,
             maxLines: 6,
             decoration: const InputDecoration(
-              labelText: 'Raconte ce moment... (optionnel)',
-              hintText: 'Ajoute des détails, émotions, anecdotes...',
+              labelText: 'Qu\'est-ce qui t\'a marqué pour ce souvenir ?',
+              hintText: 'Partage-le ici…',
               alignLabelWithHint: true,
             ),
             onChanged: (_) => setState(() {}),
@@ -991,69 +728,6 @@ class _Pill extends StatelessWidget {
           color: selected ? AppColors.white : AppColors.textMedium,
           fontSize: 13,
           fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-}
-
-class _DatePickerButton extends StatelessWidget {
-  final String label;
-  final bool highlighted;
-  final VoidCallback onTap;
-
-  const _DatePickerButton({
-    required this.label,
-    required this.onTap,
-    this.highlighted = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding:
-            const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: highlighted
-              ? const Color(0xFFFFF3CD)
-              : AppColors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: highlighted
-                ? const Color(0xFFE6A817)
-                : AppColors.beige,
-            width: 1.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.calendar_today_outlined,
-              color: highlighted
-                  ? const Color(0xFFE6A817)
-                  : AppColors.textMedium,
-              size: 18,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: highlighted
-                      ? const Color(0xFFB07800)
-                      : AppColors.textDark,
-                  fontWeight: highlighted
-                      ? FontWeight.w500
-                      : FontWeight.normal,
-                ),
-              ),
-            ),
-            const Icon(Icons.expand_more,
-                color: AppColors.softGray, size: 18),
-          ],
         ),
       ),
     );

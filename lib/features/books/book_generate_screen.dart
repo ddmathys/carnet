@@ -12,13 +12,10 @@ import '../../core/config/app_config.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
-import '../../core/models/book_settings.dart';
-import '../../core/services/deepseek_service.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/order_service.dart';
-import '../story/book_settings_sheet.dart';
 
 class BookGenerateScreen extends StatefulWidget {
   /// Single notebook mode: pass [notebookId]
@@ -44,7 +41,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // ── Data ───────────────────────────────────────────────────────────────────
   NotebookModel? _notebook;
   List<MemoryModel> _memories = [];
-  BookSettings _settings = const BookSettings();
   String? _loadError; // message si le chargement initial échoue
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -87,21 +83,24 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   late Animation<double> _coverScale;
 
   static const _loadingMessages = [
-    'J\'analyse les lieux…',
-    'Je prépare les descriptions…',
+    'Je mets en page tes souvenirs…',
+    'Je prépare les photos…',
     'Le livre prend forme…',
     'Presque prêt…',
   ];
 
-  final _deepseek = DeepSeekService();
-
   List<MemoryModel> get _selectedMemories =>
       _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();
 
-  // Nombre de pages estimé + prix (aligné sur les pages) pour les écrans.
-  int get _estimatedPages => BookPricing.estimatePages(_selectedMemories);
+  // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
+  // avant l'étape format) ; sinon estimation. Pour l'imprimé, le prix se base
+  // sur les pages réellement imprimées (bourrage Gelato pair / ≥28).
+  int get _pages => _previewPageCount > 0
+      ? _previewPageCount
+      : BookPricing.estimatePages(_selectedMemories);
+  int get _printedPages => BookPricing.printablePages(_pages);
   double _priceFor(String coverType) =>
-      BookPricing.price(coverType: coverType, pages: _estimatedPages);
+      BookPricing.price(coverType: coverType, pages: _printedPages);
   String _priceLabel(String coverType) => BookPricing.format(_priceFor(coverType));
 
   String get _yearRange {
@@ -260,25 +259,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       });
     });
 
-    // 1. Commentaires de lieux (IA) — optionnel, non bloquant.
-    if (_settings.locationComments) {
-      final memoriesWithLocation = _selectedMemories
-          .where((m) => m.location != null && m.location!.trim().isNotEmpty)
-          .toList();
-      if (memoriesWithLocation.isNotEmpty) {
-        try {
-          _locationComments = await _deepseek
-              .generateLocationComments(
-                memories: memoriesWithLocation,
-                tone: _settings.tone,
-              )
-              .timeout(const Duration(seconds: 45),
-                  onTimeout: () => <String, String>{});
-        } catch (_) {/* on continue sans commentaires */}
-      }
-    }
-
-    // 2. Génère le vrai PDF → aperçu WYSIWYG (rastérisé page par page).
+    // Génère le vrai PDF → aperçu WYSIWYG (rastérisé page par page).
     try {
       final gen = await _buildPreviewPdf();
       if (!mounted) return;
@@ -597,14 +578,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               }
             },
           ),
-          actions: [
-            if (_step == 0 && !_generating && !_showPreview)
-              IconButton(
-                icon: const Icon(Icons.tune_outlined, color: AppColors.textDark),
-                tooltip: 'Paramètres',
-                onPressed: _openSettings,
-              ),
-          ],
+          actions: const [],
         ),
         body: _showPreview
             ? _buildBookPreview()
@@ -778,7 +752,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ElevatedButton.icon(
               onPressed: _selectedMemories.isEmpty ? null : _generate,
               icon: const Icon(Icons.menu_book_outlined),
-              label: Text(_settings.locationComments ? 'Créer le livre avec lieux' : 'Créer le livre'),
+              label: const Text('Créer le livre'),
               style: ElevatedButton.styleFrom(
                 disabledBackgroundColor: AppColors.background,
                 disabledForegroundColor: AppColors.softGray,
@@ -980,6 +954,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             title: 'PDF Digital',
             subtitle: 'Télécharge et imprime toi-même',
             price: 'Gratuit',
+            priceSub: '$_pages pages',
             priceColor: AppColors.sage,
             selected: _selectedFormat == 'digital',
             onTap: () => setState(() => _selectedFormat = 'digital'),
@@ -988,8 +963,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _FormatCard(
             emoji: '📗',
             title: 'Couverture souple',
-            subtitle: 'Livre 21×28 cm · ~$_estimatedPages pages · 5–7 jours',
+            subtitle: 'Livre 21×28 cm · 5–7 jours',
             price: _priceLabel('soft'),
+            priceSub: '$_printedPages pages',
             priceColor: AppColors.amber,
             selected: _selectedFormat == 'printed' && _coverType == 'soft',
             onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'soft'; }),
@@ -998,11 +974,24 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _FormatCard(
             emoji: '📕',
             title: 'Couverture rigide',
-            subtitle: 'Livre 21×28 cm · couverture cartonnée · ~$_estimatedPages pages',
+            subtitle: 'Livre 21×28 cm · couverture cartonnée',
             price: _priceLabel('hard'),
+            priceSub: '$_printedPages pages',
             priceColor: AppColors.amber,
             selected: _selectedFormat == 'printed' && _coverType == 'hard',
             onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'hard'; }),
+          ),
+          const SizedBox(height: 12),
+          // Bouton info : grille tarifaire selon le nombre de pages.
+          Center(
+            child: TextButton.icon(
+              onPressed: _showPricingTable,
+              icon: const Icon(Icons.info_outline, size: 16, color: AppColors.textMedium),
+              label: const Text(
+                'Comment le prix est calculé ?',
+                style: TextStyle(color: AppColors.textMedium, fontSize: 13),
+              ),
+            ),
           ),
           if (_selectedFormat == 'printed') ...[
             const SizedBox(height: 12),
@@ -1099,7 +1088,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   const Divider(height: 24, color: Color(0xFFDDD8CC)),
                   _OrderRow(
                     label: 'Pages',
-                    value: '~$_estimatedPages pages'),
+                    value: '$_printedPages pages'),
                   const Divider(height: 24, color: Color(0xFFDDD8CC)),
                   _OrderRow(
                     label: 'Total',
@@ -1212,17 +1201,118 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     );
   }
 
-  Future<void> _openSettings() async {
-    showModalBottomSheet<void>(
+  // Feuille d'information : grille tarifaire selon le nombre de pages.
+  Future<void> _showPricingTable() async {
+    // Exemples de paliers (pages imprimées) — le prix de TON livre est mis en
+    // évidence si son nombre de pages tombe dans la liste.
+    const samples = [28, 40, 60, 80, 100, 150, 200];
+    final mine = _printedPages;
+    final rows = {...samples, mine}.toList()..sort();
+
+    await showModalBottomSheet<void>(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => BookSettingsSheet(
-        initial: _settings,
-        onApply: (updated, regenerate) {
-          setState(() => _settings = updated);
-          if (regenerate) _generate();
-        },
+      backgroundColor: AppColors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 36, height: 4,
+                  decoration: BoxDecoration(
+                    color: AppColors.softGray.withOpacity(0.4),
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Comment le prix est calculé',
+                style: TextStyle(
+                  fontFamily: 'PlayfairDisplay',
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textDark,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Prix de base ${BookPricing.format(BookPricing.softBase)} '
+                '(souple) / ${BookPricing.format(BookPricing.hardBase)} '
+                '(rigide) jusqu\'à ${BookPricing.includedPages} pages, puis '
+                '+${BookPricing.format(BookPricing.perExtraPage)} par page. '
+                'Les livres imprimés font 28 pages minimum.',
+                style: const TextStyle(color: AppColors.textMedium, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 16),
+              // En-tête du tableau
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Row(
+                  children: [
+                    Expanded(flex: 2, child: Text('Pages', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark))),
+                    Expanded(flex: 3, child: Text('Souple', textAlign: TextAlign.end, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark))),
+                    Expanded(flex: 3, child: Text('Rigide', textAlign: TextAlign.end, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark))),
+                  ],
+                ),
+              ),
+              for (final p in rows)
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                  decoration: BoxDecoration(
+                    color: p == mine ? AppColors.sage.withOpacity(0.10) : null,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          p == mine ? '$p · ton livre' : '$p',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: AppColors.textDark,
+                            fontWeight: p == mine ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          BookPricing.format(BookPricing.price(coverType: 'soft', pages: p)),
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(fontSize: 13, color: AppColors.textMedium),
+                        ),
+                      ),
+                      Expanded(
+                        flex: 3,
+                        child: Text(
+                          BookPricing.format(BookPricing.price(coverType: 'hard', pages: p)),
+                          textAlign: TextAlign.end,
+                          style: const TextStyle(fontSize: 13, color: AppColors.textMedium),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 12),
+              const Text(
+                '🔒  Paiement sécurisé.',
+                style: TextStyle(color: AppColors.softGray, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1468,6 +1558,7 @@ class _FormatCard extends StatelessWidget {
   final String title;
   final String subtitle;
   final String price;
+  final String? priceSub; // ex. « 28 pages » sous le prix
   final Color priceColor;
   final bool selected;
   final VoidCallback onTap;
@@ -1477,6 +1568,7 @@ class _FormatCard extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.price,
+    this.priceSub,
     required this.priceColor,
     required this.selected,
     required this.onTap,
@@ -1526,13 +1618,26 @@ class _FormatCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-            Text(
-              price,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 14,
-                color: priceColor,
-              ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  price,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    fontSize: 14,
+                    color: priceColor,
+                  ),
+                ),
+                if (priceSub != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    priceSub!,
+                    style: const TextStyle(
+                        color: AppColors.textMedium, fontSize: 11),
+                  ),
+                ],
+              ],
             ),
             const SizedBox(width: 8),
             Icon(

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/services/quota_service.dart';
@@ -13,6 +14,8 @@ class SubscriptionScreen extends StatefulWidget {
 class _SubscriptionScreenState extends State<SubscriptionScreen> {
   QuotaStatus? _quota;
   String _tier = 'free';
+  bool _requested = false; // l'utilisateur a déjà demandé Premium
+  bool _requesting = false;
 
   @override
   void initState() {
@@ -25,7 +28,44 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
     if (uid == null) return;
     final tier = await QuotaService.getSubscriptionTier(uid);
     final quota = await QuotaService.checkQuota(uid);
-    if (mounted) setState(() { _tier = tier; _quota = quota; });
+    bool requested = false;
+    try {
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      requested = doc.data()?['premiumRequested'] == true;
+    } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _tier = tier;
+        _quota = quota;
+        _requested = requested;
+      });
+    }
+  }
+
+  // Le paiement en ligne n'est pas encore actif : on enregistre l'intérêt de
+  // l'utilisateur (sur son doc `users`, écriture autorisée par les règles tant
+  // qu'on ne touche pas `subscriptionTier`). L'admin recontacte ensuite.
+  Future<void> _requestPremium() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    setState(() => _requesting = true);
+    try {
+      await FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        'premiumRequested': true,
+        'premiumRequestedAt': FieldValue.serverTimestamp(),
+        'email': user.email,
+      }, SetOptions(merge: true));
+      if (mounted) setState(() => _requested = true);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur, réessaie : $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _requesting = false);
+    }
   }
 
   @override
@@ -63,7 +103,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
             // Tagline
             const Text(
-              'Soutiens Folio\net débloque le plein potentiel de tes carnets.',
+              'Soutiens Carnet\net débloque le plein potentiel de tes carnets.',
               style: TextStyle(
                 fontFamily: 'PlayfairDisplay',
                 fontSize: 20,
@@ -74,7 +114,7 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
             ),
             const SizedBox(height: 6),
             const Text(
-              'Folio est développé avec soin par une équipe indépendante. Ton abonnement permet de continuer à améliorer l\'app.',
+              'Carnet est développé avec soin par une équipe indépendante. Ton abonnement permet de continuer à améliorer l\'app.',
               style: TextStyle(color: AppColors.textMedium, fontSize: 13, height: 1.5),
             ),
 
@@ -88,28 +128,28 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   label: 'Gratuit',
                   price: null,
                   isCurrent: !isPremium,
-                  features: const [
-                    _Feature('100 photos', true),
-                    _Feature('Carnets illimités', true),
-                    _Feature('Génération PDF', true),
-                    _Feature('Commentaires sur les lieux', false),
-                    _Feature('Support prioritaire', false),
-                    _Feature('Mises à jour anticipées', false),
+                  features: [
+                    _Feature('${QuotaService.freePhotoLimit} photos', true),
+                    _Feature('${QuotaService.freeVideoLimit} vidéos (2 min)', true),
+                    _Feature('${QuotaService.freeAudioLimit} mémos vocaux', true),
+                    const _Feature('Carnets illimités', true),
+                    const _Feature('Génération PDF', true),
+                    const _Feature('Support prioritaire', false),
                   ],
                 )),
                 const SizedBox(width: 12),
                 Expanded(child: _PlanCard(
                   label: 'Premium',
-                  price: 'CHF 29 / an',
+                  price: 'CHF ${QuotaService.premiumPriceChf.toStringAsFixed(0)} / an',
                   isCurrent: isPremium,
                   featured: true,
-                  features: const [
-                    _Feature('1 000 photos', true),
-                    _Feature('Carnets illimités', true),
-                    _Feature('Génération PDF', true),
-                    _Feature('Commentaires sur les lieux', true),
-                    _Feature('Support prioritaire', true),
-                    _Feature('Mises à jour anticipées', true),
+                  features: [
+                    _Feature('${QuotaService.premiumPhotoLimit} photos', true),
+                    _Feature('${QuotaService.premiumVideoLimit} vidéos (HD)', true),
+                    _Feature('${QuotaService.premiumAudioLimit} mémos vocaux', true),
+                    const _Feature('Carnets illimités', true),
+                    const _Feature('Génération PDF', true),
+                    const _Feature('Support prioritaire', true),
                   ],
                 )),
               ],
@@ -137,7 +177,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   ),
                   SizedBox(height: 8),
                   Text(
-                    '• Photos stockées sur Google Firebase (Suisse/EU)\n'
+                    '• Photos & mémos vocaux : Google Firebase (UE)\n'
+                    '• Vidéos : Cloudflare R2 (UE), accès privé par liens signés\n'
                     '• Tes données ne sont jamais vendues\n'
                     '• Résiliable à tout moment, sans engagement\n'
                     '• Prix en CHF, facturation annuelle',
@@ -149,33 +190,69 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
 
             const SizedBox(height: 28),
 
-            // CTA
+            // CTA — le paiement en ligne n'est pas encore actif : l'utilisateur
+            // peut DEMANDER l'accès Premium, on le recontacte.
             if (!isPremium) ...[
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Paiement en ligne disponible très bientôt !')),
-                    );
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.sage,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                    textStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16),
+              if (_requested) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: AppColors.sage.withOpacity(0.08),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppColors.sage.withOpacity(0.3)),
                   ),
-                  child: const Text('Passer à Premium · CHF 29 / an'),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.check_circle, color: AppColors.sage, size: 20),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Demande enregistrée — on te recontacte dès que le paiement est ouvert. Merci !',
+                          style: TextStyle(
+                              color: AppColors.sage,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-              const SizedBox(height: 10),
-              const Center(
-                child: Text(
-                  '🔒  Paiement sécurisé · Annulable à tout moment',
-                  style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+              ] else ...[
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _requesting ? null : _requestPremium,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.sage,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      textStyle: const TextStyle(
+                          fontWeight: FontWeight.w700, fontSize: 16),
+                    ),
+                    child: _requesting
+                        ? const SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          )
+                        : Text(
+                            'Demander Premium · CHF ${QuotaService.premiumPriceChf.toStringAsFixed(0)} / an'),
+                  ),
                 ),
-              ),
+                const SizedBox(height: 10),
+                const Center(
+                  child: Text(
+                    'Le paiement en ligne arrive bientôt — réserve ton accès dès maintenant.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+                  ),
+                ),
+              ],
             ] else ...[
               Container(
                 width: double.infinity,

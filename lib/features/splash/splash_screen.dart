@@ -42,7 +42,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     if (user != null) {
       try { await MigrationService.runIfNeeded(); } catch (_) {}
       try { await UserService.onLogin(); } catch (_) {}
-      if (mounted) context.go('/home');
+      if (!mounted) return;
+      context.go('/home');
     } else {
       context.go('/auth');
     }

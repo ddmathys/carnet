@@ -170,6 +170,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 32),
 
+            // Abonnement — accessible à tout moment (même sans dépasser un quota)
+            _ProfileTile(
+              icon: Icons.workspace_premium_outlined,
+              label: 'Passer à Premium',
+              color: AppColors.amber,
+              onTap: () => context.push('/subscription'),
+            ),
+            const SizedBox(height: 8),
+
             // Mes commandes
             _ProfileTile(
               icon: Icons.local_shipping_outlined,
@@ -185,6 +194,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: 'Console admin',
                 color: AppColors.sageDark,
                 onTap: () => context.push('/admin/orders'),
+              ),
+              const SizedBox(height: 8),
+              _ProfileTile(
+                icon: Icons.group_outlined,
+                label: 'Utilisateurs & Premium',
+                color: AppColors.sageDark,
+                onTap: () => context.push('/admin/users'),
               ),
               const SizedBox(height: 8),
             ],

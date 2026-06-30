@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:exif/exif.dart';
@@ -8,19 +7,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:speech_to_text/speech_to_text.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/models/notebook_model.dart';
-import '../../core/models/draft_milestone.dart';
-import '../../core/services/deepseek_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/video_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
-import '../../core/constants/notebook_types.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/widgets/date_mask_field.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
@@ -47,18 +42,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   NotebookModel? _notebook;
 
-  // Step 0: smart input
-  final _smartController = TextEditingController();
-  bool _isAnalyzing = false;
-  bool _showManualGrid = false;
-  // L'analyse IA tourne encore en arrière-plan (formulaire déjà ouvert).
-  bool _analysisPending = false;
-  Timer? _analysisTimeoutTimer;
-
-  // Voice (speech-to-text → remplit le texte)
-  final SpeechToText _speech = SpeechToText();
-  bool _isListening = false;
-
   // Mémo vocal (audio attaché au souvenir)
   final AudioRecorder _recorder = AudioRecorder();
   final AudioPlayer _audioPlayer = AudioPlayer();
@@ -70,7 +53,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   int? _audioDurationMs;
   DateTime? _recordStartedAt;
 
-  // Vidéos souvenir (jusqu'à maxVideosPerMemory clips ≤ 60 s, stockés sur R2).
+  // Vidéos souvenir (jusqu'à maxVideosPerMemory clips ≤ 120 s, stockés sur R2).
   final List<String> _localVideoPaths = []; // nouvelles vidéos non uploadées
   final List<int?> _localVideoDurations = []; // parallèle à _localVideoPaths
   final List<String> _existingVideoKeys = []; // clés R2 conservées (édition)
@@ -97,8 +80,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final List<String> _removedPhotoUrls = [];
   final _picker = ImagePicker();
 
-  final _deepseek = DeepSeekService();
-
   @override
   void initState() {
     super.initState();
@@ -107,18 +88,22 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   @override
   void dispose() {
-    _smartController.dispose();
     _titleController.dispose();
     _locationController.dispose();
     _textController.dispose();
     _weightController.dispose();
     _heightController.dispose();
-    _speech.stop();
     _recorder.dispose();
     _audioPlayer.dispose();
-    _analysisTimeoutTimer?.cancel();
     super.dispose();
   }
+
+  // Carnets bébé/grossesse : on propose d'abord un choix de type (étape 0).
+  // Ailleurs (famille, voyage, moi, libre) : on va directement au formulaire
+  // « souvenir » (anecdote) — un seul écran, simple.
+  bool get _hasTypePicker =>
+      _notebook != null &&
+      manualCategoriesForNotebook(_notebook!.type).isNotEmpty;
 
   Future<void> _loadNotebook() async {
     final doc = await FirebaseFirestore.instance
@@ -126,7 +111,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         .doc(widget.notebookId)
         .get();
     if (mounted && doc.exists) {
-      setState(() => _notebook = NotebookModel.fromFirestore(doc));
+      setState(() {
+        _notebook = NotebookModel.fromFirestore(doc);
+        // Pas de choix de type pour ce carnet → formulaire direct.
+        if (!_hasTypePicker) {
+          _selectedCategory = 'anecdote';
+          _step = 1;
+        }
+      });
     }
   }
 
@@ -387,87 +379,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  Future<void> _showPhotoSourceSheet() async {
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36, height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.softGray.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: AppColors.sage),
-              title: const Text('Prendre une photo'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickPhotos(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: AppColors.sage),
-              title: const Text('Choisir depuis la galerie'),
-              subtitle: const Text('Sélection multiple possible'),
-              onTap: () {
-                Navigator.pop(context);
-                _pickPhotos(ImageSource.gallery);
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _toggleListening() async {
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-      return;
-    }
-    bool available = false;
-    try {
-      available = await _speech.initialize(
-        onError: (e) {
-          if (mounted) {
-            setState(() => _isListening = false);
-            _showSnack('Erreur vocale : ${e.errorMsg}');
-          }
-        },
-      );
-    } catch (_) {
-      if (mounted) _showSnack('Vocal non disponible');
-      return;
-    }
-    if (!available) {
-      _showSnack('Reconnaissance vocale non disponible');
-      return;
-    }
-    setState(() => _isListening = true);
-    await _speech.listen(
-      onResult: (result) {
-        if (mounted) {
-          setState(() => _smartController.text = result.recognizedWords);
-          if (result.finalResult) setState(() => _isListening = false);
-        }
-      },
-      localeId: 'fr_FR',
-      cancelOnError: true,
-      partialResults: true,
-    );
-  }
 
   // ── Mémo vocal ──────────────────────────────────────────────────────────────
 
@@ -640,6 +551,131 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
   }
 
+  bool _isVideoPath(String path) {
+    final p = path.toLowerCase();
+    return p.endsWith('.mp4') ||
+        p.endsWith('.mov') ||
+        p.endsWith('.m4v') ||
+        p.endsWith('.avi') ||
+        p.endsWith('.mkv') ||
+        p.endsWith('.webm') ||
+        p.endsWith('.3gp') ||
+        p.endsWith('.hevc');
+  }
+
+  /// Ingère une liste de chemins vidéo : plafond par souvenir (max 3), quota
+  /// global (gratuit/premium) et cap de durée. Ce qui est refusé est signalé
+  /// sans bloquer le reste. Utilisé par l'import unifié galerie.
+  Future<void> _ingestVideoPaths(List<String> paths) async {
+    if (paths.isEmpty) return;
+    final remaining = QuotaService.maxVideosPerMemory - _videoCount;
+    if (remaining <= 0) {
+      _showSnack(
+          'Maximum ${QuotaService.maxVideosPerMemory} vidéos par souvenir.');
+      return;
+    }
+    // Vidéos au-delà du plafond du souvenir → ignorées.
+    final ignoredForLimit =
+        paths.length > remaining ? paths.length - remaining : 0;
+    final toConsider = paths.take(remaining).toList();
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    final accepted = <String>[];
+    final acceptedDurations = <int?>[];
+    int tooLong = 0;
+    bool quotaHit = false;
+
+    for (final path in toConsider) {
+      // Quota global, réévalué à chaque ajout (gratuit 15 / premium 150).
+      if (uid != null) {
+        final q = await QuotaService.canAddVideos(
+            uid, adding: _localVideoPaths.length + accepted.length + 1);
+        if (!q.allowed) {
+          quotaHit = true;
+          break;
+        }
+      }
+      final durMs = await VideoService.probeDurationMs(File(path));
+      if (durMs != null &&
+          durMs > (QuotaService.maxVideoDurationSec + 5) * 1000) {
+        tooLong++;
+        continue;
+      }
+      accepted.add(path);
+      acceptedDurations.add(durMs);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _localVideoPaths.addAll(accepted);
+      _localVideoDurations.addAll(acceptedDurations);
+    });
+
+    if (quotaHit) {
+      _showVideoQuotaDialog();
+      return;
+    }
+    final notes = <String>[];
+    if (tooLong > 0) {
+      notes.add('$tooLong trop longue${tooLong > 1 ? 's' : ''} '
+          '(max ${QuotaService.maxVideoDurationSec}s)');
+    }
+    if (ignoredForLimit > 0) {
+      notes.add('$ignoredForLimit au-delà de '
+          '${QuotaService.maxVideosPerMemory} vidéos');
+    }
+    if (notes.isNotEmpty) _showSnack('Ignoré : ${notes.join(' · ')}.');
+  }
+
+  /// Import unifié depuis la galerie : photos ET vidéos en une seule sélection
+  /// (Android Photo Picker via `pickMultipleMedia`), puis répartition vers les
+  /// deux pipelines (photos → EXIF, vidéos → cap durée). Aucun changement côté
+  /// enregistrement : chaque média garde son flux d'origine.
+  Future<void> _pickMediaFromGallery() async {
+    setState(() => _preparingVideo = true);
+    try {
+      final picked =
+          await _picker.pickMultipleMedia(imageQuality: 80, maxWidth: 1920);
+      if (picked.isEmpty) {
+        if (mounted) setState(() => _preparingVideo = false);
+        return;
+      }
+      final photoFiles = <File>[];
+      final videoPaths = <String>[];
+      for (final x in picked) {
+        if (_isVideoPath(x.path)) {
+          videoPaths.add(x.path);
+        } else {
+          photoFiles.add(File(x.path));
+        }
+      }
+
+      // 1) Photos — quota global photos, puis EXIF (date + lieu) de la 1ʳᵉ.
+      if (photoFiles.isNotEmpty) {
+        final uid = FirebaseAuth.instance.currentUser?.uid;
+        bool photoOk = true;
+        if (uid != null) {
+          final q = await QuotaService.canAddPhotos(
+              uid, adding: _localPhotos.length + photoFiles.length);
+          photoOk = q.allowed;
+        }
+        if (photoOk) {
+          if (mounted) setState(() => _localPhotos.addAll(photoFiles));
+          await _applyExifFromPhoto(photoFiles.first);
+        } else if (mounted) {
+          _showQuotaDialog();
+        }
+      }
+
+      // 2) Vidéos — plafond souvenir + quota + durée.
+      await _ingestVideoPaths(videoPaths);
+    } catch (_) {
+      if (mounted) _showSnack('Impossible d\'accéder aux médias');
+    } finally {
+      if (mounted) setState(() => _preparingVideo = false);
+    }
+  }
+
   void _removeLocalVideo(int index) {
     setState(() {
       _localVideoPaths.removeAt(index);
@@ -742,7 +778,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  Future<void> _showVideoSourceSheet() async {
+  /// Feuille d'import unique : galerie (photos + vidéos en une fois), ou prise
+  /// directe photo / vidéo. Remplace les deux anciennes feuilles séparées.
+  Future<void> _showMediaSourceSheet() async {
     await showModalBottomSheet<void>(
       context: context,
       backgroundColor: AppColors.white,
@@ -763,20 +801,29 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             ),
             const SizedBox(height: 16),
             ListTile(
-              leading: const Icon(Icons.videocam_outlined, color: AppColors.sage),
-              title: const Text('Filmer une vidéo'),
-              subtitle: const Text('60 secondes max'),
+              leading: const Icon(Icons.perm_media_outlined, color: AppColors.sage),
+              title: const Text('Choisir dans la galerie'),
+              subtitle: const Text('Photos et vidéos, sélection multiple'),
               onTap: () {
                 Navigator.pop(context);
-                _pickVideo(ImageSource.camera);
+                _pickMediaFromGallery();
               },
             ),
             ListTile(
-              leading: const Icon(Icons.video_library_outlined, color: AppColors.sage),
-              title: const Text('Choisir depuis la galerie'),
+              leading: const Icon(Icons.add_a_photo_outlined, color: AppColors.sage),
+              title: const Text('Prendre une photo'),
               onTap: () {
                 Navigator.pop(context);
-                _pickVideo(ImageSource.gallery);
+                _pickPhotos(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_outlined, color: AppColors.sage),
+              title: const Text('Filmer une vidéo'),
+              subtitle: const Text('2 minutes max'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickVideo(ImageSource.camera);
               },
             ),
             const SizedBox(height: 8),
@@ -784,114 +831,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
       ),
     );
-  }
-
-  Future<void> _analyzeAndFill() async {
-    final text = _smartController.text.trim();
-    if (text.isEmpty) return;
-    if (_isListening) {
-      await _speech.stop();
-      setState(() => _isListening = false);
-    }
-    setState(() {
-      _isAnalyzing = true;
-      _analysisPending = true;
-    });
-
-    // Si l'IA dépasse 5 s, on ouvre quand même le formulaire pour que
-    // l'utilisateur puisse enregistrer un mémo vocal / remplir sans attendre.
-    // L'analyse continue en arrière-plan et complète les champs vides à son
-    // retour (sans écraser ce que l'utilisateur a déjà saisi).
-    _analysisTimeoutTimer?.cancel();
-    _analysisTimeoutTimer = Timer(const Duration(seconds: 5), () {
-      if (!mounted || !_analysisPending) return;
-      setState(() {
-        _isAnalyzing = false; // libère le spinner bloquant de l'étape 0
-        if (_step == 0) _step = 1; // ouvre le formulaire (catégorie par défaut)
-      });
-    });
-
-    try {
-      final results = await _deepseek.extractAllMilestonesFromText(text: text);
-      _analysisTimeoutTimer?.cancel();
-      if (!mounted) return;
-      if (results == null || results.isEmpty) {
-        setState(() {
-          _isAnalyzing = false;
-          _analysisPending = false;
-        });
-        _showSnack('Impossible d\'analyser — réessaie');
-        return;
-      }
-      _applyAnalysis(results.first);
-    } catch (_) {
-      _analysisTimeoutTimer?.cancel();
-      if (mounted) {
-        setState(() {
-          _isAnalyzing = false;
-          _analysisPending = false;
-        });
-        _showSnack('Impossible d\'analyser — réessaie');
-      }
-    }
-  }
-
-  /// Applique le résultat de l'IA. Si le formulaire a déjà été ouvert via le
-  /// délai de 5 s et que l'utilisateur a commencé à le remplir, on préserve
-  /// ses saisies et on ne complète que les champs encore vides.
-  void _applyAnalysis(DraftMilestone r) {
-    // Le formulaire est déjà ouvert si l'analyse est revenue après le timeout.
-    final advancedEarly = _step == 1;
-    final userTouchedForm = advancedEarly &&
-        (_selectedSubType != null ||
-            _textController.text.trim().isNotEmpty ||
-            _weightController.text.trim().isNotEmpty ||
-            _heightController.text.trim().isNotEmpty);
-
-    setState(() {
-      if (!userTouchedForm) {
-        // Cas normal : on applique entièrement la classification de l'IA.
-        _selectedCategory = r.type;
-        _selectedSubType = r.subType;
-        _textController.text = r.type != 'taille_poids' ? r.rawContent : '';
-        if (r.weightKg != null) {
-          _weightController.text = r.weightKg!.toStringAsFixed(1);
-        }
-        if (r.heightCm != null) {
-          _heightController.text = r.heightCm!.toStringAsFixed(1);
-        }
-      } else {
-        // L'utilisateur a déjà saisi quelque chose → on garde sa catégorie.
-        _selectedCategory ??= r.type;
-        _selectedSubType ??= r.subType;
-      }
-
-      // ── Date ──────────────────────────────────────────────────────────────
-      // On applique la date de l'IA seulement si elle n'a pas déjà été fixée
-      // (ni par EXIF, ni manuellement) — _dateNeedsConfirmation le garantit.
-      final exifAlreadySetDate = !_dateNeedsConfirmation && _hasPhotos;
-      if (r.date != null && _dateNeedsConfirmation && !exifAlreadySetDate) {
-        _selectedDate = r.date!;
-        _datePrecision = r.datePrecision;
-        _dateNeedsConfirmation = false;
-      }
-
-      // ── Titre & lieu (remplis seulement si vides) ─────────────────────────
-      if (_titleController.text.isEmpty &&
-          r.title != null &&
-          r.title!.isNotEmpty) {
-        _titleController.text = r.title!;
-      }
-      if (_locationController.text.isEmpty &&
-          r.location != null &&
-          r.location!.isNotEmpty) {
-        _locationController.text = r.location!;
-      }
-
-      _analysisPending = false;
-      _isAnalyzing = false;
-      _step = 1;
-    });
   }
 
   String get _dateLabel => _dateNeedsConfirmation
@@ -937,40 +876,62 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
   }
 
-  bool get _hasPhotos =>
-      _existingPhotoUrls.isNotEmpty || _localPhotos.isNotEmpty;
 
   String? get _missingFieldsHint {
     final missing = <String>[];
-    if (_titleController.text.trim().isEmpty) missing.add('titre');
-    if (_locationController.text.trim().isEmpty) missing.add('lieu');
     if (_dateNeedsConfirmation) missing.add('date');
-    if ((_selectedCategory == 'anecdote' || (_selectedCategory != 'taille_poids' && _selectedCategory != 'parole' && _selectedCategory != 'mouvement')) &&
-        _textController.text.trim().isEmpty) missing.add('description');
+    switch (_selectedCategory) {
+      case 'parole':
+      case 'mouvement':
+        if (_selectedSubType == null) missing.add('type précis');
+        break;
+      case 'taille_poids':
+        if (_measurementMissing) missing.add('taille ou poids');
+        break;
+      case 'anecdote':
+      case null:
+        if (_textController.text.trim().isEmpty) missing.add('description');
+        break;
+      default:
+        break;
+    }
     if (missing.isEmpty) return null;
-    return 'Manque : ${missing.join(', ')}';
+    return 'Champs obligatoires : ${missing.join(', ')}';
   }
 
+  // ── Validation des champs obligatoires ───────────────────────────────────
+  // Seuls requis : une date confirmée + un contenu selon le type. Titre et lieu
+  // sont OPTIONNELS. Une catégorie nulle (repli manuel après échec IA) est
+  // traitée comme « anecdote ».
+  bool get _measurementMissing {
+    final w = double.tryParse(_weightController.text.replaceAll(',', '.'));
+    final h = double.tryParse(_heightController.text.replaceAll(',', '.'));
+    return !((w != null && w > 0) || (h != null && h > 0));
+  }
+
+  bool get _descriptionRequiredEmpty =>
+      (_selectedCategory == 'anecdote' || _selectedCategory == null) &&
+      _textController.text.trim().isEmpty;
+
+  // Bordure rouge pour les champs obligatoires non remplis.
+  OutlineInputBorder get _errorBorder => OutlineInputBorder(
+        borderRadius: BorderRadius.circular(12),
+        borderSide: const BorderSide(color: AppColors.error, width: 1.5),
+      );
+
   bool get _saveEnabled {
-    // All memories require title, location, and a confirmed date
-    if (_titleController.text.trim().isEmpty) return false;
-    if (_locationController.text.trim().isEmpty) return false;
     if (_dateNeedsConfirmation) return false;
     switch (_selectedCategory) {
       case 'parole':
-        return _selectedSubType != null;
       case 'mouvement':
         return _selectedSubType != null;
       case 'taille_poids':
-        final w =
-            double.tryParse(_weightController.text.replaceAll(',', '.'));
-        final h =
-            double.tryParse(_heightController.text.replaceAll(',', '.'));
-        return (w != null && w > 0) || (h != null && h > 0);
+        return !_measurementMissing;
       case 'anecdote':
+      case null:
         return _textController.text.trim().isNotEmpty;
       default:
-        return _selectedCategory != null;
+        return true;
     }
   }
 
@@ -978,7 +939,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     if (!_saveEnabled || _loading) return;
     setState(() => _loading = true);
     try {
-      final category = _selectedCategory!;
+      // Catégorie nulle (repli manuel après échec/timeout IA) → « anecdote ».
+      final category = _selectedCategory ?? 'anecdote';
       final rawContent = _buildRawContent(category);
       final weightKg = category == 'taille_poids'
           ? double.tryParse(_weightController.text.replaceAll(',', '.'))
@@ -1127,18 +1089,20 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
   void _goBack() {
-    if (_step == 0) {
-      context.go('/notebook/${widget.notebookId}/memories');
-    } else {
+    // Retour vers le choix de type seulement si ce carnet en propose un et
+    // qu'on n'est pas en édition. Sinon, on quitte vers la liste.
+    if (_step == 1 && _hasTypePicker && !_isEditing) {
       setState(() {
         _step = 0;
         _selectedCategory = null;
         _selectedSubType = null;
-        _dateNeedsConfirmation = false;
+        _dateNeedsConfirmation = true;
         _textController.clear();
         _weightController.clear();
         _heightController.clear();
       });
+    } else {
+      context.go('/notebook/${widget.notebookId}/memories');
     }
   }
 
@@ -1155,11 +1119,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         backgroundColor: AppColors.background,
         elevation: 0,
         title: Text(
-          _isEditing
-              ? 'Modifier le souvenir'
-              : _step == 0
-                  ? 'Nouveau souvenir'
-                  : 'Vérifier & confirmer',
+          _isEditing ? 'Modifier le souvenir' : 'Nouveau souvenir',
           style: const TextStyle(
               fontFamily: 'PlayfairDisplay',
               fontWeight: FontWeight.bold,
@@ -1167,59 +1127,29 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
         leading: IconButton(
           icon: Icon(
-            _step == 0 ? Icons.close : Icons.arrow_back,
+            (_step == 0 || (!_hasTypePicker && !_isEditing))
+                ? Icons.close
+                : Icons.arrow_back,
             color: AppColors.textDark,
           ),
           onPressed: _goBack,
         ),
       ),
-      body: _step == 0
-          ? _buildSmartInputStep()
-          : Column(
-              children: [
-                if (_analysisPending) _buildAnalysisBanner(),
-                Expanded(child: _buildDetailsStep()),
-              ],
-            ),
+      body: _step == 0 ? _buildTypePickerStep() : _buildDetailsStep(),
     );
   }
 
-  Widget _buildAnalysisBanner() {
-    return Container(
-      width: double.infinity,
-      color: AppColors.sage.withOpacity(0.12),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      child: Row(
-        children: [
-          const SizedBox(
-            width: 16,
-            height: 16,
-            child: CircularProgressIndicator(
-                strokeWidth: 2, color: AppColors.sage),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Analyse IA en cours… les champs vides se rempliront automatiquement. Tu peux déjà enregistrer un mémo vocal.',
-              style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSmartInputStep() {
-    final hasText = _smartController.text.trim().isNotEmpty;
-    final notebookType = getNotebookTypeById(_notebook!.type);
-
+  /// Étape de choix du type — affichée uniquement pour les carnets bébé /
+  /// grossesse. Les autres carnets vont directement au formulaire « souvenir ».
+  Widget _buildTypePickerStep() {
+    final manualCats = manualCategoriesForNotebook(_notebook!.type);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Qu\'as-tu à noter ?',
+            'Quel souvenir veux-tu ajouter ?',
             style: TextStyle(
               fontFamily: 'PlayfairDisplay',
               fontSize: 26,
@@ -1229,158 +1159,39 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ),
           const SizedBox(height: 6),
           const Text(
-            'Écris ou dicte librement — l\'IA classe automatiquement.',
+            'Choisis un type, ou « Autre souvenir » pour écrire librement.',
             style: TextStyle(color: AppColors.textMedium, fontSize: 14),
           ),
           const SizedBox(height: 20),
-          Stack(
-            children: [
-              TextField(
-                controller: _smartController,
-                maxLines: 6,
-                onChanged: (_) => setState(() {}),
-                autofocus: true,
-                textCapitalization: TextCapitalization.sentences,
-                decoration: InputDecoration(
-                  hintText: notebookType.memoryPlaceholder,
-                  alignLabelWithHint: true,
-                  contentPadding: const EdgeInsets.fromLTRB(16, 14, 52, 14),
-                ),
-              ),
-              Positioned(
-                right: 8,
-                top: 8,
-                child: GestureDetector(
-                  onTap: _toggleListening,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 200),
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: _isListening
-                          ? AppColors.error
-                          : AppColors.sage,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      _isListening ? Icons.stop : Icons.mic,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          if (_isListening) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Container(
-                  width: 8,
-                  height: 8,
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            crossAxisSpacing: 14,
+            mainAxisSpacing: 14,
+            childAspectRatio: 1.3,
+            children: manualCats.map((cat) {
+              return GestureDetector(
+                onTap: () => setState(() {
+                  _selectedCategory = cat.id;
+                  _step = 1;
+                }),
+                child: Container(
                   decoration: BoxDecoration(
-                    color: AppColors.error,
-                    shape: BoxShape.circle,
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                        color: const Color(0xFFDDD8CC), width: 0.5),
                   ),
-                ),
-                const SizedBox(width: 8),
-                const Text(
-                  'Écoute en cours…',
-                  style: TextStyle(color: AppColors.error, fontSize: 13),
-                ),
-              ],
-            ),
-          ],
-          const SizedBox(height: 20),
-          // ── Photos + vidéo (visibles dès l'étape 0, comme les photos)
-          _buildPhotoSection(),
-          const SizedBox(height: 20),
-          _buildVideoSection(),
-          const SizedBox(height: 20),
-
-          if (_isAnalyzing)
-            const Center(child: CircularProgressIndicator())
-          else
-            ElevatedButton.icon(
-              onPressed: hasText ? _analyzeAndFill : null,
-              icon: const Icon(Icons.auto_awesome),
-              label: const Text('Analyser avec l\'IA'),
-              style: ElevatedButton.styleFrom(
-                disabledBackgroundColor: AppColors.background,
-                disabledForegroundColor: AppColors.softGray,
-              ),
-            ),
-          const SizedBox(height: 10),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: const [
-              Icon(Icons.lock_outline, size: 13, color: AppColors.softGray),
-              SizedBox(width: 5),
-              Expanded(
-                child: Text(
-                  'L\'IA lit ton texte et remplit automatiquement le type, la date, le lieu et le titre. Tes photos ne sont pas envoyées.',
-                  style: TextStyle(color: AppColors.softGray, fontSize: 12, height: 1.4),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          const Row(
-            children: [
-              Expanded(child: Divider(color: Color(0xFFDDD8CC))),
-              Padding(
-                padding: EdgeInsets.symmetric(horizontal: 12),
-                child: Text('ou',
-                    style:
-                        TextStyle(color: AppColors.softGray, fontSize: 13)),
-              ),
-              Expanded(child: Divider(color: Color(0xFFDDD8CC))),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Center(
-            child: TextButton(
-              onPressed: () =>
-                  setState(() => _showManualGrid = !_showManualGrid),
-              child: Text(
-                _showManualGrid
-                    ? 'Masquer le choix manuel'
-                    : 'Choisir le type manuellement',
-                style: const TextStyle(
-                    color: AppColors.softGray, fontSize: 13),
-              ),
-            ),
-          ),
-          if (_showManualGrid) ...[
-            const SizedBox(height: 8),
-            GridView.count(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              crossAxisSpacing: 14,
-              mainAxisSpacing: 14,
-              children:
-                  kMilestoneCategories.where((c) => !c.isLegacy).map((cat) {
-                return GestureDetector(
-                  onTap: () => setState(() {
-                    _selectedCategory = cat.id;
-                    _step = 1;
-                  }),
-                  child: Container(
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                          color: const Color(0xFFDDD8CC), width: 0.5),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Text(cat.emoji,
-                            style: const TextStyle(fontSize: 36)),
-                        const SizedBox(height: 8),
-                        Text(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(cat.emoji, style: const TextStyle(fontSize: 32)),
+                      const SizedBox(height: 6),
+                      Padding(
+                        padding:
+                            const EdgeInsets.symmetric(horizontal: 6),
+                        child: Text(
                           cat.label,
                           textAlign: TextAlign.center,
                           style: const TextStyle(
@@ -1389,13 +1200,25 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                             fontSize: 12,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                );
-              }).toList(),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 16),
+          Center(
+            child: TextButton.icon(
+              onPressed: () => setState(() {
+                _selectedCategory = 'anecdote';
+                _step = 1;
+              }),
+              icon: const Icon(Icons.edit_outlined, size: 16),
+              label: const Text('Autre souvenir'),
+              style: TextButton.styleFrom(foregroundColor: AppColors.sage),
             ),
-          ],
+          ),
         ],
       ),
     );
@@ -1424,7 +1247,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('💬 Type de parole'),
+          _SectionTitle('💬 Type de parole', error: _selectedSubType == null),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -1490,7 +1313,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('🏃 Type de mouvement'),
+          _SectionTitle('🏃 Type de mouvement',
+              error: _selectedSubType == null),
           const SizedBox(height: 12),
           Wrap(
             spacing: 8,
@@ -1569,7 +1393,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const _SectionTitle('📊 Mesures'),
+          _SectionTitle('📊 Mesures', error: _measurementMissing),
           const SizedBox(height: 12),
           Row(
             children: [
@@ -1691,10 +1515,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           TextField(
             controller: _textController,
             maxLines: 6,
-            decoration: const InputDecoration(
-              labelText: 'Raconte ce moment…',
-              hintText: 'Ajoute des détails, émotions, anecdotes…',
+            decoration: InputDecoration(
+              labelText: 'Qu\'est-ce qui t\'a marqué pour ce souvenir ?',
+              hintText: 'Partage-le ici…',
               alignLabelWithHint: true,
+              // Encadré rouge tant que la description (obligatoire ici) est vide.
+              enabledBorder: _descriptionRequiredEmpty ? _errorBorder : null,
+              focusedBorder: _descriptionRequiredEmpty ? _errorBorder : null,
             ),
             onChanged: (_) => setState(() {}),
           ),
@@ -1752,7 +1579,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                     onRemove: () => _removeLocalPhoto(i),
                   ),
                 GestureDetector(
-                  onTap: _showPhotoSourceSheet,
+                  onTap: _showMediaSourceSheet,
                   child: Container(
                     width: 90, height: 90,
                     margin: const EdgeInsets.only(right: 8),
@@ -1776,7 +1603,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ),
         ] else ...[
           GestureDetector(
-            onTap: _showPhotoSourceSheet,
+            onTap: _showMediaSourceSheet,
             child: Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 14),
@@ -1790,7 +1617,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                 children: [
                   Icon(Icons.add_photo_alternate_outlined, color: AppColors.sage, size: 20),
                   SizedBox(width: 8),
-                  Text('Ajouter des photos', style: TextStyle(color: AppColors.sage, fontWeight: FontWeight.w600, fontSize: 14)),
+                  Text('Ajouter photos & vidéos', style: TextStyle(color: AppColors.sage, fontWeight: FontWeight.w600, fontSize: 14)),
                   SizedBox(width: 6),
                   Text('· galerie ou appareil', style: TextStyle(color: AppColors.softGray, fontSize: 12)),
                 ],
@@ -1910,109 +1737,56 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   // ── Vidéo widget ──────────────────────────────────────────────────────────
 
+  /// Affichage seul des vidéos du souvenir : l'ajout passe désormais par le
+  /// bouton unique « Ajouter photos & vidéos » (galerie mixte). Masqué tant
+  /// qu'aucune vidéo n'est présente et qu'aucun import n'est en cours.
   Widget _buildVideoSection() {
+    if (!_hasVideo && !_preparingVideo) return const SizedBox.shrink();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _SectionTitle(
             '🎬 Vidéos (optionnel · ${QuotaService.maxVideosPerMemory} max)'),
         const SizedBox(height: 8),
-        if (_hasVideo || _preparingVideo) ...[
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                for (int i = 0; i < _existingVideoKeys.length; i++)
-                  _VideoThumb(
-                    durationLabel: i < _existingVideoDurations.length
-                        ? _formatAudioDuration(_existingVideoDurations[i])
-                        : '',
-                    onTap: () => _openVideoViewer(i),
-                    onRemove: () => _removeExistingVideo(i),
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              for (int i = 0; i < _existingVideoKeys.length; i++)
+                _VideoThumb(
+                  durationLabel: i < _existingVideoDurations.length
+                      ? _formatAudioDuration(_existingVideoDurations[i])
+                      : '',
+                  onTap: () => _openVideoViewer(i),
+                  onRemove: () => _removeExistingVideo(i),
+                ),
+              for (int i = 0; i < _localVideoPaths.length; i++)
+                _VideoThumb(
+                  durationLabel: _formatAudioDuration(_localVideoDurations[i]),
+                  onTap: () => _openVideoViewer(_existingVideoKeys.length + i),
+                  onRemove: () => _removeLocalVideo(i),
+                ),
+              if (_preparingVideo)
+                Container(
+                  width: 90, height: 90,
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: AppColors.white,
+                    borderRadius: BorderRadius.circular(10),
+                    border:
+                        Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
                   ),
-                for (int i = 0; i < _localVideoPaths.length; i++)
-                  _VideoThumb(
-                    durationLabel: _formatAudioDuration(_localVideoDurations[i]),
-                    onTap: () =>
-                        _openVideoViewer(_existingVideoKeys.length + i),
-                    onRemove: () => _removeLocalVideo(i),
-                  ),
-                if (_preparingVideo)
-                  Container(
-                    width: 90, height: 90,
-                    margin: const EdgeInsets.only(right: 8),
-                    decoration: BoxDecoration(
-                      color: AppColors.white,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                          color: const Color(0xFFDDD8CC), width: 0.5),
-                    ),
-                    child: const Center(
-                      child: SizedBox(
-                        width: 20, height: 20,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: AppColors.sage),
-                      ),
-                    ),
-                  )
-                else if (_canAddVideo)
-                  GestureDetector(
-                    onTap: _showVideoSourceSheet,
-                    child: Container(
-                      width: 90, height: 90,
-                      margin: const EdgeInsets.only(right: 8),
-                      decoration: BoxDecoration(
-                        color: AppColors.white,
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: AppColors.sage, width: 1),
-                      ),
-                      child: const Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.video_call_outlined,
-                              color: AppColors.sage, size: 22),
-                          SizedBox(height: 4),
-                          Text('Ajouter',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color: AppColors.sage,
-                                  fontWeight: FontWeight.w600)),
-                        ],
-                      ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 20, height: 20,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.sage),
                     ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
-        ] else ...[
-          GestureDetector(
-            onTap: _showVideoSourceSheet,
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.white,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
-              ),
-              child: const Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.video_call_outlined,
-                      color: AppColors.sage, size: 20),
-                  SizedBox(width: 8),
-                  Text('Ajouter des vidéos',
-                      style: TextStyle(
-                          color: AppColors.sage,
-                          fontWeight: FontWeight.w600,
-                          fontSize: 14)),
-                  SizedBox(width: 6),
-                  Text('· 60 s max', style: TextStyle(color: AppColors.softGray, fontSize: 12)),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ),
         const SizedBox(height: 6),
         Text(
           'Jusqu\'à ${QuotaService.maxVideosPerMemory} vidéos de '
@@ -2028,7 +1802,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('📍 Lieu'),
+        const _SectionTitle('📍 Lieu (optionnel)'),
         const SizedBox(height: 8),
         TextField(
           controller: _locationController,
@@ -2047,7 +1821,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('📅 Date'),
+        _SectionTitle('📅 Date', error: _dateNeedsConfirmation),
         const SizedBox(height: 8),
         if (_datePrecision == DatePrecision.exact)
           DateMaskField(
@@ -2223,14 +1997,16 @@ class _VideoThumb extends StatelessWidget {
 
 class _SectionTitle extends StatelessWidget {
   final String text;
-  const _SectionTitle(this.text);
+  // [error] = champ obligatoire non rempli → titre en rouge + mention.
+  final bool error;
+  const _SectionTitle(this.text, {this.error = false});
 
   @override
   Widget build(BuildContext context) => Text(
-        text,
-        style: const TextStyle(
+        error ? '$text — obligatoire' : text,
+        style: TextStyle(
           fontWeight: FontWeight.w600,
-          color: AppColors.textDark,
+          color: error ? AppColors.error : AppColors.textDark,
           fontSize: 15,
         ),
       );
@@ -2260,67 +2036,6 @@ class _Pill extends StatelessWidget {
           color: selected ? AppColors.white : AppColors.textMedium,
           fontSize: 13,
           fontWeight: FontWeight.w500,
-        ),
-      ),
-    );
-  }
-}
-
-class _DatePickerButton extends StatelessWidget {
-  final String label;
-  final bool highlighted;
-  final VoidCallback onTap;
-
-  const _DatePickerButton({
-    required this.label,
-    required this.onTap,
-    this.highlighted = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color:
-              highlighted ? const Color(0xFFFFF3CD) : AppColors.white,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: highlighted
-                ? const Color(0xFFE6A817)
-                : const Color(0xFFDDD8CC),
-            width: 1.5,
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              Icons.calendar_today_outlined,
-              color: highlighted
-                  ? const Color(0xFFE6A817)
-                  : AppColors.textMedium,
-              size: 18,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: highlighted
-                      ? const Color(0xFFB07800)
-                      : AppColors.textDark,
-                  fontWeight: highlighted
-                      ? FontWeight.w500
-                      : FontWeight.normal,
-                ),
-              ),
-            ),
-            const Icon(Icons.expand_more,
-                color: AppColors.softGray, size: 18),
-          ],
         ),
       ),
     );
@@ -2358,13 +2073,24 @@ class _SaveButton extends StatelessWidget {
         ),
         if (!enabled && hint != null) ...[
           const SizedBox(height: 8),
-          Text(
-            hint!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(
-              fontSize: 12,
-              color: AppColors.softGray,
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.error_outline,
+                  size: 14, color: AppColors.error),
+              const SizedBox(width: 5),
+              Flexible(
+                child: Text(
+                  hint!,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.error,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ],

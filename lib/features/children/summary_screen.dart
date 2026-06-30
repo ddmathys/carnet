@@ -192,13 +192,6 @@ class _QuickActions extends StatelessWidget {
           color: AppColors.sage,
           onTap: () => context.push('/child/$childId/growth'),
         ),
-        const SizedBox(width: 10),
-        _ActionBtn(
-          icon: Icons.auto_stories_outlined,
-          label: 'Histoire',
-          color: const Color(0xFFD4956A),
-          onTap: () => context.push('/child/$childId/story'),
-        ),
       ],
     );
   }

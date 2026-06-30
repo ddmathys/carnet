@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:app_links/app_links.dart';
 import 'package:intl/date_symbol_data_local.dart';
+import 'package:image_picker_android/image_picker_android.dart';
+import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'core/services/notebook_share_service.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
@@ -14,8 +16,6 @@ import 'features/children/add_child_screen.dart';
 import 'features/children/home_screen.dart';
 import 'features/children/child_timeline_screen.dart';
 import 'features/milestones/add_milestone_screen.dart';
-import 'features/milestones/scan_milestone_screen.dart';
-import 'features/story/story_screen.dart';
 import 'features/growth/growth_screen.dart';
 import 'features/children/summary_screen.dart';
 import 'features/profile/profile_screen.dart';
@@ -32,11 +32,22 @@ import 'features/books/multi_notebook_select_screen.dart';
 import 'features/orders/order_tracking_screen.dart';
 import 'features/orders/order_confirmation_screen.dart';
 import 'features/admin/admin_orders_screen.dart';
+import 'features/admin/admin_users_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   await initializeDateFormatting('fr', null);
+
+  // Android : bascule sur le Photo Picker système (Android 13+, rétroporté via
+  // Google Play services). C'est le seul sélecteur où la multi-sélection de
+  // vidéos est fiable ; sans ça, image_picker utilise le vieux GET_CONTENT qui
+  // ne renvoie souvent qu'un seul élément.
+  final picker = ImagePickerPlatform.instance;
+  if (picker is ImagePickerAndroid) {
+    picker.useAndroidPhotoPicker = true;
+  }
+
   runApp(const ProviderScope(child: BloomApp()));
 }
 
@@ -113,19 +124,9 @@ final _router = GoRouter(
           BookHistoryScreen(notebookId: state.pathParameters['notebookId']!),
     ),
     GoRoute(
-      path: '/notebook/:notebookId/story',
-      builder: (_, state) =>
-          StoryScreen(childId: state.pathParameters['notebookId']!),
-    ),
-    GoRoute(
       path: '/notebook/:notebookId/growth',
       builder: (_, state) =>
           GrowthScreen(notebookId: state.pathParameters['notebookId']!),
-    ),
-    GoRoute(
-      path: '/notebook/:notebookId/scan',
-      builder: (_, state) =>
-          ScanMilestoneScreen(childId: state.pathParameters['notebookId']!),
     ),
 
     // ── Orders ──
@@ -141,6 +142,7 @@ final _router = GoRouter(
 
     // ── Admin ──
     GoRoute(path: '/admin/orders', builder: (_, __) => const AdminOrdersScreen()),
+    GoRoute(path: '/admin/users', builder: (_, __) => const AdminUsersScreen()),
 
     // ── Legacy child routes (kept during transition) ──
     GoRoute(path: '/add-child', builder: (_, __) => const AddChildScreen()),
@@ -160,11 +162,6 @@ final _router = GoRouter(
           AddMilestoneScreen(childId: state.pathParameters['childId']!),
     ),
     GoRoute(
-      path: '/child/:childId/story',
-      builder: (_, state) =>
-          StoryScreen(childId: state.pathParameters['childId']!),
-    ),
-    GoRoute(
       path: '/child/:childId/growth',
       builder: (_, state) =>
           GrowthScreen(notebookId: state.pathParameters['childId']!),
@@ -173,11 +170,6 @@ final _router = GoRouter(
       path: '/child/:childId/summary',
       builder: (_, state) =>
           SummaryScreen(childId: state.pathParameters['childId']!),
-    ),
-    GoRoute(
-      path: '/child/:childId/scan-milestone',
-      builder: (_, state) =>
-          ScanMilestoneScreen(childId: state.pathParameters['childId']!),
     ),
     GoRoute(
       path: '/child/:childId/edit-milestone/:milestoneId',

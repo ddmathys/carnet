@@ -11,7 +11,6 @@ import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/data/growth_data.dart';
 import '../../core/utils/date_precision.dart';
-import '../../core/services/deepseek_service.dart';
 
 // Animaux disponibles en asset SVG (companion du carnet). Repli sur « bear ».
 const _animalAssets = {'bear', 'dino', 'fox', 'mouse', 'penguin', 'rabbit'};
@@ -1186,9 +1185,7 @@ class _AddMeasureButton extends StatelessWidget {
   }
 }
 
-// ─── Sheet : commentaire + IA → mesure (enregistrée dans memories) ──────────────
-
-enum _SheetState { composing, analyzing, result }
+// ─── Sheet : saisie d'une mesure (enregistrée dans memories) ────────────────────
 
 class _MeasureSheet extends StatefulWidget {
   final NotebookModel notebook;
@@ -1201,11 +1198,7 @@ class _MeasureSheet extends StatefulWidget {
 }
 
 class _MeasureSheetState extends State<_MeasureSheet> {
-  _SheetState _state = _SheetState.composing;
-
   Uint8List? _photoBytes;
-  GrowthAnalysis? _analysis;
-  bool _aiSuccess = false;
   bool _saving = false;
 
   final _commentCtrl = TextEditingController();
@@ -1238,36 +1231,10 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     });
   }
 
-  bool get _canSend => _commentCtrl.text.trim().isNotEmpty;
-
-  Future<void> _send() async {
-    final comment = _commentCtrl.text.trim();
-    if (comment.isEmpty) return;
-
-    setState(() => _state = _SheetState.analyzing);
-
-    final service = DeepSeekService();
-    final result = await service.analyzeGrowthComment(
-      comment: comment,
-      childName: widget.notebook.title,
-      previousMeasurements: const [],
-    );
-
-    if (!mounted) return;
-
-    if (result != null) {
-      _analysis = result;
-      _aiSuccess = true;
-      if (result.heightCm != null) {
-        _heightCtrl.text = result.heightCm!.toStringAsFixed(0);
-      }
-      if (result.weightKg != null) {
-        _weightCtrl.text = result.weightKg!.toStringAsFixed(1);
-      }
-    } else {
-      _aiSuccess = false;
-    }
-    setState(() => _state = _SheetState.result);
+  bool get _canSave {
+    final h = double.tryParse(_heightCtrl.text.trim().replaceAll(',', '.'));
+    final w = double.tryParse(_weightCtrl.text.trim().replaceAll(',', '.'));
+    return (h != null && h > 0) || (w != null && w > 0);
   }
 
   Future<void> _save() async {
@@ -1294,8 +1261,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
         'datePrecision': 'exact',
         'dateLabel': null,
         'rawContent': comment.isNotEmpty ? comment : parts.join(', '),
-        'aiNarration':
-            _analysis?.notes.isNotEmpty == true ? _analysis!.notes : null,
+        'aiNarration': null,
         'photoUrl': null,
         'mediaUrls': <String>[],
         'weightKg': weightKg,
@@ -1344,11 +1310,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
               child: SingleChildScrollView(
                 controller: scrollController,
                 padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
-                child: _state == _SheetState.analyzing
-                    ? _buildAnalyzing()
-                    : _state == _SheetState.result
-                        ? _buildResult()
-                        : _buildComposing(),
+                child: _buildForm(),
               ),
             ),
           ],
@@ -1357,7 +1319,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     );
   }
 
-  Widget _buildComposing() {
+  Widget _buildForm() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -1373,12 +1335,14 @@ class _MeasureSheetState extends State<_MeasureSheet> {
         const SizedBox(height: 6),
         Text(
           _isChild
-              ? 'Décris la mesure en texte libre — l\'IA extrait la taille et le poids pour toi.'
-              : 'Décris la mesure en texte libre — l\'IA extrait le poids pour toi.',
+              ? 'Renseigne la taille et/ou le poids.'
+              : 'Renseigne le poids.',
           style: TextStyle(
               fontSize: 13, color: Colors.grey.shade500, height: 1.5),
         ),
         const SizedBox(height: 20),
+
+        // Photo (optionnelle)
         GestureDetector(
           onTap: _takePhoto,
           child: AnimatedContainer(
@@ -1435,144 +1399,8 @@ class _MeasureSheetState extends State<_MeasureSheet> {
                   ),
           ),
         ),
-        const SizedBox(height: 16),
-        TextField(
-          controller: _commentCtrl,
-          minLines: 3,
-          maxLines: 5,
-          onChanged: (_) => setState(() {}),
-          decoration: InputDecoration(
-            hintText: _isChild
-                ? 'Ex : "Nathan mesure 78 cm et pèse 11,5 kg chez le pédiatre"'
-                : 'Ex : "Je pèse 72,3 kg ce matin"',
-            hintStyle: TextStyle(
-                color: Colors.grey.shade400, fontSize: 13, height: 1.5),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: Colors.grey.shade200),
-            ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: Colors.grey.shade200),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-              borderSide: const BorderSide(color: AppColors.sage, width: 2),
-            ),
-            filled: true,
-            fillColor: Colors.grey.shade50,
-            contentPadding: const EdgeInsets.all(16),
-          ),
-        ),
         const SizedBox(height: 20),
-        ElevatedButton.icon(
-          onPressed: _canSend ? _send : null,
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.sage,
-            disabledBackgroundColor: Colors.grey.shade200,
-            foregroundColor: Colors.white,
-            minimumSize: const Size(double.infinity, 52),
-            shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14)),
-          ),
-          icon: const Icon(Icons.auto_awesome, size: 18),
-          label: const Text(
-            'Envoyer à l\'IA',
-            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
-          ),
-        ),
-      ],
-    );
-  }
 
-  Widget _buildAnalyzing() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        const SizedBox(height: 20),
-        if (_photoBytes != null)
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Image.memory(
-              _photoBytes!,
-              height: 160,
-              width: double.infinity,
-              fit: BoxFit.cover,
-            ),
-          ),
-        SizedBox(height: _photoBytes != null ? 28 : 60),
-        SvgPicture.asset(
-          'assets/images/animals/${_animalId(widget.notebook)}.svg',
-          width: 90,
-        ),
-        const SizedBox(height: 20),
-        const CircularProgressIndicator(color: AppColors.sage),
-        const SizedBox(height: 16),
-        Text(
-          "L'IA analyse le commentaire…",
-          style: TextStyle(
-            fontSize: 14,
-            color: Colors.grey.shade600,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildResult() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (_photoBytes != null) ...[
-          ClipRRect(
-            borderRadius: BorderRadius.circular(14),
-            child: Image.memory(
-              _photoBytes!,
-              height: 140,
-              width: double.infinity,
-              fit: BoxFit.cover,
-            ),
-          ),
-          const SizedBox(height: 14),
-        ],
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: _aiSuccess ? Colors.green.shade50 : Colors.orange.shade50,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(
-              color: _aiSuccess ? Colors.green.shade200 : Colors.orange.shade200,
-            ),
-          ),
-          child: Row(
-            children: [
-              Icon(
-                _aiSuccess ? Icons.auto_awesome : Icons.edit_note,
-                size: 16,
-                color:
-                    _aiSuccess ? Colors.green.shade700 : Colors.orange.shade700,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  _aiSuccess
-                      ? (_analysis?.notes.isNotEmpty == true
-                          ? _analysis!.notes
-                          : 'Valeurs extraites — vérifie et ajuste si besoin')
-                      : 'L\'IA n\'a pas pu extraire les valeurs — entre-les manuellement',
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: _aiSuccess
-                        ? Colors.green.shade700
-                        : Colors.orange.shade700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
         const Text(
           'Valeurs mesurées',
           style: TextStyle(
@@ -1591,6 +1419,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
                   label: 'Taille',
                   unit: 'cm',
                   icon: Icons.height,
+                  onChanged: () => setState(() {}),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1601,11 +1430,14 @@ class _MeasureSheetState extends State<_MeasureSheet> {
                 label: 'Poids',
                 unit: 'kg',
                 icon: Icons.monitor_weight_outlined,
+                onChanged: () => setState(() {}),
               ),
             ),
           ],
         ),
         const SizedBox(height: 14),
+
+        // Date
         GestureDetector(
           onTap: _pickDate,
           child: Container(
@@ -1632,11 +1464,40 @@ class _MeasureSheetState extends State<_MeasureSheet> {
             ),
           ),
         ),
+        const SizedBox(height: 14),
+
+        // Note (optionnelle)
+        TextField(
+          controller: _commentCtrl,
+          minLines: 2,
+          maxLines: 4,
+          decoration: InputDecoration(
+            hintText: 'Note (optionnel) — ex : visite chez le pédiatre',
+            hintStyle: TextStyle(
+                color: Colors.grey.shade400, fontSize: 13, height: 1.5),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade200),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: BorderSide(color: Colors.grey.shade200),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(14),
+              borderSide: const BorderSide(color: AppColors.sage, width: 2),
+            ),
+            filled: true,
+            fillColor: Colors.grey.shade50,
+            contentPadding: const EdgeInsets.all(16),
+          ),
+        ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: _saving ? null : _save,
+          onPressed: (_canSave && !_saving) ? _save : null,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.sage,
+            disabledBackgroundColor: Colors.grey.shade200,
             foregroundColor: Colors.white,
             minimumSize: const Size(double.infinity, 52),
             shape: RoundedRectangleBorder(
@@ -1654,18 +1515,6 @@ class _MeasureSheetState extends State<_MeasureSheet> {
                   style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
                 ),
         ),
-        const SizedBox(height: 10),
-        TextButton.icon(
-          onPressed: () => setState(() {
-            _state = _SheetState.composing;
-            _analysis = null;
-            _heightCtrl.clear();
-            _weightCtrl.clear();
-          }),
-          icon: const Icon(Icons.arrow_back, size: 16),
-          label: const Text('Modifier le commentaire'),
-          style: TextButton.styleFrom(foregroundColor: Colors.grey.shade500),
-        ),
       ],
     );
   }
@@ -1676,18 +1525,21 @@ class _MeasureField extends StatelessWidget {
   final String label;
   final String unit;
   final IconData icon;
+  final VoidCallback? onChanged;
 
   const _MeasureField({
     required this.controller,
     required this.label,
     required this.unit,
     required this.icon,
+    this.onChanged,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextField(
       controller: controller,
+      onChanged: onChanged == null ? null : (_) => onChanged!(),
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       textAlign: TextAlign.center,
       style: const TextStyle(
