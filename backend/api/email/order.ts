@@ -47,18 +47,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Coordonnées de paiement — lues depuis l'environnement (jamais en dur dans
   // le code) : IBAN pour virement, numéro pour TWINT, nom du bénéficiaire.
   const payName = process.env.PAYMENT_NAME ?? ''
+  const payAddress = process.env.PAYMENT_ADDRESS ?? ''
   const payIban = process.env.PAYMENT_IBAN ?? ''
+  const payBic = process.env.PAYMENT_BIC ?? ''
   const payPhone = process.env.PAYMENT_PHONE ?? ''
+  const payLine = (emoji: string, label: string, value: string) =>
+    value
+      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">${emoji} ${label} : <strong>${escapeHtml(value)}</strong></p>`
+      : ''
   const paymentRows = [
-    payName
-      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">👤 Bénéficiaire : <strong>${escapeHtml(payName)}</strong></p>`
-      : '',
-    payIban
-      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">🏦 IBAN : <strong>${escapeHtml(payIban)}</strong></p>`
-      : '',
-    payPhone
-      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📱 TWINT : <strong>${escapeHtml(payPhone)}</strong></p>`
-      : '',
+    payLine('👤', 'Bénéficiaire', payName),
+    payLine('📍', 'Adresse', payAddress),
+    payLine('🏦', 'IBAN', payIban),
+    payLine('🏛️', 'BIC', payBic),
+    payLine('📱', 'TWINT', payPhone),
   ].join('')
 
   const adminHtml = wrap(`
