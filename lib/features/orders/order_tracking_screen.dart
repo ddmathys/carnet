@@ -385,8 +385,8 @@ class _PayButtonState extends State<_PayButton> {
             SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Paiement après réception : tu régleras par TWINT une fois le '
-                'livre reçu. Les détails te seront envoyés par e-mail.',
+                'Le paiement déclenche la commande de ton livre. L\'équipe '
+                'Carnet te contactera rapidement pour les instructions de paiement.',
                 style: TextStyle(
                     fontSize: 13, color: AppColors.textDark, height: 1.5),
               ),

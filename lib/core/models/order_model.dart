@@ -77,14 +77,15 @@ class OrderModel {
     'paid':      '💚',
   };
 
-  // Ordered list for timeline
+  // Ordered list for timeline. Le paiement déclenche la commande → il vient
+  // AVANT l'impression et l'envoi.
   static const statusFlow = [
     'received',
     'validated',
-    'printing',
-    'ready',
     'invoiced',
     'paid',
+    'printing',
+    'ready',
   ];
 
   int get statusIndex => statusFlow.indexOf(status);

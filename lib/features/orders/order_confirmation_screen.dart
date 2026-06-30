@@ -40,12 +40,11 @@ class OrderConfirmationScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               const Text(
-                'Vous allez recevoir un email de confirmation.\nNous vous contacterons dès que votre livre est prêt.',
+                'Le paiement déclenchera la commande de votre livre.',
                 style: TextStyle(fontSize: 15, color: AppColors.textMedium, height: 1.6),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
-              // Paiement après livraison (MVP) — aucun paiement en ligne ici.
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
@@ -60,8 +59,8 @@ class OrderConfirmationScreen extends StatelessWidget {
                     SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Vous paierez après réception du livre, par TWINT. '
-                        'Les détails de paiement vous seront envoyés par e-mail.',
+                        'L\'équipe Carnet vous contactera rapidement pour les '
+                        'instructions de paiement.',
                         style: TextStyle(
                             fontSize: 13, color: AppColors.textDark, height: 1.5),
                       ),
