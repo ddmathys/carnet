@@ -258,7 +258,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
       customSubtitle: null,
       backendUrl: AppConfig.backendUrl,
-    ).timeout(const Duration(seconds: 60));
+    ).timeout(const Duration(seconds: 180));
   }
 
   Future<void> _generate() async {
@@ -328,7 +328,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customTitle: customTitle,
         customSubtitle: null,
         backendUrl: AppConfig.backendUrl,
-      ).timeout(const Duration(seconds: 60));
+      ).timeout(const Duration(seconds: 180));
       pdfBytes = gen.bytes;
     } catch (e) {
       pdfBytes = null;
