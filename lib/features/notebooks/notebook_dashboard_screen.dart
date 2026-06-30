@@ -6,10 +6,8 @@ import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
-import '../../core/models/generated_book_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/constants/notebook_types.dart';
-import '../../core/services/book_history_service.dart';
 import '../../core/services/user_service.dart';
 import 'share_notebook_sheet.dart';
 
@@ -143,8 +141,10 @@ class _DashboardBodyState extends State<_DashboardBody> {
                 const SizedBox(height: 16),
                 _buildSharedWith(context),
                 const SizedBox(height: 20),
-                _StatsGrid(notebook: notebook, memories: memories),
-                const SizedBox(height: 20),
+                if (memories.isNotEmpty) ...[
+                  _MemoryTimeline(notebook: notebook, memories: memories),
+                  const SizedBox(height: 20),
+                ],
                 _ShortcutsRow(notebook: notebook),
                 const SizedBox(height: 24),
                 if (memories.isNotEmpty) ...[
@@ -552,135 +552,345 @@ class _BookCta extends StatelessWidget {
   }
 }
 
-class _StatsGrid extends StatelessWidget {
+/// Ligne du temps horizontale : une ligne continue, des bulles alternées
+/// au-dessus / au-dessous (photo du souvenir ou icône + date), défilable.
+/// 1er tap sur une bulle = aperçu (bulle agrandie + carte titre/date/photo) ;
+/// 2e tap sur la même bulle (ou tap sur la carte) = page « Modifier ».
+class _MemoryTimeline extends StatefulWidget {
   final NotebookModel notebook;
   final List<MemoryModel> memories;
-  const _StatsGrid({required this.notebook, required this.memories});
+  const _MemoryTimeline({required this.notebook, required this.memories});
+
+  @override
+  State<_MemoryTimeline> createState() => _MemoryTimelineState();
+}
+
+class _MemoryTimelineState extends State<_MemoryTimeline> {
+  String? _selectedId;
+
+  void _onTap(MemoryModel m) {
+    if (_selectedId == m.id) {
+      // 2e clic sur la bulle déjà ouverte → page Modifier le souvenir.
+      context.push('/notebook/${widget.notebook.id}/edit-memory/${m.id}');
+    } else {
+      setState(() => _selectedId = m.id);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final stats = _buildStats();
-    return GridView.builder(
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-        crossAxisCount: 2,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
-        childAspectRatio: 1.6,
-      ),
-      itemCount: stats.length,
-      itemBuilder: (_, i) {
-        final s = stats[i];
-        // La stat « Livres générés » est branchée sur le vrai compte.
-        if (s.label == 'Livres générés') {
-          return StreamBuilder<List<GeneratedBookModel>>(
-            stream: BookHistoryService.streamForNotebook(notebook.id),
-            builder: (_, snap) => _StatCard(
-              stat: _Stat(s.label, '${snap.data?.length ?? 0}', s.emoji),
-            ),
-          );
+    // Ordre chronologique : le plus ancien à gauche, le plus récent à droite.
+    final items = [...widget.memories]..sort((a, b) => a.date.compareTo(b.date));
+    MemoryModel? selected;
+    if (_selectedId != null) {
+      for (final m in items) {
+        if (m.id == _selectedId) {
+          selected = m;
+          break;
         }
-        return _StatCard(stat: s);
-      },
+      }
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Ligne du temps',
+          style: TextStyle(
+            fontFamily: 'PlayfairDisplay',
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: AppColors.textDark,
+          ),
+        ),
+        const SizedBox(height: 2),
+        const Text(
+          'Touche un souvenir pour l\'aperçu, touche à nouveau pour le modifier.',
+          style: TextStyle(fontSize: 12, color: AppColors.textMedium),
+        ),
+        const SizedBox(height: 12),
+        SizedBox(
+          height: 184,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: items.length,
+            padding: const EdgeInsets.symmetric(horizontal: 2),
+            itemBuilder: (_, i) => _TimelineBubble(
+              memory: items[i],
+              above: i.isEven,
+              selected: items[i].id == _selectedId,
+              onTap: () => _onTap(items[i]),
+            ),
+          ),
+        ),
+        if (selected != null)
+          _TimelineDetailCard(
+            memory: selected,
+            onTap: () => context.push(
+                '/notebook/${widget.notebook.id}/edit-memory/${selected!.id}'),
+          ),
+      ],
+    );
+  }
+}
+
+class _TimelineBubble extends StatelessWidget {
+  final MemoryModel memory;
+  final bool above;
+  final bool selected;
+  final VoidCallback onTap;
+  const _TimelineBubble({
+    required this.memory,
+    required this.above,
+    required this.selected,
+    required this.onTap,
+  });
+
+  // Photo du souvenir (vignette de bulle), si disponible.
+  String? get _photo {
+    if (memory.photoUrl != null && memory.photoUrl!.isNotEmpty) {
+      return memory.photoUrl;
+    }
+    if (memory.mediaUrls.isNotEmpty) return memory.mediaUrls.first;
+    return null;
+  }
+
+  // Icône du type quand il n'y a pas de photo — jamais le livre : on remplace
+  // l'emoji « anecdote » (📖) et les types inconnus par une étoile « souvenir ».
+  String get _emoji {
+    try {
+      final e = getMilestoneCategoryById(memory.type).emoji;
+      return e == '📖' ? '✨' : e;
+    } catch (_) {
+      return '✨';
+    }
+  }
+
+  static const _line = Color(0xFFDDD8CC);
+
+  @override
+  Widget build(BuildContext context) {
+    final dateLabel = DateFormat('d MMM', 'fr').format(memory.date);
+
+    final bubble = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: above
+            ? [_dateChip(dateLabel), const SizedBox(height: 4), _circle()]
+            : [_circle(), const SizedBox(height: 4), _dateChip(dateLabel)],
+      ),
+    );
+
+    const zone = 76.0;
+    return SizedBox(
+      width: 82,
+      child: Column(
+        children: [
+          SizedBox(
+            height: zone,
+            child: above
+                ? Align(alignment: Alignment.bottomCenter, child: bubble)
+                : null,
+          ),
+          // Ligne continue + tige + nœud.
+          SizedBox(
+            height: 24,
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  top: 11,
+                  child: Container(height: 2, color: _line),
+                ),
+                Align(
+                  alignment:
+                      above ? Alignment.topCenter : Alignment.bottomCenter,
+                  child: Container(width: 2, height: 12, color: _line),
+                ),
+                Align(
+                  alignment: Alignment.center,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: AppColors.sage,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: AppColors.white, width: 2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: zone,
+            child: !above
+                ? Align(alignment: Alignment.topCenter, child: bubble)
+                : null,
+          ),
+        ],
+      ),
     );
   }
 
-  List<_Stat> _buildStats() {
-    final total = memories.length;
-    final lastDate = memories.isEmpty ? null : memories.first.date;
-    final lastLabel = lastDate == null
-        ? '—'
-        : DateFormat('d MMM', 'fr').format(lastDate);
+  Widget _circle() {
+    final size = selected ? 58.0 : 46.0;
+    final photo = _photo;
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 180),
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: AppColors.sage.withOpacity(0.12),
+        shape: BoxShape.circle,
+        border: Border.all(
+          color: selected ? AppColors.sage : AppColors.sage.withOpacity(0.5),
+          width: selected ? 2.5 : 1.5,
+        ),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: photo != null
+          ? CachedNetworkImage(
+              imageUrl: photo,
+              fit: BoxFit.cover,
+              placeholder: (_, __) =>
+                  Container(color: AppColors.sage.withOpacity(0.12)),
+              errorWidget: (_, __, ___) => Center(
+                  child: Text(_emoji, style: TextStyle(fontSize: size * 0.45))),
+            )
+          : Center(
+              child: Text(_emoji, style: TextStyle(fontSize: size * 0.45))),
+    );
+  }
 
-    switch (notebook.type) {
-      case 'enfant':
-        final measurements = memories
-            .where((m) => m.type == 'taille_poids')
-            .length;
-        return [
-          _Stat('Total', '$total', '📝'),
-          _Stat('Mesures', '$measurements', '📏'),
-          _Stat('Dernière saisie', lastLabel, '🕒'),
-        ];
-      case 'voyage':
-        final withPhoto =
-            memories.where((m) => m.photoUrl != null).length;
-        return [
-          _Stat('Total', '$total', '📝'),
-          _Stat('Photos', '$withPhoto', '📷'),
-          _Stat('Dernière saisie', lastLabel, '🕒'),
-          _Stat('Destination', notebook.destination ?? '—', '🌍'),
-        ];
-      case 'famille':
-        return [
-          _Stat('Total', '$total', '📝'),
-          _Stat('Cette semaine',
-              '${memories.where((m) => DateTime.now().difference(m.date).inDays < 7).length}',
-              '📅'),
-          _Stat('Dernière saisie', lastLabel, '🕒'),
-          _Stat('Livres générés', '0', '📖'),
-        ];
-      default:
-        return [
-          _Stat('Total', '$total', '📝'),
-          _Stat('Cette semaine',
-              '${memories.where((m) => DateTime.now().difference(m.date).inDays < 7).length}',
-              '📅'),
-          _Stat('Dernière saisie', lastLabel, '🕒'),
-          _Stat('Livres générés', '0', '📖'),
-        ];
-    }
+  Widget _dateChip(String label) {
+    return Text(
+      label,
+      style: TextStyle(
+        fontSize: 10,
+        color: selected ? AppColors.sage : AppColors.textMedium,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+      ),
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+    );
   }
 }
 
-class _Stat {
-  final String label;
-  final String value;
-  final String emoji;
-  const _Stat(this.label, this.value, this.emoji);
-}
+/// Carte d'aperçu du souvenir sélectionné dans la ligne du temps : photo (si
+/// présente), titre, date. Taper → page « Modifier le souvenir ».
+class _TimelineDetailCard extends StatelessWidget {
+  final MemoryModel memory;
+  final VoidCallback onTap;
+  const _TimelineDetailCard({required this.memory, required this.onTap});
 
-class _StatCard extends StatelessWidget {
-  final _Stat stat;
-  const _StatCard({required this.stat});
+  String? get _photo {
+    if (memory.photoUrl != null && memory.photoUrl!.isNotEmpty) {
+      return memory.photoUrl;
+    }
+    if (memory.mediaUrls.isNotEmpty) return memory.mediaUrls.first;
+    return null;
+  }
+
+  String get _typeLabel {
+    try {
+      return getMilestoneCategoryById(memory.type).label;
+    } catch (_) {
+      return 'Souvenir';
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(stat.emoji, style: const TextStyle(fontSize: 20)),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    final photo = _photo;
+    final title = (memory.title != null && memory.title!.isNotEmpty)
+        ? memory.title!
+        : _typeLabel;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: AppColors.sage.withOpacity(0.4), width: 1),
+          ),
+          clipBehavior: Clip.hardEdge,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Text(
-                stat.value,
-                style: const TextStyle(
-                  fontFamily: 'PlayfairDisplay',
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDark,
+              if (photo != null)
+                CachedNetworkImage(
+                  imageUrl: photo,
+                  width: 76,
+                  height: 76,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) =>
+                      Container(width: 76, height: 76, color: AppColors.background),
+                  errorWidget: (_, __, ___) => Container(
+                    width: 76,
+                    height: 76,
+                    color: AppColors.background,
+                    child: const Icon(Icons.image_outlined,
+                        color: AppColors.softGray),
+                  ),
+                )
+              else
+                Container(
+                  width: 76,
+                  height: 76,
+                  color: AppColors.sage.withOpacity(0.10),
+                  child: const Icon(Icons.auto_awesome,
+                      color: AppColors.sage, size: 26),
                 ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontFamily: 'PlayfairDisplay',
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textDark,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        DateFormat('d MMMM yyyy', 'fr').format(memory.date),
+                        style: const TextStyle(
+                            fontSize: 12, color: AppColors.textMedium),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-              Text(
-                stat.label,
-                style: const TextStyle(
-                    fontSize: 11, color: AppColors.textMedium),
+              const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: Row(
+                  children: [
+                    Text('Modifier',
+                        style: TextStyle(
+                            color: AppColors.sage,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600)),
+                    Icon(Icons.chevron_right, color: AppColors.sage, size: 18),
+                  ],
+                ),
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }

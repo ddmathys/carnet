@@ -879,7 +879,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   String? get _missingFieldsHint {
     final missing = <String>[];
+    if (_titleRequiredEmpty) missing.add('titre');
     if (_dateNeedsConfirmation) missing.add('date');
+    if (_locationRequiredEmpty) missing.add('lieu');
     switch (_selectedCategory) {
       case 'parole':
       case 'mouvement':
@@ -900,14 +902,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   // ── Validation des champs obligatoires ───────────────────────────────────
-  // Seuls requis : une date confirmée + un contenu selon le type. Titre et lieu
-  // sont OPTIONNELS. Une catégorie nulle (repli manuel après échec IA) est
-  // traitée comme « anecdote ».
+  // Requis : titre + lieu + date confirmée + un contenu selon le type. Une
+  // catégorie nulle (« Autre souvenir ») est traitée comme « anecdote ».
   bool get _measurementMissing {
     final w = double.tryParse(_weightController.text.replaceAll(',', '.'));
     final h = double.tryParse(_heightController.text.replaceAll(',', '.'));
     return !((w != null && w > 0) || (h != null && h > 0));
   }
+
+  bool get _titleRequiredEmpty => _titleController.text.trim().isEmpty;
+  bool get _locationRequiredEmpty => _locationController.text.trim().isEmpty;
 
   bool get _descriptionRequiredEmpty =>
       (_selectedCategory == 'anecdote' || _selectedCategory == null) &&
@@ -920,6 +924,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       );
 
   bool get _saveEnabled {
+    if (_titleRequiredEmpty || _locationRequiredEmpty) return false;
     if (_dateNeedsConfirmation) return false;
     switch (_selectedCategory) {
       case 'parole':
@@ -1277,9 +1282,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 20),
           TextField(
             controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Titre (optionnel)',
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Titre',
               hintText: 'Ex : Premier mot',
+              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
+              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
             ),
             textCapitalization: TextCapitalization.sentences,
           ),
@@ -1332,9 +1340,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 20),
           TextField(
             controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Titre (optionnel)',
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Titre',
               hintText: 'Ex : Premiers pas !',
+              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
+              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
             ),
             textCapitalization: TextCapitalization.sentences,
           ),
@@ -1458,9 +1469,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ],
           TextField(
             controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Titre (optionnel)',
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Titre',
               hintText: 'Ex : Visite chez le pédiatre',
+              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
+              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
             ),
             textCapitalization: TextCapitalization.sentences,
           ),
@@ -1505,9 +1519,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 12),
           TextField(
             controller: _titleController,
-            decoration: const InputDecoration(
-              labelText: 'Titre (optionnel)',
+            onChanged: (_) => setState(() {}),
+            decoration: InputDecoration(
+              labelText: 'Titre',
               hintText: 'Ex : Premier pas dans la neige',
+              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
+              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
             ),
             textCapitalization: TextCapitalization.sentences,
           ),
@@ -1802,14 +1819,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('📍 Lieu (optionnel)'),
+        _SectionTitle('📍 Lieu', error: _locationRequiredEmpty),
         const SizedBox(height: 8),
         TextField(
           controller: _locationController,
           textCapitalization: TextCapitalization.sentences,
           onChanged: (_) => setState(() {}),
-          decoration: const InputDecoration(
+          decoration: InputDecoration(
             hintText: 'Ex : Zoo de Genève, Paris, Maison…',
+            enabledBorder: _locationRequiredEmpty ? _errorBorder : null,
+            focusedBorder: _locationRequiredEmpty ? _errorBorder : null,
           ),
         ),
       ],
