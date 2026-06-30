@@ -821,7 +821,6 @@ class _TimelineDetailCard extends StatelessWidget {
           ),
           clipBehavior: Clip.hardEdge,
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (photo != null)
                 CachedNetworkImage(
