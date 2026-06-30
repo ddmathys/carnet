@@ -163,6 +163,7 @@ class _CurvesTabState extends State<_CurvesTab> {
           ),
           const SizedBox(height: 24),
           _MeasurementList(
+            notebook: widget.notebook,
             measures: widget.measures,
             showWeight: _showWeight,
           ),
@@ -458,7 +459,8 @@ class _AdultWeightTab extends StatelessWidget {
         children: [
           _SimpleWeightChart(measures: wMeasures),
           const SizedBox(height: 24),
-          _MeasurementList(measures: measures, showWeight: true),
+          _MeasurementList(
+              notebook: notebook, measures: measures, showWeight: true),
           const SizedBox(height: 20),
           _AddMeasureButton(notebook: notebook, measures: measures),
         ],
@@ -601,10 +603,28 @@ class _SimpleWeightChart extends StatelessWidget {
 }
 
 class _MeasurementList extends StatelessWidget {
+  final NotebookModel notebook;
   final List<MemoryModel> measures;
   final bool showWeight;
 
-  const _MeasurementList({required this.measures, required this.showWeight});
+  const _MeasurementList({
+    required this.notebook,
+    required this.measures,
+    required this.showWeight,
+  });
+
+  void _edit(BuildContext context, MemoryModel m) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _MeasureSheet(
+        notebook: notebook,
+        previousMeasures: const [],
+        editing: m,
+      ),
+    );
+  }
 
   String _label(MemoryModel m) =>
       m.dateLabel ??
@@ -663,72 +683,80 @@ class _MeasurementList extends StatelessWidget {
             }
           }
 
-          return Container(
-            margin: const EdgeInsets.only(bottom: 10),
-            padding: const EdgeInsets.all(14),
-            decoration: BoxDecoration(
-              color: isLatest ? AppColors.sage.withOpacity(0.08) : Colors.white,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isLatest
-                    ? AppColors.sage.withOpacity(0.3)
-                    : Colors.grey.shade100,
-              ),
-            ),
-            child: Row(
-              children: [
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: isLatest ? AppColors.sage : Colors.grey.shade100,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    showWeight ? Icons.monitor_weight_outlined : Icons.height,
-                    color: isLatest ? Colors.white : Colors.grey.shade400,
-                    size: 20,
-                  ),
+          return GestureDetector(
+            onTap: () => _edit(context, m),
+            child: Container(
+              margin: const EdgeInsets.only(bottom: 10),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color:
+                    isLatest ? AppColors.sage.withOpacity(0.08) : Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: isLatest
+                      ? AppColors.sage.withOpacity(0.3)
+                      : Colors.grey.shade100,
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        value,
+              ),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: isLatest ? AppColors.sage : Colors.grey.shade100,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      showWeight ? Icons.monitor_weight_outlined : Icons.height,
+                      color: isLatest ? Colors.white : Colors.grey.shade400,
+                      size: 20,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          value,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w800,
+                            fontSize: 20,
+                            color:
+                                isLatest ? AppColors.sage : AppColors.textDark,
+                          ),
+                        ),
+                        Text(
+                          _label(m),
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade500),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (gain != null)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        gain,
                         style: TextStyle(
-                          fontWeight: FontWeight.w800,
-                          fontSize: 20,
-                          color: isLatest ? AppColors.sage : AppColors.textDark,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.green.shade600,
                         ),
                       ),
-                      Text(
-                        _label(m),
-                        style: TextStyle(
-                            fontSize: 12, color: Colors.grey.shade500),
-                      ),
-                    ],
-                  ),
-                ),
-                if (gain != null)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: Colors.green.shade50,
-                      borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Text(
-                      gain,
-                      style: TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.green.shade600,
-                      ),
-                    ),
-                  ),
-              ],
+                  const SizedBox(width: 6),
+                  Icon(Icons.edit_outlined,
+                      size: 16, color: Colors.grey.shade400),
+                ],
+              ),
             ),
           );
         }),
@@ -799,8 +827,14 @@ class _AddMeasureButton extends StatelessWidget {
 class _MeasureSheet extends StatefulWidget {
   final NotebookModel notebook;
   final List<MemoryModel> previousMeasures;
+  /// Mesure existante à éditer (null = nouvelle mesure).
+  final MemoryModel? editing;
 
-  const _MeasureSheet({required this.notebook, required this.previousMeasures});
+  const _MeasureSheet({
+    required this.notebook,
+    required this.previousMeasures,
+    this.editing,
+  });
 
   @override
   State<_MeasureSheet> createState() => _MeasureSheetState();
@@ -808,6 +842,7 @@ class _MeasureSheet extends StatefulWidget {
 
 class _MeasureSheetState extends State<_MeasureSheet> {
   bool _saving = false;
+  bool _deleting = false;
 
   final _commentCtrl = TextEditingController();
   final _heightCtrl = TextEditingController();
@@ -815,6 +850,24 @@ class _MeasureSheetState extends State<_MeasureSheet> {
   DateTime _date = DateTime.now();
 
   bool get _isChild => widget.notebook.type == 'enfant';
+  bool get _isEditing => widget.editing != null;
+
+  @override
+  void initState() {
+    super.initState();
+    final e = widget.editing;
+    if (e != null) {
+      if (e.heightCm != null) _heightCtrl.text = e.heightCm!.toStringAsFixed(0);
+      if (e.weightKg != null) _weightCtrl.text = e.weightKg!.toStringAsFixed(1);
+      _date = e.date;
+      // Pré-remplit la note seulement si rawContent n'est pas le texte auto
+      // « 75 cm • 9.5 kg » (chiffres + unités uniquement).
+      final raw = e.rawContent.trim();
+      final looksAuto =
+          RegExp(r'^[\d.,\s•×xcmkg]*$', caseSensitive: false).hasMatch(raw);
+      if (raw.isNotEmpty && !looksAuto) _commentCtrl.text = raw;
+    }
+  }
 
   @override
   void dispose() {
@@ -844,26 +897,63 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     final comment = _commentCtrl.text.trim();
 
     setState(() => _saving = true);
+    final col = FirebaseFirestore.instance.collection('memories');
+    final data = {
+      'notebookId': widget.notebook.id,
+      'type': 'taille_poids',
+      'subType': null,
+      'date': Timestamp.fromDate(_date),
+      'datePrecision': 'exact',
+      'dateLabel': null,
+      'rawContent': comment.isNotEmpty ? comment : parts.join(', '),
+      'aiNarration': null,
+      'photoUrl': null,
+      'mediaUrls': <String>[],
+      'weightKg': weightKg,
+      'heightCm': heightCm,
+    };
     try {
-      // Mesure = souvenir de type taille_poids dans le carnet courant.
-      await FirebaseFirestore.instance.collection('memories').add({
-        'notebookId': widget.notebook.id,
-        'type': 'taille_poids',
-        'subType': null,
-        'date': Timestamp.fromDate(_date),
-        'datePrecision': 'exact',
-        'dateLabel': null,
-        'rawContent': comment.isNotEmpty ? comment : parts.join(', '),
-        'aiNarration': null,
-        'photoUrl': null,
-        'mediaUrls': <String>[],
-        'weightKg': weightKg,
-        'heightCm': heightCm,
-        'createdAt': Timestamp.now(),
-      });
+      if (_isEditing) {
+        // Édition : on met à jour la mesure existante (createdAt conservé).
+        await col.doc(widget.editing!.id).update(data);
+      } else {
+        await col.add({...data, 'createdAt': Timestamp.now()});
+      }
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Supprimer cette mesure ?'),
+        content: const Text('Cette action est irréversible.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    setState(() => _deleting = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('memories')
+          .doc(widget.editing!.id)
+          .delete();
+      if (mounted) Navigator.pop(context);
+    } finally {
+      if (mounted) setState(() => _deleting = false);
     }
   }
 
@@ -906,9 +996,9 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        const Text(
-          'Nouvelle mesure',
-          style: TextStyle(
+        Text(
+          _isEditing ? 'Modifier la mesure' : 'Nouvelle mesure',
+          style: const TextStyle(
             fontSize: 22,
             fontWeight: FontWeight.w800,
             color: AppColors.textDark,
@@ -1017,11 +1107,28 @@ class _MeasureSheetState extends State<_MeasureSheet> {
                   child: CircularProgressIndicator(
                       color: Colors.white, strokeWidth: 2),
                 )
-              : const Text(
-                  'Enregistrer la mesure',
-                  style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+              : Text(
+                  _isEditing ? 'Mettre à jour' : 'Enregistrer la mesure',
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 15),
                 ),
         ),
+        if (_isEditing) ...[
+          const SizedBox(height: 8),
+          TextButton.icon(
+            onPressed: _deleting ? null : _delete,
+            icon: _deleting
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: AppColors.error))
+                : const Icon(Icons.delete_outline,
+                    size: 18, color: AppColors.error),
+            label: const Text('Supprimer cette mesure',
+                style: TextStyle(color: AppColors.error)),
+          ),
+        ],
       ],
     );
   }
