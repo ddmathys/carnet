@@ -44,6 +44,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   )
   const price = `CHF ${Number(o.price ?? 0).toFixed(2)}`
 
+  // Coordonnées de paiement — lues depuis l'environnement (jamais en dur dans
+  // le code) : IBAN pour virement, numéro pour TWINT, nom du bénéficiaire.
+  const payName = process.env.PAYMENT_NAME ?? ''
+  const payIban = process.env.PAYMENT_IBAN ?? ''
+  const payPhone = process.env.PAYMENT_PHONE ?? ''
+  const paymentRows = [
+    payName
+      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">👤 Bénéficiaire : <strong>${escapeHtml(payName)}</strong></p>`
+      : '',
+    payIban
+      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">🏦 IBAN : <strong>${escapeHtml(payIban)}</strong></p>`
+      : '',
+    payPhone
+      ? `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📱 TWINT : <strong>${escapeHtml(payPhone)}</strong></p>`
+      : '',
+  ].join('')
+
   const adminHtml = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">🎉 Nouvelle commande reçue</p>
     ${row('Commande', `<strong>${ref}</strong>`)}
@@ -57,8 +74,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const userHtml = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">Bonjour ${firstName},</p>
     <p style="margin:0 0 24px;font-size:15px;color:#2d2d2d;line-height:1.6;">
-      Merci pour votre commande ! Nous avons bien reçu votre livre <strong>« ${bookTitle} »</strong>
-      et nous allons le traiter dans les plus brefs délais.
+      Merci pour votre commande ! Nous avons bien reçu votre livre <strong>« ${bookTitle} »</strong>.
     </p>
     <table width="100%" style="background:#f5ece0;border-radius:12px;margin-bottom:24px;">
       <tr><td style="padding:20px 24px;">
@@ -66,12 +82,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📖 ${bookTitle}</p>
         <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📦 Couverture ${cover.toLowerCase()}</p>
         <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📍 ${address}</p>
-        <p style="margin:0;font-size:15px;font-weight:bold;color:#3A6648;">${price} — paiement à réception</p>
+        <p style="margin:0;font-size:15px;font-weight:bold;color:#3A6648;">${price}</p>
+      </td></tr>
+    </table>
+    <table width="100%" style="background:#fff7e6;border:1px solid #f0d9a0;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:20px 24px;">
+        <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
+        <p style="margin:0 0 14px;font-size:14px;color:#2d2d2d;line-height:1.6;">
+          Le paiement déclenche la fabrication de votre livre. Merci de régler <strong>${price}</strong> :
+        </p>
+        ${paymentRows}
+        <p style="margin:14px 0 0;font-size:14px;color:#2d2d2d;">🔖 Référence à indiquer : <strong>${ref}</strong></p>
       </td></tr>
     </table>
     <p style="margin:0;font-size:14px;color:#888;line-height:1.6;">
-      Vous recevrez une facture avec les détails de paiement dès que votre livre sera prêt à être envoyé.
-      Délai estimé : 5 à 7 jours ouvrés.
+      Dès réception de votre paiement, nous lançons l'impression (délai estimé : 5 à 7 jours ouvrés).
+      Vous pouvez suivre votre commande à tout moment dans l'application Carnet.
     </p>
   `)
 
