@@ -1,11 +1,9 @@
 import 'dart:math' show min, max;
-import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
-import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
@@ -808,7 +806,6 @@ class _MeasureSheet extends StatefulWidget {
 }
 
 class _MeasureSheetState extends State<_MeasureSheet> {
-  Uint8List? _photoBytes;
   bool _saving = false;
 
   final _commentCtrl = TextEditingController();
@@ -824,21 +821,6 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     _heightCtrl.dispose();
     _weightCtrl.dispose();
     super.dispose();
-  }
-
-  Future<void> _takePhoto() async {
-    final picker = ImagePicker();
-    final xfile = await picker.pickImage(
-      source: ImageSource.camera,
-      imageQuality: 70,
-      maxWidth: 900,
-      maxHeight: 900,
-    );
-    if (xfile == null || !mounted) return;
-    final bytes = await xfile.readAsBytes();
-    setState(() {
-      _photoBytes = bytes;
-    });
   }
 
   bool get _canSave {
@@ -949,65 +931,6 @@ class _MeasureSheetState extends State<_MeasureSheet> {
               : 'Renseigne le poids.',
           style: TextStyle(
               fontSize: 13, color: Colors.grey.shade500, height: 1.5),
-        ),
-        const SizedBox(height: 20),
-
-        // Photo (optionnelle)
-        GestureDetector(
-          onTap: _takePhoto,
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            height: _photoBytes != null ? 180 : 80,
-            decoration: BoxDecoration(
-              color: Colors.grey.shade50,
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: _photoBytes != null
-                    ? AppColors.sage.withOpacity(0.3)
-                    : Colors.grey.shade200,
-                width: 1.5,
-              ),
-            ),
-            child: _photoBytes != null
-                ? ClipRRect(
-                    borderRadius: BorderRadius.circular(13),
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        Image.memory(_photoBytes!, fit: BoxFit.cover),
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: GestureDetector(
-                            onTap: () => setState(() => _photoBytes = null),
-                            child: Container(
-                              padding: const EdgeInsets.all(4),
-                              decoration: const BoxDecoration(
-                                color: Colors.black54,
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(Icons.close,
-                                  color: Colors.white, size: 16),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.camera_alt_outlined,
-                          color: Colors.grey.shade400, size: 22),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Photo (optionnelle)',
-                        style: TextStyle(
-                            color: Colors.grey.shade400, fontSize: 13),
-                      ),
-                    ],
-                  ),
-          ),
         ),
         const SizedBox(height: 20),
 
