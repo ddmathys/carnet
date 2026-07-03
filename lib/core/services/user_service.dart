@@ -50,6 +50,32 @@ class UserService {
     return result;
   }
 
+  // ── Admin ───────────────────────────────────────────────────────────────
+
+  /// Flux de tous les utilisateurs (console admin). Demandes Premium d'abord,
+  /// puis tri par e-mail. Les règles autorisent la lecture aux connectés.
+  static Stream<List<AppUser>> allUsersStream() => _db
+      .collection('users')
+      .snapshots()
+      .map((s) => s.docs.map((d) => AppUser.fromDoc(d.id, d.data())).toList()
+        ..sort((a, b) {
+          if (a.premiumRequested != b.premiumRequested) {
+            return a.premiumRequested ? -1 : 1; // demandes en haut
+          }
+          return a.email.compareTo(b.email);
+        }));
+
+  /// Active/retire Premium (admin only — autorisé par firestore.rules isAdmin).
+  /// Le passage à premium efface le drapeau de demande. Les compteurs de quota
+  /// s'ajustent automatiquement car les limites suivent `subscriptionTier`.
+  static Future<void> setSubscriptionTier(String uid, String tier) async {
+    await _db.collection('users').doc(uid).set({
+      'subscriptionTier': tier,
+      if (tier == 'premium') 'premiumRequested': false,
+      'tierUpdatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+  }
+
   // When a user logs in, grant them access to notebooks they were invited to.
   static Future<void> resolvePendingInvites() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -75,4 +101,31 @@ class _UserInfo {
   final String displayName;
   const _UserInfo({required this.email, required this.displayName});
   String get label => displayName.isNotEmpty ? '$displayName ($email)' : email;
+}
+
+/// Utilisateur tel que vu par la console admin.
+class AppUser {
+  final String uid;
+  final String email;
+  final String displayName;
+  final String tier; // 'free' | 'premium'
+  final bool premiumRequested;
+
+  const AppUser({
+    required this.uid,
+    required this.email,
+    required this.displayName,
+    required this.tier,
+    required this.premiumRequested,
+  });
+
+  bool get isPremium => tier == 'premium';
+
+  factory AppUser.fromDoc(String uid, Map<String, dynamic> d) => AppUser(
+        uid: uid,
+        email: (d['email'] as String?) ?? uid,
+        displayName: (d['displayName'] as String?) ?? '',
+        tier: (d['subscriptionTier'] as String?) ?? 'free',
+        premiumRequested: d['premiumRequested'] == true,
+      );
 }

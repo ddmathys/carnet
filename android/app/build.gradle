@@ -39,7 +39,8 @@ android {
 
     defaultConfig {
         applicationId "ch.gravendev.bloom"
-        minSdkVersion flutter.minSdkVersion
+        // flutter_gemma / MediaPipe LLM exige minSdk 24.
+        minSdkVersion 24
         targetSdkVersion 34
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName

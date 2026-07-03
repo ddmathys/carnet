@@ -194,8 +194,91 @@ const List<MilestoneCategory> kMilestoneCategories = [
   ),
 ];
 
+// ── Catégories spécifiques aux carnets « Grossesse » ─────────────────────────
+// Liste séparée de [kMilestoneCategories] (jalons enfant) pour que les écrans
+// de jalons bébé (add/scan/timeline) ne montrent jamais ces étapes-là.
+const List<MilestoneCategory> kPregnancyCategories = [
+  MilestoneCategory(
+    id: 'annonce',
+    label: 'Annonce',
+    emoji: '🤰',
+    description: 'L\'annonce de la grossesse',
+  ),
+  MilestoneCategory(
+    id: 'echographie',
+    label: 'Échographie',
+    emoji: '👶',
+    description: 'Première image de bébé',
+  ),
+  MilestoneCategory(
+    id: 'premiers_coups',
+    label: 'Premiers coups de pied',
+    emoji: '🦶',
+    description: 'Bébé bouge',
+  ),
+  MilestoneCategory(
+    id: 'envies',
+    label: 'Envies & aversions',
+    emoji: '🍫',
+    description: 'Fringales et dégoûts',
+  ),
+  MilestoneCategory(
+    id: 'symptomes',
+    label: 'Sensations & symptômes',
+    emoji: '🤢',
+    description: 'Le corps qui change',
+  ),
+  MilestoneCategory(
+    id: 'rdv_medical',
+    label: 'Rendez-vous médical',
+    emoji: '🩺',
+    description: 'Suivi de la grossesse',
+  ),
+  MilestoneCategory(
+    id: 'preparatifs',
+    label: 'Préparatifs bébé',
+    emoji: '🛏️',
+    description: 'Chambre, valise, achats',
+  ),
+  MilestoneCategory(
+    id: 'prenom',
+    label: 'Choix du prénom',
+    emoji: '🔤',
+    description: 'Le prénom de bébé',
+  ),
+  MilestoneCategory(
+    id: 'humeurs',
+    label: 'Émotions & humeurs',
+    emoji: '💗',
+    description: 'Joies, doutes, espoirs',
+  ),
+  MilestoneCategory(
+    id: 'accouchement',
+    label: 'Accouchement',
+    emoji: '🏥',
+    description: 'Le grand jour',
+  ),
+];
+
+/// Catégories proposées dans le choix manuel du type de souvenir, selon le type
+/// de carnet :
+/// - « enfant » : jalons développementaux du bébé ;
+/// - « grossesse » : étapes de la grossesse ;
+/// - autres (famille, voyage, moi, libre) : aucune liste → l'utilisateur écrit
+///   librement (l'IA classe, sinon le formulaire « anecdote »). Pas de grille.
+List<MilestoneCategory> manualCategoriesForNotebook(String notebookType) {
+  switch (notebookType) {
+    case 'enfant':
+      return kMilestoneCategories.where((c) => !c.isLegacy).toList();
+    case 'grossesse':
+      return kPregnancyCategories;
+    default:
+      return const [];
+  }
+}
+
 MilestoneCategory getMilestoneCategoryById(String id) =>
-    kMilestoneCategories.firstWhere(
+    [...kMilestoneCategories, ...kPregnancyCategories].firstWhere(
       (c) => c.id == id,
       orElse: () => kMilestoneCategories.last,
     );

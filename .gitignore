@@ -42,3 +42,7 @@ kmp/composeApp/build/
 .env
 *.env
 *firebase-adminsdk*.json
+
+# Modèles LLM embarqués (hébergés sur Firebase Storage, jamais committés)
+*.task
+*.litertlm

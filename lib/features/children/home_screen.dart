@@ -387,7 +387,7 @@ class _HeroHeader extends StatelessWidget {
                       if (tier == 'free') ...[
                         if (quota != null)
                           GestureDetector(
-                            onTap: quota!.nearLimit ? onSubscription : null,
+                            onTap: onSubscription,
                             child: _HeroChip(
                               icon: Icons.photo_outlined,
                               label: '${quota!.current}/${quota!.limit} photos',
@@ -396,7 +396,7 @@ class _HeroHeader extends StatelessWidget {
                           ),
                         if (videoQuota != null)
                           GestureDetector(
-                            onTap: videoQuota!.nearLimit ? onSubscription : null,
+                            onTap: onSubscription,
                             child: _HeroChip(
                               icon: Icons.videocam_outlined,
                               label:
@@ -406,7 +406,7 @@ class _HeroHeader extends StatelessWidget {
                           ),
                         if (audioQuota != null)
                           GestureDetector(
-                            onTap: audioQuota!.nearLimit ? onSubscription : null,
+                            onTap: onSubscription,
                             child: _HeroChip(
                               icon: Icons.mic_none_outlined,
                               label:

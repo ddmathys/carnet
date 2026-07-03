@@ -78,5 +78,15 @@ service firebase.storage {
       allow read: if true;
       allow write: if isAdmin();
     }
+
+    // Modèle IA embarqué (Gemma 3 1B) — lecture publique. Placé à la RACINE du
+    // bucket (et NON sous public/...) pour que l'URL de download ne contienne
+    // AUCUN "/" encodé en %2F : flutter_gemma dérive le nom du fichier local de
+    // l'URL, et un %2F dans ce nom casse la restauration du modèle au
+    // redémarrage. Écriture admin uniquement.
+    match /gemma3-1b-it-int4.task {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
   }
 }
