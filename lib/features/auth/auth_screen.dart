@@ -9,7 +9,9 @@ import '../../core/services/migration_service.dart';
 import '../../core/services/user_service.dart';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({super.key});
+  /// 'signup' ouvre directement sur la création de compte ; sinon connexion.
+  final String? initialMode;
+  const AuthScreen({super.key, this.initialMode});
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -19,7 +21,7 @@ class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailCtrl = TextEditingController();
   final _passCtrl = TextEditingController();
-  bool _isLogin = true;
+  late bool _isLogin = widget.initialMode != 'signup';
   bool _loading = false;
   bool _resetSent = false;
   bool _obscurePass = true;
@@ -330,7 +332,22 @@ class _AuthScreenState extends State<AuthScreen> {
               fontSize: 13, height: 1.4,
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 14),
+
+          // Bandeau de confiance — la sécurité reste visible sur la page login.
+          Wrap(
+            spacing: 7,
+            runSpacing: 7,
+            children: const [
+              _TrustChip(icon: Icons.lock_outline, label: 'Privé par défaut'),
+              _TrustChip(
+                  icon: Icons.verified_user_outlined,
+                  label: 'Connexion sécurisée'),
+              _TrustChip(
+                  icon: Icons.import_export, label: 'Export & suppression'),
+            ],
+          ),
+          const SizedBox(height: 18),
 
           // Form
           Form(
@@ -491,6 +508,38 @@ class _AuthScreenState extends State<AuthScreen> {
                   ),
                 ),
               ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _TrustChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  const _TrustChip({required this.icon, required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.sageTint,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 13, color: AppColors.sage),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: AppColors.sage,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ],

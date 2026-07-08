@@ -11,6 +11,7 @@ import 'core/services/notebook_share_service.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
+import 'features/auth/welcome_screen.dart';
 import 'features/auth/auth_screen.dart';
 import 'features/children/add_child_screen.dart';
 import 'features/children/home_screen.dart';
@@ -55,7 +56,12 @@ final _router = GoRouter(
   initialLocation: '/',
   routes: [
     GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
-    GoRoute(path: '/auth', builder: (_, __) => const AuthScreen()),
+    GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
+    GoRoute(
+      path: '/auth',
+      builder: (_, state) =>
+          AuthScreen(initialMode: state.uri.queryParameters['mode']),
+    ),
     GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
     GoRoute(path: '/subscription', builder: (_, __) => const SubscriptionScreen()),

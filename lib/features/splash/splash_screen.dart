@@ -45,7 +45,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       if (!mounted) return;
       context.go('/home');
     } else {
-      context.go('/auth');
+      context.go('/welcome');
     }
   }
 
