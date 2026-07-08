@@ -35,21 +35,19 @@ jobs:
         with:
           channel: stable
 
+      # Clé de signature fixe (keystore PKCS12) injectée depuis les secrets.
+      - name: Restaurer le keystore de signature
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/carnet-release.p12"
+
       - name: Dépendances
         run: flutter pub get
 
-      - name: Build APK release
+      - name: Build APK release (signé)
         run: flutter build apk --release
-
-      # SHA-1 de la clé de signature — à enregistrer dans Firebase
-      # (Authentication → Sign-in method) pour que Google Sign-In marche.
-      - name: Afficher le SHA-1 de signature
-        run: |
-          keytool -list -v \
-            -keystore ~/.android/debug.keystore \
-            -alias androiddebugkey \
-            -storepass android -keypass android 2>/dev/null \
-            | grep -A1 "SHA1" || echo "keystore debug non trouvé"
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/carnet-release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
       - name: Publier l'APK
         uses: actions/upload-artifact@v4
