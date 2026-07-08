@@ -384,8 +384,9 @@ class _HeroHeader extends StatelessWidget {
                         icon: Icons.auto_stories_outlined,
                         label: '$memoryCount souvenir${memoryCount != 1 ? 's' : ''}',
                       ),
-                      if (tier == 'free') ...[
-                        if (quota != null)
+                      // Quotas affichés pour TOUS les paliers (premium inclus)
+                      // pour que l'utilisateur voie toujours sa consommation.
+                      if (quota != null)
                           GestureDetector(
                             onTap: onSubscription,
                             child: _HeroChip(
@@ -414,7 +415,6 @@ class _HeroHeader extends StatelessWidget {
                               warn: audioQuota!.nearLimit,
                             ),
                           ),
-                      ],
                     ],
                   ),
                   // Alerte premium — pour la 1re ressource proche de sa limite.

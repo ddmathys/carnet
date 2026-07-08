@@ -519,7 +519,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           'Maximum ${QuotaService.maxVideosPerMemory} vidéos par souvenir.');
       return;
     }
-    // Quota global (30 gratuit / 50 premium), en comptant les vidéos déjà
+    // Quota global (30 gratuit / 150 premium), en comptant les vidéos déjà
     // ajoutées localement dans ce souvenir.
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
@@ -604,7 +604,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     bool quotaHit = false;
 
     for (final path in toConsider) {
-      // Quota global, réévalué à chaque ajout (gratuit 30 / premium 50).
+      // Quota global, réévalué à chaque ajout (gratuit 30 / premium 150).
       if (uid != null) {
         final q = await QuotaService.canAddVideos(
             uid, adding: _localVideoPaths.length + accepted.length + 1);

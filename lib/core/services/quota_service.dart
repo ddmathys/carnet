@@ -14,9 +14,9 @@ class QuotaService {
   // de vidéos est aussi un palier (plafond au NOMBRE de clips, pas à la durée
   // cumulée).
   // Estimation stockage : gratuit 30 clips × 2 min (~25 Mo) ≈ 0,75 Go ;
-  // premium 50 clips × jusqu'à 10 min (~90 Mo) ≈ 4,5 Go max par utilisateur.
+  // premium 150 clips × jusqu'à 10 min (~90 Mo) ≈ 13,5 Go max par utilisateur.
   static const int freeVideoLimit = 30;
-  static const int premiumVideoLimit = 50;
+  static const int premiumVideoLimit = 150;
   static const int freeVideoDurationSec = 120; // 2 min
   static const int premiumVideoDurationSec = 600; // 10 min
   // Conservé pour compat/affichage par défaut (= palier gratuit).
@@ -156,7 +156,7 @@ class QuotaService {
     }
   }
 
-  /// Peut-on ajouter [adding] vidéo(s) ? (30 free / 50 premium).
+  /// Peut-on ajouter [adding] vidéo(s) ? (30 free / 150 premium).
   static Future<({bool allowed, int current, int limit})> canAddVideos(
     String userId, {
     int adding = 1,
