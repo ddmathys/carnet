@@ -9,15 +9,18 @@ class QuotaService {
   static const int premiumPhotoLimit = 15000;
   static const double premiumPriceChf = 29.0;
 
-  // Vidéos souvenir. La durée par clip est plafonnée à 120 s à la capture
-  // (cf. memory_create_screen) — c'est le principal levier de coût de stockage.
-  // Le nombre de vidéos est le palier gratuit/premium (plafond au NOMBRE de
-  // clips, pas à la durée cumulée).
-  // Estimation stockage (clip 2 min ~ 25 Mo) : gratuit 30 ≈ 0,75 Go ;
-  // premium 150 ≈ 3,75 Go par utilisateur.
+  // Vidéos souvenir. La durée par clip dépend du palier (gratuit 2 min /
+  // premium 10 min) — c'est le principal levier de coût de stockage. Le nombre
+  // de vidéos est aussi un palier (plafond au NOMBRE de clips, pas à la durée
+  // cumulée).
+  // Estimation stockage : gratuit 30 clips × 2 min (~25 Mo) ≈ 0,75 Go ;
+  // premium 50 clips × jusqu'à 10 min (~90 Mo) ≈ 4,5 Go max par utilisateur.
   static const int freeVideoLimit = 30;
-  static const int premiumVideoLimit = 150;
-  static const int maxVideoDurationSec = 120;
+  static const int premiumVideoLimit = 50;
+  static const int freeVideoDurationSec = 120; // 2 min
+  static const int premiumVideoDurationSec = 600; // 10 min
+  // Conservé pour compat/affichage par défaut (= palier gratuit).
+  static const int maxVideoDurationSec = freeVideoDurationSec;
   // Nombre max de vidéos attachées à UN même souvenir (en plus du quota global
   // ci-dessus). Garde la page du livre lisible et maîtrise le coût de stockage.
   static const int maxVideosPerMemory = 3;
@@ -107,6 +110,15 @@ class QuotaService {
     return await isPremium(userId) ? premiumVideoLimit : freeVideoLimit;
   }
 
+  /// Durée max par clip (secondes) selon le palier : gratuit 2 min / premium
+  /// 10 min. Le plafond premium évite des fichiers énormes qui échouent à
+  /// l'upload (l'app charge tout le fichier en mémoire, cf. VideoService).
+  static Future<int> getVideoDurationLimitSec(String userId) async {
+    return await isPremium(userId)
+        ? premiumVideoDurationSec
+        : freeVideoDurationSec;
+  }
+
   // Compte le nombre TOTAL de vidéos (chaque souvenir peut en porter plusieurs)
   // sur tous les carnets de l'utilisateur.
   static Future<int> countUserVideos(String userId) async {
@@ -144,7 +156,7 @@ class QuotaService {
     }
   }
 
-  /// Peut-on ajouter [adding] vidéo(s) ? (15 free / 150 premium).
+  /// Peut-on ajouter [adding] vidéo(s) ? (30 free / 50 premium).
   static Future<({bool allowed, int current, int limit})> canAddVideos(
     String userId, {
     int adding = 1,

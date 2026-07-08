@@ -130,7 +130,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   isCurrent: !isPremium,
                   features: [
                     _Feature('${QuotaService.freePhotoLimit} photos', true),
-                    _Feature('${QuotaService.freeVideoLimit} vidéos (2 min)', true),
+                    _Feature('${QuotaService.freeVideoLimit} vidéos '
+                        '(${QuotaService.freeVideoDurationSec ~/ 60} min)', true),
                     _Feature('${QuotaService.freeAudioLimit} mémos vocaux', true),
                     const _Feature('Carnets illimités', true),
                     const _Feature('Génération PDF', true),
@@ -145,7 +146,8 @@ class _SubscriptionScreenState extends State<SubscriptionScreen> {
                   featured: true,
                   features: [
                     _Feature('${QuotaService.premiumPhotoLimit} photos', true),
-                    _Feature('${QuotaService.premiumVideoLimit} vidéos (HD)', true),
+                    _Feature('${QuotaService.premiumVideoLimit} vidéos HD '
+                        '(${QuotaService.premiumVideoDurationSec ~/ 60} min)', true),
                     _Feature('${QuotaService.premiumAudioLimit} mémos vocaux', true),
                     const _Feature('Carnets illimités', true),
                     const _Feature('Génération PDF', true),
