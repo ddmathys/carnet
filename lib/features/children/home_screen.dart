@@ -10,6 +10,7 @@ import '../../core/models/order_model.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
+import '../library/book_shelf.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -150,19 +151,15 @@ class _HomeScreenState extends State<HomeScreen> {
         if (isEmpty)
           const SliverFillRemaining(child: _EmptyState())
         else ...[
-          // ── Mes carnets ──────────────────────────────────────────────
+          // ── Mes carnets (bibliothèque) ───────────────────────────────
           if (allOwn.isNotEmpty) ...[
-            _sectionHeader('Mes carnets', '${allOwn.length} carnet${allOwn.length > 1 ? 's' : ''}'),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) => _NotebookCard(
-                      notebook: allOwn[i],
-                      isOwner: true,
-                      memoryCount: _memCounts[allOwn[i].id]),
-                  childCount: allOwn.length,
-                ),
+            _sectionHeader('Mes carnets',
+                '${allOwn.length} carnet${allOwn.length > 1 ? 's' : ''}'),
+            SliverToBoxAdapter(
+              child: BookShelfRail(
+                books: [
+                  for (final n in allOwn) _buildNotebookBook(context, n, true)
+                ],
               ),
             ),
           ],
@@ -170,23 +167,78 @@ class _HomeScreenState extends State<HomeScreen> {
           // ── Partagés avec moi ────────────────────────────────────────
           if (allShared.isNotEmpty) ...[
             _sectionHeader('Partagés avec moi', '${allShared.length}'),
-            SliverPadding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
-              sliver: SliverList(
-                delegate: SliverChildBuilderDelegate(
-                  (_, i) => _NotebookCard(
-                      notebook: allShared[i],
-                      isOwner: false,
-                      memoryCount: _memCounts[allShared[i].id]),
-                  childCount: allShared.length,
-                ),
+            SliverToBoxAdapter(
+              child: BookShelfRail(
+                books: [
+                  for (final n in allShared)
+                    _buildNotebookBook(context, n, false)
+                ],
               ),
             ),
+            const SliverToBoxAdapter(child: SizedBox(height: 90)),
           ] else
-            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+            const SliverToBoxAdapter(child: SizedBox(height: 90)),
         ],
       ],
     );
+  }
+
+  // Un carnet → un livre sur l'étagère. Hauteur variée selon le nb de souvenirs
+  // pour donner une vraie allure de bibliothèque.
+  ShelfBook _buildNotebookBook(
+      BuildContext context, NotebookModel n, bool isOwner) {
+    final count = _memCounts[n.id] ?? n.memoriesCount;
+    final h = 150.0 + (count.clamp(0, 12) * 3.5);
+    Color color;
+    try {
+      color =
+          Color(int.parse('FF${n.coverColor.replaceAll('#', '')}', radix: 16));
+    } catch (_) {
+      color = AppColors.sage;
+    }
+    return ShelfBook(
+      coverUrl: n.coverPhotoUrl,
+      coverColor: color,
+      emoji: n.emoji,
+      title: n.title,
+      kind: n.subtitle,
+      width: 104,
+      height: h,
+      tilt: 0.42,
+      flag: isOwner ? null : 'partagé',
+      onTap: () => context.go('/notebook/${n.id}/dashboard'),
+      onLongPress: isOwner ? () => _confirmDeleteNotebook(context, n) : null,
+    );
+  }
+
+  Future<void> _confirmDeleteNotebook(
+      BuildContext context, NotebookModel n) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Supprimer ce carnet ?',
+            style: TextStyle(
+                fontFamily: 'PlayfairDisplay',
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark)),
+        content: Text(
+            'Le carnet "${n.title}" et tous ses souvenirs seront supprimés.',
+            style: const TextStyle(color: AppColors.textMedium, height: 1.5)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+              child: const Text('Supprimer')),
+        ],
+      ),
+    );
+    if (ok == true) {
+      await PhotoService.deleteNotebookCascade(n.id);
+    }
   }
 
   SliverToBoxAdapter _sectionHeader(String title, String count) =>

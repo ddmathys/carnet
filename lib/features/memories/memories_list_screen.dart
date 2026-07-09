@@ -10,6 +10,7 @@ import '../../core/constants/milestone_types.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/video_service.dart';
+import '../library/book_shelf.dart';
 
 class MemoriesListScreen extends StatefulWidget {
   final String notebookId;
@@ -117,14 +118,12 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                           });
                         },
                       )
-                    : ListView.builder(
-                        padding:
-                            const EdgeInsets.fromLTRB(16, 8, 16, 100),
-                        itemCount: filtered.length,
-                        itemBuilder: (_, i) => _MemoryTile(
-                          memory: filtered[i],
-                          notebookId: widget.notebookId,
-                          onDelete: () => _deleteMemory(filtered[i]),
+                    : SingleChildScrollView(
+                        padding: const EdgeInsets.only(top: 6, bottom: 100),
+                        child: BookShelfGrid(
+                          books: [
+                            for (final m in filtered) _buildMemoryBook(context, m)
+                          ],
                         ),
                       ),
               ),
@@ -253,6 +252,62 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   Future<void> _deleteMemory(MemoryModel memory) async {
     await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
         audioUrl: memory.audioUrl, videoKeys: memory.videoKeys);
+  }
+
+  // Un souvenir → un livre sur l'étagère. Tap = écran souvenir actuel.
+  ShelfBook _buildMemoryBook(BuildContext context, MemoryModel m) {
+    final cover = (m.photoUrl != null && m.photoUrl!.isNotEmpty)
+        ? m.photoUrl
+        : (m.mediaUrls.isNotEmpty ? m.mediaUrls.first : null);
+    final cat = _safeCat(m.type);
+    final title = (m.title?.trim().isNotEmpty ?? false)
+        ? m.title!.trim()
+        : (m.rawContent.trim().isNotEmpty ? m.rawContent.trim() : 'Souvenir');
+    String kind;
+    try {
+      kind = DateFormat('d MMM yyyy', 'fr').format(m.date);
+    } catch (_) {
+      kind = '';
+    }
+    return ShelfBook(
+      coverUrl: cover,
+      coverColor: AppColors.sage,
+      emoji: cat?.emoji ?? '📖',
+      title: title,
+      kind: kind,
+      width: 96,
+      height: 168,
+      onTap: () => context
+          .push('/notebook/${widget.notebookId}/edit-memory/${m.id}'),
+      onLongPress: () => _confirmDeleteMemory(context, m),
+    );
+  }
+
+  Future<void> _confirmDeleteMemory(
+      BuildContext context, MemoryModel m) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Supprimer ce souvenir ?',
+            style: TextStyle(
+                fontFamily: 'PlayfairDisplay',
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark)),
+        content: const Text('Cette action est définitive.',
+            style: TextStyle(color: AppColors.textMedium, height: 1.5)),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+              child: const Text('Supprimer')),
+        ],
+      ),
+    );
+    if (ok == true) await _deleteMemory(m);
   }
 }
 
