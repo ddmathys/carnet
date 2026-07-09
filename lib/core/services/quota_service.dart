@@ -23,7 +23,7 @@ class QuotaService {
   static const int maxVideoDurationSec = freeVideoDurationSec;
   // Nombre max de vidéos attachées à UN même souvenir (en plus du quota global
   // ci-dessus). Garde la page du livre lisible et maîtrise le coût de stockage.
-  static const int maxVideosPerMemory = 3;
+  static const int maxVideosPerMemory = 10;
 
   // Mémos vocaux (un par souvenir). Même logique de palier gratuit/premium.
   static const int freeAudioLimit = 15;
