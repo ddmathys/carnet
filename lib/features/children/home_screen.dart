@@ -10,6 +10,7 @@ import '../../core/models/order_model.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
+import '../library/book_shelf.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -210,29 +211,37 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Carnets en livres sur une étagère (les uns après les autres).
   Widget _carnetRail(
       BuildContext context, List<NotebookModel> list, bool owner) {
-    return SizedBox(
-      height: 202,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(22, 2, 22, 12),
-        itemCount: list.length + (owner ? 1 : 0),
-        separatorBuilder: (_, __) => const SizedBox(width: 13),
-        itemBuilder: (_, i) {
-          if (i >= list.length) {
-            return _NewCarnetCard(
-                onTap: () => context.push('/notebook/create/template'));
-          }
-          return _CarnetCard(
-            notebook: list[i],
-            count: _memCounts[list[i].id],
-            onTap: () => context.go('/notebook/${list[i].id}/dashboard'),
-            onLongPress:
-                owner ? () => _confirmDeleteNotebook(context, list[i]) : null,
-          );
-        },
-      ),
+    return BookShelfRail(
+      books: [for (final n in list) _notebookBook(context, n, owner)],
+    );
+  }
+
+  ShelfBook _notebookBook(
+      BuildContext context, NotebookModel n, bool owner) {
+    final count = _memCounts[n.id] ?? n.memoriesCount;
+    final h = 150.0 + (count.clamp(0, 12) * 3.5);
+    Color color;
+    try {
+      color =
+          Color(int.parse('FF${n.coverColor.replaceAll('#', '')}', radix: 16));
+    } catch (_) {
+      color = AppColors.sage;
+    }
+    return ShelfBook(
+      coverUrl: n.coverPhotoUrl,
+      coverColor: color,
+      emoji: n.emoji,
+      title: n.title,
+      kind: n.subtitle,
+      width: 104,
+      height: h,
+      tilt: 0.42,
+      flag: owner ? null : 'partagé',
+      onTap: () => context.go('/notebook/${n.id}/dashboard'),
+      onLongPress: owner ? () => _confirmDeleteNotebook(context, n) : null,
     );
   }
 
