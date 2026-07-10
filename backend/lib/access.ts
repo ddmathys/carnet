@@ -50,3 +50,15 @@ export function videoKeysOf(mem: Record<string, unknown>): string[] {
   }
   return typeof mem.videoKey === 'string' && mem.videoKey ? [mem.videoKey] : []
 }
+
+/** Extrait les clés photo R2 d'un souvenir (`mediaKeys`). Les anciens souvenirs
+ *  n'ont pas ce champ (leurs photos sont des URLs Firebase dans `mediaUrls`) —
+ *  ils sont servis directement côté app (double-lecture). */
+export function photoKeysOf(mem: Record<string, unknown>): string[] {
+  if (Array.isArray(mem.mediaKeys)) {
+    return (mem.mediaKeys as unknown[]).filter(
+      (k): k is string => typeof k === 'string' && k.length > 0
+    )
+  }
+  return []
+}

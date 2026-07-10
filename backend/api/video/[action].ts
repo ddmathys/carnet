@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomUUID } from 'crypto'
 import { requireAuth } from '../../lib/verify'
 import { presignPut, presignGet, deleteObject, r2PublicHost } from '../../lib/r2'
-import { memoryIfMember, videoKeysOf } from '../../lib/access'
+import { memoryIfMember, videoKeysOf, photoKeysOf } from '../../lib/access'
 
 // Route dynamique regroupant les endpoints vidéo + la config publique en UNE
 // seule fonction serverless (le plan Hobby de Vercel plafonne à 12 fonctions).
@@ -64,6 +64,59 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // c.-à-d. dont la clé commence par `videos/{uid}/`.
     const key = (body.key ?? '') as string
     if (!key || !key.startsWith(`videos/${user.uid}/`)) {
+      return res.status(403).json({ error: 'Clé invalide' })
+    }
+    try {
+      await deleteObject(key)
+      return res.status(200).json({ ok: true })
+    } catch {
+      return res.status(500).json({ error: 'Suppression impossible' })
+    }
+  }
+
+  // ── Photos (même infra R2 privée + URLs signées temporaires) ─────────────
+  if (action === 'photo-upload-url') {
+    const notebookId = (body.notebookId ?? '') as string
+    if (!notebookId) {
+      return res.status(400).json({ error: 'notebookId manquant' })
+    }
+    const contentType = 'image/jpeg'
+    const key = `photos/${user.uid}/${notebookId}/${randomUUID()}.jpg`
+    try {
+      const uploadUrl = await presignPut(key, contentType)
+      return res.status(200).json({ uploadUrl, key, contentType })
+    } catch {
+      return res.status(500).json({ error: 'Signature impossible' })
+    }
+  }
+
+  if (action === 'photo-play') {
+    // URLs GET signées (courtes) des photos d'un souvenir, si l'appelant est
+    // membre du carnet. Les souvenirs sans `mediaKeys` (anciens) renvoient une
+    // liste vide → l'app retombe sur leurs URLs Firebase (double-lecture).
+    const memoryId = (body.memoryId ?? '') as string
+    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    if (!mem) return res.status(403).json({ error: 'Accès refusé' })
+    const keys = photoKeysOf(mem)
+    const urls = await Promise.all(keys.map((k) => presignGet(k, 3600)))
+    return res.status(200).json({ keys, urls })
+  }
+
+  if (action === 'photo-sign') {
+    // Signature par lot de clés APPARTENANT à l'appelant (photos/{uid}/…).
+    // Sert la génération de livre et les couvertures.
+    const raw = Array.isArray(body.keys) ? (body.keys as unknown[]) : []
+    const keys = raw.filter(
+      (k): k is string =>
+        typeof k === 'string' && k.startsWith(`photos/${user.uid}/`)
+    )
+    const urls = await Promise.all(keys.map((k) => presignGet(k, 3600)))
+    return res.status(200).json({ keys, urls })
+  }
+
+  if (action === 'photo-delete') {
+    const key = (body.key ?? '') as string
+    if (!key || !key.startsWith(`photos/${user.uid}/`)) {
       return res.status(403).json({ error: 'Clé invalide' })
     }
     try {
