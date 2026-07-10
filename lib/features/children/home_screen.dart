@@ -10,7 +10,6 @@ import '../../core/models/order_model.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
-import '../library/book_shelf.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -124,25 +123,22 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildBody(BuildContext context) {
     final allOwn = _ownNotebooks;
     final allShared = _sharedNotebooks;
-    final totalMemories = _memCounts.isNotEmpty
-        ? _memCounts.values.fold<int>(0, (s, c) => s + c)
-        : [...allOwn, ...allShared].fold<int>(0, (s, n) => s + n.memoriesCount);
     final isEmpty = allOwn.isEmpty && allShared.isEmpty;
 
     return CustomScrollView(
       slivers: [
         SliverToBoxAdapter(
-          child: _HeroHeader(
-            greeting: _greeting,
-            notebookCount: allOwn.length + allShared.length,
-            memoryCount: totalMemories,
-            quota: _quota,
-            videoQuota: _videoQuota,
-            audioQuota: _audioQuota,
-            tier: _tier,
+          child: _TopBar(
+            initial: _initial,
+            maxUsage: _maxUsageRatio,
+            warn: _nearAnyLimit,
             onProfile: () => context.push('/profile'),
-            onSubscription: () => context.push('/subscription'),
+            onSpace: () => _showMonEspace(context),
           ),
+        ),
+        SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
+        SliverToBoxAdapter(
+          child: _CreateMemoryCta(onTap: () => _startCreateMemory(context)),
         ),
 
         // ── Commandes en cours ───────────────────────────────────────
@@ -151,63 +147,152 @@ class _HomeScreenState extends State<HomeScreen> {
         if (isEmpty)
           const SliverFillRemaining(child: _EmptyState())
         else ...[
-          // ── Mes carnets (bibliothèque) ───────────────────────────────
           if (allOwn.isNotEmpty) ...[
             _sectionHeader('Mes carnets',
                 '${allOwn.length} carnet${allOwn.length > 1 ? 's' : ''}'),
-            SliverToBoxAdapter(
-              child: BookShelfRail(
-                books: [
-                  for (final n in allOwn) _buildNotebookBook(context, n, true)
-                ],
-              ),
-            ),
+            SliverToBoxAdapter(child: _carnetRail(context, allOwn, true)),
           ],
-
-          // ── Partagés avec moi ────────────────────────────────────────
           if (allShared.isNotEmpty) ...[
             _sectionHeader('Partagés avec moi', '${allShared.length}'),
-            SliverToBoxAdapter(
-              child: BookShelfRail(
-                books: [
-                  for (final n in allShared)
-                    _buildNotebookBook(context, n, false)
-                ],
-              ),
-            ),
-            const SliverToBoxAdapter(child: SizedBox(height: 90)),
-          ] else
-            const SliverToBoxAdapter(child: SizedBox(height: 90)),
+            SliverToBoxAdapter(child: _carnetRail(context, allShared, false)),
+          ],
+          _sectionHeader('Mes statistiques', ''),
+          SliverToBoxAdapter(child: _statsRail(allOwn.length + allShared.length)),
+          const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
       ],
     );
   }
 
-  // Un carnet → un livre sur l'étagère. Hauteur variée selon le nb de souvenirs
-  // pour donner une vraie allure de bibliothèque.
-  ShelfBook _buildNotebookBook(
-      BuildContext context, NotebookModel n, bool isOwner) {
-    final count = _memCounts[n.id] ?? n.memoriesCount;
-    final h = 150.0 + (count.clamp(0, 12) * 3.5);
-    Color color;
-    try {
-      color =
-          Color(int.parse('FF${n.coverColor.replaceAll('#', '')}', radix: 16));
-    } catch (_) {
-      color = AppColors.sage;
+  Widget _statsRail(int carnetCount) {
+    final totalMem = _memCounts.values.fold<int>(0, (s, c) => s + c);
+    final stats = <Widget>[
+      _StatCard(
+          emoji: '📖',
+          value: '$carnetCount',
+          label: 'carnets',
+          tint: const Color(0xFFFBE4DB),
+          iconColor: AppColors.sage),
+      _StatCard(
+          emoji: '📷',
+          value: '${_quota?.current ?? 0}',
+          label: 'photos',
+          tint: const Color(0xFFE2F0E3),
+          iconColor: const Color(0xFF7BA87E)),
+      _StatCard(
+          emoji: '🎬',
+          value: '${_videoQuota?.current ?? 0}',
+          label: 'vidéos',
+          tint: const Color(0xFFEDE7F7),
+          iconColor: const Color(0xFF9B8BC4)),
+      _StatCard(
+          emoji: '🎙',
+          value: '${_audioQuota?.current ?? 0}',
+          label: 'audios',
+          tint: const Color(0xFFFAF0DD),
+          iconColor: AppColors.amber),
+      _StatCard(
+          emoji: '✎',
+          value: '$totalMem',
+          label: 'souvenirs',
+          tint: const Color(0xFFFBE4DB),
+          iconColor: AppColors.sage),
+    ];
+    return SizedBox(
+      height: 108,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(22, 2, 22, 8),
+        itemCount: stats.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 10),
+        itemBuilder: (_, i) => stats[i],
+      ),
+    );
+  }
+
+  Widget _carnetRail(
+      BuildContext context, List<NotebookModel> list, bool owner) {
+    return SizedBox(
+      height: 202,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(22, 2, 22, 12),
+        itemCount: list.length + (owner ? 1 : 0),
+        separatorBuilder: (_, __) => const SizedBox(width: 13),
+        itemBuilder: (_, i) {
+          if (i >= list.length) {
+            return _NewCarnetCard(
+                onTap: () => context.push('/notebook/create/template'));
+          }
+          return _CarnetCard(
+            notebook: list[i],
+            count: _memCounts[list[i].id],
+            onTap: () => context.go('/notebook/${list[i].id}/dashboard'),
+            onLongPress:
+                owner ? () => _confirmDeleteNotebook(context, list[i]) : null,
+          );
+        },
+      ),
+    );
+  }
+
+  // ── Jauge d'espace (compteur discret dans le header) ───────────────────
+  double get _maxUsageRatio {
+    final rs = [
+      _quota?.ratio ?? 0,
+      _videoQuota?.ratio ?? 0,
+      _audioQuota?.ratio ?? 0,
+    ];
+    return rs.fold<double>(0, (m, r) => r > m ? r : m);
+  }
+
+  bool get _nearAnyLimit =>
+      (_quota?.nearLimit ?? false) ||
+      (_videoQuota?.nearLimit ?? false) ||
+      (_audioQuota?.nearLimit ?? false);
+
+  String get _initial {
+    final e = FirebaseAuth.instance.currentUser?.email ?? '';
+    return e.isNotEmpty ? e[0].toUpperCase() : '·';
+  }
+
+  // Nouveau flux : créer un souvenir → choisir le carnet cible → formulaire
+  // (le formulaire s'adapte déjà au type du carnet côté écran de création).
+  Future<void> _startCreateMemory(BuildContext context) async {
+    final books = _ownNotebooks;
+    if (books.isEmpty) {
+      context.push('/notebook/create/template');
+      return;
     }
-    return ShelfBook(
-      coverUrl: n.coverPhotoUrl,
-      coverColor: color,
-      emoji: n.emoji,
-      title: n.title,
-      kind: n.subtitle,
-      width: 104,
-      height: h,
-      tilt: 0.42,
-      flag: isOwner ? null : 'partagé',
-      onTap: () => context.go('/notebook/${n.id}/dashboard'),
-      onLongPress: isOwner ? () => _confirmDeleteNotebook(context, n) : null,
+    if (books.length == 1) {
+      context.push('/notebook/${books.first.id}/add-memory');
+      return;
+    }
+    final chosen = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _PickNotebookSheet(notebooks: books),
+    );
+    if (chosen != null && context.mounted) {
+      context.push('/notebook/$chosen/add-memory');
+    }
+  }
+
+  void _showMonEspace(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => _MonEspaceSheet(
+        tier: _tier,
+        quota: _quota,
+        videoQuota: _videoQuota,
+        audioQuota: _audioQuota,
+        onUpsell: () {
+          Navigator.pop(context);
+          context.push('/subscription');
+        },
+      ),
     );
   }
 
@@ -301,6 +386,724 @@ class _HomeScreenState extends State<HomeScreen> {
 }
 
 // ── Hero header ──────────────────────────────────────────────────────────────
+
+// ── Barre du haut : logo + jauge d'espace + avatar ─────────────────────────
+class _TopBar extends StatelessWidget {
+  final String initial;
+  final double maxUsage;
+  final bool warn;
+  final VoidCallback onProfile;
+  final VoidCallback onSpace;
+  const _TopBar({
+    required this.initial,
+    required this.maxUsage,
+    required this.warn,
+    required this.onProfile,
+    required this.onSpace,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 10, 18, 2),
+        child: Row(
+          children: [
+            Transform.rotate(
+              angle: -0.07,
+              child: Container(
+                width: 34,
+                height: 34,
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.sage, width: 2),
+                  borderRadius: BorderRadius.circular(9),
+                ),
+                child: const Center(
+                  child: Text('♥',
+                      style: TextStyle(color: AppColors.sage, fontSize: 15)),
+                ),
+              ),
+            ),
+            const SizedBox(width: 9),
+            const Text('Carnet',
+                style: TextStyle(
+                  fontFamily: 'Caveat',
+                  fontSize: 30,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.sage,
+                )),
+            const Spacer(),
+            _SpaceGauge(ratio: maxUsage, warn: warn, onTap: onSpace),
+            const SizedBox(width: 12),
+            GestureDetector(
+              onTap: onProfile,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(
+                    color: AppColors.sageDark, shape: BoxShape.circle),
+                child: Center(
+                  child: Text(initial,
+                      style: const TextStyle(
+                          color: Colors.white, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Anneau circulaire discret : usage max parmi photos/vidéos/vocaux.
+class _SpaceGauge extends StatelessWidget {
+  final double ratio;
+  final bool warn;
+  final VoidCallback onTap;
+  const _SpaceGauge(
+      {required this.ratio, required this.warn, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: SizedBox(
+        width: 38,
+        height: 38,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Container(
+              width: 34,
+              height: 34,
+              decoration: const BoxDecoration(
+                  color: AppColors.sageTint, shape: BoxShape.circle),
+            ),
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                value: ratio.clamp(0.02, 1.0),
+                strokeWidth: 3,
+                backgroundColor: AppColors.sage.withOpacity(0.22),
+                valueColor: AlwaysStoppedAnimation(
+                    warn ? AppColors.amber : AppColors.sage),
+              ),
+            ),
+            if (warn)
+              Positioned(
+                top: 1,
+                right: 1,
+                child: Container(
+                  width: 11,
+                  height: 11,
+                  decoration: BoxDecoration(
+                    color: AppColors.amber,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: AppColors.background, width: 2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HeroGreeting extends StatelessWidget {
+  final String greeting;
+  const _HeroGreeting({required this.greeting});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 12, 22, 2),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('$greeting 👋',
+                    style: const TextStyle(
+                      fontFamily: 'Fraunces',
+                      fontSize: 28,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textDark,
+                      height: 1.1,
+                    )),
+                const SizedBox(height: 4),
+                const Text('Chaque souvenir mérite d\'être conservé.',
+                    style:
+                        TextStyle(fontSize: 14, color: AppColors.textMedium)),
+              ],
+            ),
+          ),
+          const Text('📖', style: TextStyle(fontSize: 40)),
+        ],
+      ),
+    );
+  }
+}
+
+class _CreateMemoryCta extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CreateMemoryCta({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 18),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(18),
+          decoration: BoxDecoration(
+            color: AppColors.sageTint,
+            borderRadius: BorderRadius.circular(22),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 62,
+                height: 62,
+                decoration: BoxDecoration(
+                  color: AppColors.sageDark,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: AppColors.sageDark.withOpacity(0.45),
+                      blurRadius: 18,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(Icons.add, color: Colors.white, size: 32),
+              ),
+              const SizedBox(width: 16),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Créer un souvenir',
+                        style: TextStyle(
+                          fontFamily: 'Fraunces',
+                          fontSize: 19,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textDark,
+                        )),
+                    SizedBox(height: 3),
+                    Text('Photo, vidéo, audio ou texte.',
+                        style: TextStyle(
+                            fontSize: 12.5, color: AppColors.textMedium)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: AppColors.sage),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Carte carnet façon vignette (maquette terracotta).
+class _CarnetCard extends StatelessWidget {
+  final NotebookModel notebook;
+  final int? count;
+  final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  const _CarnetCard({
+    required this.notebook,
+    required this.count,
+    required this.onTap,
+    this.onLongPress,
+  });
+
+  Color get _cover {
+    try {
+      return Color(
+          int.parse('FF${notebook.coverColor.replaceAll('#', '')}', radix: 16));
+    } catch (_) {
+      return AppColors.sage;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final c = count ?? notebook.memoriesCount;
+    return GestureDetector(
+      onTap: onTap,
+      onLongPress: onLongPress,
+      child: SizedBox(
+        width: 140,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(16),
+              child: SizedBox(
+                height: 142,
+                width: 140,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    if (notebook.coverPhotoUrl != null &&
+                        notebook.coverPhotoUrl!.isNotEmpty)
+                      CachedNetworkImage(
+                        imageUrl: notebook.coverPhotoUrl!,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) => _plain(),
+                        errorWidget: (_, __, ___) => _plain(),
+                      )
+                    else
+                      _plain(),
+                    Positioned(
+                      top: 9,
+                      right: 9,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.92),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                        child: Text('🖼 $c',
+                            style: const TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: AppColors.textDark)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(notebook.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 1),
+            Text(notebook.subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style:
+                    const TextStyle(fontSize: 12, color: AppColors.textMedium)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _plain() => Container(
+        color: _cover,
+        alignment: Alignment.center,
+        child: Text(notebook.emoji, style: const TextStyle(fontSize: 40)),
+      );
+}
+
+class _NewCarnetCard extends StatelessWidget {
+  final VoidCallback onTap;
+  const _NewCarnetCard({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 130,
+        height: 150,
+        decoration: BoxDecoration(
+          color: AppColors.cream,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.sage.withOpacity(0.5), width: 1.5),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 8,
+                      offset: const Offset(0, 3)),
+                ],
+              ),
+              child: const Icon(Icons.add, color: AppColors.sage, size: 22),
+            ),
+            const SizedBox(height: 9),
+            const Text('Nouveau carnet',
+                style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w500,
+                    color: AppColors.sage)),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatCard extends StatelessWidget {
+  final String emoji;
+  final String value;
+  final String label;
+  final Color tint;
+  final Color iconColor;
+  const _StatCard({
+    required this.emoji,
+    required this.value,
+    required this.label,
+    required this.tint,
+    required this.iconColor,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 96,
+      padding: const EdgeInsets.all(13),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+              color: const Color(0xFF785A46).withOpacity(0.07),
+              blurRadius: 10,
+              offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+                color: tint, borderRadius: BorderRadius.circular(11)),
+            child: Text(emoji, style: const TextStyle(fontSize: 16)),
+          ),
+          const SizedBox(height: 9),
+          Text(value,
+              style: const TextStyle(
+                  fontFamily: 'Fraunces',
+                  fontSize: 21,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDark,
+                  height: 1)),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 11.5, color: AppColors.textMedium)),
+        ],
+      ),
+    );
+  }
+}
+
+// Sélecteur de carnet quand on crée un souvenir depuis l'accueil.
+class _PickNotebookSheet extends StatelessWidget {
+  final List<NotebookModel> notebooks;
+  const _PickNotebookSheet({required this.notebooks});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      padding: const EdgeInsets.fromLTRB(22, 10, 22, 8),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                    color: AppColors.softGray,
+                    borderRadius: BorderRadius.circular(99)),
+              ),
+            ),
+            const Text('Dans quel carnet ?',
+                style: TextStyle(
+                    fontFamily: 'Fraunces',
+                    fontSize: 21,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 4),
+            const Text('Choisis où ranger ce souvenir.',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textMedium)),
+            const SizedBox(height: 14),
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: notebooks.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (_, i) {
+                  final n = notebooks[i];
+                  Color color;
+                  try {
+                    color = Color(int.parse(
+                        'FF${n.coverColor.replaceAll('#', '')}',
+                        radix: 16));
+                  } catch (_) {
+                    color = AppColors.sage;
+                  }
+                  return GestureDetector(
+                    onTap: () => Navigator.pop(context, n.id),
+                    child: Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        border:
+                            Border.all(color: AppColors.border, width: 0.5),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 42,
+                            height: 42,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                                color: color,
+                                borderRadius: BorderRadius.circular(11)),
+                            child: Text(n.emoji,
+                                style: const TextStyle(fontSize: 20)),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(n.title,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textDark)),
+                                Text(n.subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        fontSize: 12,
+                                        color: AppColors.textMedium)),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              color: AppColors.sage, size: 20),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Feuille « Mon espace » : compteurs discrets + alerte ciblée.
+class _MonEspaceSheet extends StatelessWidget {
+  final String tier;
+  final QuotaStatus? quota;
+  final QuotaStatus? videoQuota;
+  final QuotaStatus? audioQuota;
+  final VoidCallback onUpsell;
+  const _MonEspaceSheet({
+    required this.tier,
+    required this.quota,
+    required this.videoQuota,
+    required this.audioQuota,
+    required this.onUpsell,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final premium = tier == 'premium';
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
+      ),
+      padding: const EdgeInsets.fromLTRB(22, 10, 22, 8),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                    color: AppColors.softGray,
+                    borderRadius: BorderRadius.circular(99)),
+              ),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Mon espace',
+                    style: TextStyle(
+                        fontFamily: 'Fraunces',
+                        fontSize: 21,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark)),
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+                  decoration: BoxDecoration(
+                      color: AppColors.sageDark,
+                      borderRadius: BorderRadius.circular(99)),
+                  child: Text(premium ? '✦ Premium' : 'Gratuit',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            _GaugeRow(label: '🖼 Photos', quota: quota),
+            _GaugeRow(label: '🎬 Vidéos', quota: videoQuota),
+            _GaugeRow(label: '🎙 Vocaux', quota: audioQuota),
+            if (!premium) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(15),
+                decoration: BoxDecoration(
+                    color: AppColors.sageTint,
+                    borderRadius: BorderRadius.circular(16)),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Passe à l\'illimité',
+                              style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                  color: AppColors.textDark)),
+                          SizedBox(height: 2),
+                          Text('Médias sans limite + livres −20 %',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.textMedium)),
+                        ],
+                      ),
+                    ),
+                    ElevatedButton(
+                      onPressed: onUpsell,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.sageDark,
+                        minimumSize: const Size(0, 40),
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(99)),
+                      ),
+                      child: const Text('Découvrir',
+                          style: TextStyle(fontSize: 13)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GaugeRow extends StatelessWidget {
+  final String label;
+  final QuotaStatus? quota;
+  const _GaugeRow({required this.label, required this.quota});
+
+  @override
+  Widget build(BuildContext context) {
+    final q = quota;
+    final ratio = q?.ratio ?? 0;
+    final warn = q?.nearLimit ?? false;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 15),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      fontSize: 13.5,
+                      color: AppColors.textDark,
+                      fontWeight: FontWeight.w500)),
+              Text.rich(TextSpan(children: [
+                TextSpan(
+                    text: '${q?.current ?? 0}',
+                    style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: warn ? AppColors.amber : AppColors.textDark)),
+                TextSpan(
+                    text: ' / ${q?.limit ?? 0}',
+                    style: const TextStyle(color: AppColors.textMedium)),
+              ])),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(99),
+            child: LinearProgressIndicator(
+              value: ratio.clamp(0.0, 1.0),
+              minHeight: 8,
+              backgroundColor: AppColors.softGray.withOpacity(0.28),
+              valueColor: AlwaysStoppedAnimation(
+                  warn ? AppColors.amber : AppColors.sageDark),
+            ),
+          ),
+          if (warn)
+            Padding(
+              padding: const EdgeInsets.only(top: 5),
+              child: Text(
+                '⚠ Plus que ${q?.remaining ?? 0} avant la limite',
+                style: const TextStyle(fontSize: 11.5, color: AppColors.amber),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
 
 class _HeroHeader extends StatelessWidget {
   final String greeting;
