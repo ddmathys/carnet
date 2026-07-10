@@ -12,6 +12,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/video_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -82,6 +83,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final List<File> _localPhotos = [];
   final List<String> _existingPhotoUrls = [];
   final List<String> _removedPhotoUrls = [];
+  // Photos R2 existantes : URL signée (affichée) → clé R2 (conservée en base).
+  final Map<String, String> _existingKeyByUrl = {};
+  final List<String> _removedPhotoKeys = [];
   final _picker = ImagePicker();
 
   @override
@@ -166,6 +170,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       textValue = rawContent.split(' — ').last;
     }
 
+    // Photos R2 existantes : résoudre les URLs signées AVANT le setState (async).
+    final mediaKeysData =
+        List<String>.from(data['mediaKeys'] as List<dynamic>? ?? []);
+    Map<String, String> signedMap = const {};
+    if (mediaKeysData.isNotEmpty) {
+      signedMap = await PhotoService.signedUrlsForMemory(widget.memoryId!);
+      if (!mounted) return;
+    }
+
     setState(() {
       _notebook = notebook;
       _selectedCategory = data['type'];
@@ -183,6 +196,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ...mediaUrls,
       }.toList();
       _existingPhotoUrls.addAll(existing);
+      // Photos R2 : affichées via URL signée, clé conservée pour la sauvegarde.
+      for (final key in mediaKeysData) {
+        final url = signedMap[key];
+        if (url != null && url.isNotEmpty) {
+          _existingPhotoUrls.add(url);
+          _existingKeyByUrl[url] = key;
+        }
+      }
       _existingAudioUrl = data['audioUrl'] as String?;
       _audioDurationMs = (data['audioDurationMs'] as num?)?.toInt();
       // Vidéos (nouveau format multi, avec repli sur l'ancien videoKey unique).
@@ -357,7 +378,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   void _removeExistingPhoto(String url) {
     setState(() {
       _existingPhotoUrls.remove(url);
-      _removedPhotoUrls.add(url);
+      final key = _existingKeyByUrl.remove(url);
+      if (key != null) {
+        _removedPhotoKeys.add(key); // photo R2 → suppression par clé
+      } else {
+        _removedPhotoUrls.add(url); // ancienne photo Firebase → suppression par URL
+      }
     });
   }
 
@@ -980,7 +1006,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // complétera le document une fois l'upload terminé. La liste écoute le
       // flux Firestore en temps réel → le souvenir apparaît tout de suite et
       // ses photos arrivent toutes seules ensuite.
-      final knownPhotoUrls = List<String>.of(_existingPhotoUrls);
+      // `_existingPhotoUrls` mélange d'anciennes URLs Firebase et des URLs R2
+      // signées (temporaires) → on sépare : les URLs signées ne doivent jamais
+      // être écrites en base, seule leur CLÉ R2 (via `_existingKeyByUrl`) l'est.
+      final keptLegacyUrls = [
+        for (final u in _existingPhotoUrls)
+          if (!_existingKeyByUrl.containsKey(u)) u
+      ];
+      final keptPhotoKeys = [
+        for (final u in _existingPhotoUrls)
+          if (_existingKeyByUrl.containsKey(u)) _existingKeyByUrl[u]!
+      ];
       final knownAudioUrl = _audioRemoved ? null : _existingAudioUrl;
       // Vidéos déjà uploadées et conservées (les nouvelles partent en file).
       final knownVideoKeys = List<String>.of(_existingVideoKeys);
@@ -998,8 +1034,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'datePrecision': datePrecisionToString(_datePrecision),
         'dateLabel': formatDateWithPrecision(_selectedDate, _datePrecision),
         'rawContent': rawContent,
-        'mediaUrls': knownPhotoUrls,
-        'photoUrl': knownPhotoUrls.isNotEmpty ? knownPhotoUrls.first : null,
+        'mediaUrls': keptLegacyUrls,
+        'mediaKeys': keptPhotoKeys,
+        'photoUrl': keptLegacyUrls.isNotEmpty ? keptLegacyUrls.first : null,
         'audioUrl': knownAudioUrl,
         'audioDurationMs': knownAudioUrl != null ? _audioDurationMs : null,
         'videoKeys': knownVideoKeys,
@@ -1041,6 +1078,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _localAudioPath != null ||
           _localVideoPaths.isNotEmpty ||
           _removedPhotoUrls.isNotEmpty ||
+          _removedPhotoKeys.isNotEmpty ||
           _removedVideoKeys.isNotEmpty ||
           (_audioRemoved && _existingAudioUrl != null);
       if (hasMediaWork) {
@@ -1048,8 +1086,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           memoryId: memoryId,
           notebookId: widget.notebookId,
           localPhotos: List<File>.of(_localPhotos),
-          existingPhotoUrls: knownPhotoUrls,
+          existingPhotoUrls: keptLegacyUrls,
+          existingPhotoKeys: keptPhotoKeys,
           removedPhotoUrls: List<String>.of(_removedPhotoUrls),
+          removedPhotoKeys: List<String>.of(_removedPhotoKeys),
           localAudioPath: _localAudioPath,
           existingAudioUrl: _existingAudioUrl,
           audioRemoved: _audioRemoved,

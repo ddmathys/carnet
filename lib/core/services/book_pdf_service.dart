@@ -9,6 +9,7 @@ import '../models/notebook_model.dart';
 import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
+import 'photo_service.dart';
 import '../utils/date_precision.dart';
 
 class BookPdfService {
@@ -156,15 +157,16 @@ class BookPdfService {
       } catch (_) {}
     }
 
-    // Build flat list of (memory, photoUrl) sorted chronologically
+    // Build flat list of (memory, url) sorted chronologically. Les photos R2
+    // sont résolues en URLs GET signées (valables ~1 h, suffisant pour le
+    // téléchargement ci-dessous) ; les anciennes photos Firebase passent tel quel.
     final photoEntries = <_PhotoEntry>[];
     final sorted = [...memories]..sort((a, b) => a.date.compareTo(b.date));
-    for (final m in sorted) {
-      final urls = m.mediaUrls.isNotEmpty
-          ? m.mediaUrls
-          : (m.photoUrl != null && m.photoUrl!.isNotEmpty ? [m.photoUrl!] : <String>[]);
-      for (final url in urls) {
-        photoEntries.add(_PhotoEntry(memory: m, url: url));
+    final resolved =
+        await Future.wait(sorted.map((m) => PhotoService.resolvePhotoUrls(m)));
+    for (var i = 0; i < sorted.length; i++) {
+      for (final url in resolved[i]) {
+        photoEntries.add(_PhotoEntry(memory: sorted[i], url: url));
       }
     }
 
@@ -199,7 +201,8 @@ class BookPdfService {
     // dont la seule photo était la couverture exclue / un download échoué).
     final textOnlyMemories = sorted.where((m) {
       if (m.type == 'taille_poids') return false;
-      final hasPhoto = m.mediaUrls.isNotEmpty ||
+      final hasPhoto = m.mediaKeys.isNotEmpty ||
+          m.mediaUrls.isNotEmpty ||
           (m.photoUrl != null && m.photoUrl!.isNotEmpty);
       if (!hasPhoto) return true;
       return !shownPhotoMemoIds.contains(m.id);

@@ -11,8 +11,11 @@ class MediaUploadJob {
   final String memoryId;
   final String notebookId;
   final List<File> localPhotos;
-  final List<String> existingPhotoUrls;
+  final List<String> existingPhotoUrls; // anciennes photos Firebase conservées
   final List<String> removedPhotoUrls;
+  // Photos R2 (clés) : conservées à l'édition / à supprimer.
+  final List<String> existingPhotoKeys;
+  final List<String> removedPhotoKeys;
   final String? localAudioPath;
   final String? existingAudioUrl;
   final bool audioRemoved;
@@ -31,6 +34,8 @@ class MediaUploadJob {
     required this.localPhotos,
     required this.existingPhotoUrls,
     required this.removedPhotoUrls,
+    this.existingPhotoKeys = const [],
+    this.removedPhotoKeys = const [],
     required this.localAudioPath,
     required this.existingAudioUrl,
     required this.audioRemoved,
@@ -82,8 +87,8 @@ class MediaUploadQueue extends ChangeNotifier {
 
   Future<void> _run(MediaUploadJob job) async {
     try {
-      // Compression + upload des photos ET du mémo vocal en parallèle.
-      final photoFuture = PhotoService.uploadMultiplePhotos(
+      // Compression + upload des photos (vers R2, clés) ET du mémo vocal.
+      final photoFuture = PhotoService.uploadMultiplePhotosToR2(
         photos: job.localPhotos,
         notebookId: job.notebookId,
       );
@@ -98,6 +103,7 @@ class MediaUploadQueue extends ChangeNotifier {
       // Suppression des médias retirés/remplacés (en parallèle des uploads).
       final deletions = <Future<void>>[
         ...job.removedPhotoUrls.map(PhotoService.deletePhotoByUrl),
+        ...job.removedPhotoKeys.map(PhotoService.deletePhotoByKey),
         ...job.removedVideoKeys.map(VideoService.deleteVideoByKey),
       ];
       if (job.existingAudioUrl != null &&
@@ -134,17 +140,22 @@ class MediaUploadQueue extends ChangeNotifier {
         if (dur != null) videoDurationsMs.add(dur);
       }
 
-      final newUrls = await photoFuture;
+      final newKeys = await photoFuture;
       final audioUrl = await audioFuture;
       await Future.wait(deletions);
 
-      final allUrls = [...job.existingPhotoUrls, ...newUrls];
+      // Photos R2 : clés conservées + nouvelles. Les anciennes photos Firebase
+      // (mediaUrls) sont préservées telles quelles → souvenir potentiellement
+      // mixte, fusionné à l'affichage par PhotoService.resolvePhotoUrls.
+      final allKeys = [...job.existingPhotoKeys, ...newKeys];
+      final legacyUrls = job.existingPhotoUrls;
       await FirebaseFirestore.instance
           .collection('memories')
           .doc(job.memoryId)
           .update({
-        'mediaUrls': allUrls,
-        'photoUrl': allUrls.isNotEmpty ? allUrls.first : null,
+        'mediaKeys': allKeys,
+        'mediaUrls': legacyUrls,
+        'photoUrl': legacyUrls.isNotEmpty ? legacyUrls.first : null,
         'audioUrl': audioUrl,
         'audioDurationMs': audioUrl != null ? job.audioDurationMs : null,
         'videoKeys': videoKeys,
@@ -163,8 +174,9 @@ class MediaUploadQueue extends ChangeNotifier {
           memoryId: job.memoryId,
           notebookId: job.notebookId,
           localPhotos: const [],
-          existingPhotoUrls: allUrls,
+          existingPhotoUrls: legacyUrls,
           removedPhotoUrls: const [],
+          existingPhotoKeys: allKeys,
           localAudioPath: null,
           existingAudioUrl: audioUrl,
           audioRemoved: false,

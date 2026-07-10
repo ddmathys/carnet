@@ -264,7 +264,9 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
 
   Future<void> _deleteMemory(MemoryModel memory) async {
     await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
-        audioUrl: memory.audioUrl, videoKeys: memory.videoKeys);
+        audioUrl: memory.audioUrl,
+        videoKeys: memory.videoKeys,
+        mediaKeys: memory.mediaKeys);
   }
 
   Future<void> _confirmDeleteMemory(
@@ -485,12 +487,12 @@ class _MemoryPolaroid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final photos = memory.mediaUrls.isNotEmpty
-        ? memory.mediaUrls
-        : (memory.photoUrl != null && memory.photoUrl!.isNotEmpty
-            ? [memory.photoUrl!]
-            : <String>[]);
-    final cover = photos.isNotEmpty ? photos.first : null;
+    final photoCount = memory.mediaKeys.isNotEmpty
+        ? memory.mediaKeys.length
+        : (memory.mediaUrls.isNotEmpty
+            ? memory.mediaUrls.length
+            : (memory.photoUrl != null && memory.photoUrl!.isNotEmpty ? 1 : 0));
+    final hasPhoto = photoCount > 0;
     final title = (memory.title?.trim().isNotEmpty ?? false)
         ? memory.title!.trim()
         : (memory.rawContent.trim().isNotEmpty
@@ -533,14 +535,25 @@ class _MemoryPolaroid extends StatelessWidget {
                   child: Stack(
                     fit: StackFit.expand,
                     children: [
-                      if (cover != null)
-                        CachedNetworkImage(
-                          imageUrl: cover,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) =>
-                              Container(color: AppColors.sageTint),
-                          errorWidget: (_, __, ___) =>
-                              Container(color: AppColors.sageTint),
+                      if (hasPhoto)
+                        FutureBuilder<List<String>>(
+                          future: PhotoService.resolvePhotoUrls(memory),
+                          builder: (_, snap) {
+                            final url = (snap.data?.isNotEmpty ?? false)
+                                ? snap.data!.first
+                                : null;
+                            if (url == null) {
+                              return Container(color: AppColors.sageTint);
+                            }
+                            return CachedNetworkImage(
+                              imageUrl: url,
+                              fit: BoxFit.cover,
+                              placeholder: (_, __) =>
+                                  Container(color: AppColors.sageTint),
+                              errorWidget: (_, __, ___) =>
+                                  Container(color: AppColors.sageTint),
+                            );
+                          },
                         )
                       else
                         Container(
@@ -592,7 +605,7 @@ class _MemoryPolaroid extends StatelessWidget {
                             ],
                           ),
                         ),
-                      if (photos.isNotEmpty)
+                      if (hasPhoto)
                         Positioned(
                           bottom: 8,
                           right: 8,
@@ -603,7 +616,7 @@ class _MemoryPolaroid extends StatelessWidget {
                               color: Colors.black.withOpacity(0.6),
                               borderRadius: BorderRadius.circular(99),
                             ),
-                            child: Text('${photos.length} 📷',
+                            child: Text('$photoCount 📷',
                                 style: const TextStyle(
                                     color: Colors.white,
                                     fontSize: 10,

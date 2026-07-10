@@ -135,19 +135,52 @@ class PhotoService {
         },
         body: jsonEncode({'memoryId': m.id}),
       );
-      if (res.statusCode != 200) return const [];
+      if (res.statusCode != 200) {
+        // Repli : si la signature échoue mais qu'il reste d'anciennes URLs.
+        return m.mediaUrls;
+      }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
-      final urls = (data['urls'] as List<dynamic>).cast<String>();
-      _signedCache[m.id] = urls;
-      return urls;
+      final signed = (data['urls'] as List<dynamic>).cast<String>();
+      // Souvenir mixte (édité) : clés R2 signées PUIS anciennes URLs Firebase.
+      final merged = <String>[...signed, ...m.mediaUrls];
+      _signedCache[m.id] = merged;
+      return merged;
     } catch (_) {
-      return const [];
+      return m.mediaUrls;
     }
   }
 
   /// À appeler après édition d'un souvenir pour forcer une nouvelle signature.
   static void invalidateSignedCache(String memoryId) =>
       _signedCache.remove(memoryId);
+
+  /// Map clé→URL signée des photos R2 d'un souvenir (via photo-play, membre
+  /// uniquement). Sert l'écran d'édition (afficher les photos existantes tout
+  /// en conservant leurs clés).
+  static Future<Map<String, String>> signedUrlsForMemory(
+      String memoryId) async {
+    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    if (token == null) return const {};
+    try {
+      final res = await http.post(
+        Uri.parse('${AppConfig.backendUrl}/api/video/photo-play'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'memoryId': memoryId}),
+      );
+      if (res.statusCode != 200) return const {};
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final ks = (data['keys'] as List<dynamic>).cast<String>();
+      final us = (data['urls'] as List<dynamic>).cast<String>();
+      return {
+        for (var i = 0; i < ks.length && i < us.length; i++) ks[i]: us[i]
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
 
   /// Signe par lot des clés R2 appartenant à l'appelant (livre / couverture).
   static Future<Map<String, String>> signOwnPhotoKeys(
@@ -220,8 +253,11 @@ class PhotoService {
       final videoKeys = List<String>.from(
           data['videoKeys'] as List<dynamic>? ??
               [if (data['videoKey'] != null) data['videoKey']]);
+      final photoKeys =
+          List<String>.from(data['mediaKeys'] as List<dynamic>? ?? []);
       return <Future<void>>[
         ...urls.map(deletePhotoByUrl),
+        ...photoKeys.map(deletePhotoByKey),
         AudioService.deleteAudioByUrl(data['audioUrl'] as String?),
         VideoService.deleteVideosByKeys(videoKeys),
       ];
@@ -245,13 +281,16 @@ class PhotoService {
   /// Delete a memory and ALL its photos (photoUrl + mediaUrls) + voice memo.
   static Future<void> deleteMemory(
       String memoryId, String? photoUrl, List<String> mediaUrls,
-      {String? audioUrl, List<String> videoKeys = const []}) async {
+      {String? audioUrl,
+      List<String> videoKeys = const [],
+      List<String> mediaKeys = const []}) async {
     final allUrls = {
       if (photoUrl != null && photoUrl.isNotEmpty) photoUrl,
       ...mediaUrls,
     };
     await Future.wait([
       ...allUrls.map(deletePhotoByUrl),
+      ...mediaKeys.map(deletePhotoByKey),
       AudioService.deleteAudioByUrl(audioUrl),
       VideoService.deleteVideosByKeys(videoKeys),
       _firestore.collection('memories').doc(memoryId).delete(),

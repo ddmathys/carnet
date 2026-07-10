@@ -39,9 +39,11 @@ class BookPricing {
   static int estimatePages(List<MemoryModel> memories) {
     int pages = 0;
     for (final m in memories) {
-      final n = m.mediaUrls.isNotEmpty
-          ? m.mediaUrls.length
-          : (m.photoUrl != null && m.photoUrl!.isNotEmpty ? 1 : 0);
+      final n = m.mediaKeys.isNotEmpty
+          ? m.mediaKeys.length
+          : (m.mediaUrls.isNotEmpty
+              ? m.mediaUrls.length
+              : (m.photoUrl != null && m.photoUrl!.isNotEmpty ? 1 : 0));
       if (n > 0) {
         pages += (n / 4).ceil(); // ~4 photos / page, ≥1 page par souvenir
       } else if (m.type != 'taille_poids') {
