@@ -14,6 +14,10 @@ class MemoryModel {
   final String? aiNarration;
   final String? photoUrl;
   final List<String> mediaUrls;
+  // Photos stockées sur Cloudflare R2 (clés d'objets, bucket privé). Nouveau
+  // format sécurisé (URLs signées temporaires). Les anciens souvenirs n'ont que
+  // `mediaUrls` (URLs Firebase permanentes) → double-lecture à l'affichage.
+  final List<String> mediaKeys;
   final String? audioUrl;
   final int? audioDurationMs;
   // Vidéos souvenir : on stocke les CLÉS des objets R2 (videos/{uid}/…/x.mp4),
@@ -40,6 +44,7 @@ class MemoryModel {
     this.aiNarration,
     this.photoUrl,
     this.mediaUrls = const [],
+    this.mediaKeys = const [],
     this.audioUrl,
     this.audioDurationMs,
     this.videoKeys = const [],
@@ -66,6 +71,7 @@ class MemoryModel {
       aiNarration: d['aiNarration'],
       photoUrl: d['photoUrl'],
       mediaUrls: List<String>.from(d['mediaUrls'] ?? []),
+      mediaKeys: List<String>.from(d['mediaKeys'] ?? []),
       audioUrl: d['audioUrl'],
       audioDurationMs: (d['audioDurationMs'] as num?)?.toInt(),
       videoKeys: _readVideoKeys(d),
@@ -110,6 +116,7 @@ class MemoryModel {
         'aiNarration': aiNarration,
         'photoUrl': photoUrl,
         'mediaUrls': mediaUrls,
+        'mediaKeys': mediaKeys,
         'audioUrl': audioUrl,
         'audioDurationMs': audioDurationMs,
         'videoKeys': videoKeys,

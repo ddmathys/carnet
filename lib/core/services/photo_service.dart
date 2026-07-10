@@ -1,10 +1,14 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
+import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
+import '../config/app_config.dart';
+import '../models/memory_model.dart';
 import 'audio_service.dart';
 import 'video_service.dart';
 
@@ -61,6 +65,132 @@ class PhotoService {
       photos.map((f) => uploadMemoryPhoto(photo: f, notebookId: notebookId)),
     );
     return results.whereType<String>().toList();
+  }
+
+  // ── R2 : bucket privé + URLs signées temporaires (comme les vidéos) ──────
+
+  /// Upload une photo vers R2 via une URL PUT signée par le backend. Retourne
+  /// la CLÉ d'objet (à stocker dans `mediaKeys`), ou null en cas d'échec.
+  static Future<String?> uploadMemoryPhotoToR2({
+    required File photo,
+    required String notebookId,
+  }) async {
+    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    if (token == null) return null;
+    final signRes = await http.post(
+      Uri.parse('${AppConfig.backendUrl}/api/video/photo-upload-url'),
+      headers: {
+        'Authorization': 'Bearer $token',
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode({'notebookId': notebookId}),
+    );
+    if (signRes.statusCode != 200) return null;
+    final data = jsonDecode(signRes.body) as Map<String, dynamic>;
+    final uploadUrl = data['uploadUrl'] as String?;
+    final key = data['key'] as String?;
+    final contentType = (data['contentType'] as String?) ?? 'image/jpeg';
+    if (uploadUrl == null || key == null) return null;
+    final bytes = await _compress(photo) ?? await photo.readAsBytes();
+    final putRes = await http.put(Uri.parse(uploadUrl),
+        headers: {'Content-Type': contentType}, body: bytes);
+    if (putRes.statusCode != 200 && putRes.statusCode != 201) return null;
+    return key;
+  }
+
+  /// Upload plusieurs photos vers R2 (parallèle). Retourne les clés réussies.
+  static Future<List<String>> uploadMultiplePhotosToR2({
+    required List<File> photos,
+    required String notebookId,
+  }) async {
+    final results = await Future.wait(photos
+        .map((f) => uploadMemoryPhotoToR2(photo: f, notebookId: notebookId)));
+    return results.whereType<String>().toList();
+  }
+
+  // Cache d'URLs signées par souvenir (évite un aller-retour à chaque affichage
+  // dans la même session ; les URLs sont valables ~1 h).
+  static final Map<String, List<String>> _signedCache = {};
+
+  /// URLs affichables des photos d'un souvenir (DOUBLE-LECTURE) :
+  ///  - `mediaKeys` (R2) → URLs GET signées via le backend (membre uniquement) ;
+  ///  - sinon `mediaUrls` (Firebase), puis `photoUrl` (ancien format).
+  static Future<List<String>> resolvePhotoUrls(MemoryModel m) async {
+    if (m.mediaKeys.isEmpty) {
+      if (m.mediaUrls.isNotEmpty) return m.mediaUrls;
+      return (m.photoUrl != null && m.photoUrl!.isNotEmpty)
+          ? [m.photoUrl!]
+          : const [];
+    }
+    final cached = _signedCache[m.id];
+    if (cached != null) return cached;
+    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    if (token == null) return const [];
+    try {
+      final res = await http.post(
+        Uri.parse('${AppConfig.backendUrl}/api/video/photo-play'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'memoryId': m.id}),
+      );
+      if (res.statusCode != 200) return const [];
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final urls = (data['urls'] as List<dynamic>).cast<String>();
+      _signedCache[m.id] = urls;
+      return urls;
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// À appeler après édition d'un souvenir pour forcer une nouvelle signature.
+  static void invalidateSignedCache(String memoryId) =>
+      _signedCache.remove(memoryId);
+
+  /// Signe par lot des clés R2 appartenant à l'appelant (livre / couverture).
+  static Future<Map<String, String>> signOwnPhotoKeys(
+      List<String> keys) async {
+    if (keys.isEmpty) return const {};
+    final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+    if (token == null) return const {};
+    try {
+      final res = await http.post(
+        Uri.parse('${AppConfig.backendUrl}/api/video/photo-sign'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'keys': keys}),
+      );
+      if (res.statusCode != 200) return const {};
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final ks = (data['keys'] as List<dynamic>).cast<String>();
+      final us = (data['urls'] as List<dynamic>).cast<String>();
+      return {
+        for (var i = 0; i < ks.length && i < us.length; i++) ks[i]: us[i]
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
+  /// Supprime une photo R2 par sa clé via le backend (ignore les erreurs).
+  static Future<void> deletePhotoByKey(String? key) async {
+    if (key == null || key.isEmpty) return;
+    try {
+      final token = await FirebaseAuth.instance.currentUser?.getIdToken();
+      if (token == null) return;
+      await http.post(
+        Uri.parse('${AppConfig.backendUrl}/api/video/photo-delete'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({'key': key}),
+      );
+    } catch (_) {}
   }
 
   /// Delete a photo by its download URL. Silently ignores errors
