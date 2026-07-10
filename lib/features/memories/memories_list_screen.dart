@@ -10,7 +10,6 @@ import '../../core/constants/milestone_types.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/video_service.dart';
-import '../library/book_shelf.dart';
 
 class MemoriesListScreen extends StatefulWidget {
   final String notebookId;
@@ -118,13 +117,27 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                           });
                         },
                       )
-                    : SingleChildScrollView(
-                        padding: const EdgeInsets.only(top: 6, bottom: 100),
-                        child: BookShelfGrid(
-                          books: [
-                            for (final m in filtered) _buildMemoryBook(context, m)
-                          ],
+                    : GridView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 20,
+                          crossAxisSpacing: 16,
+                          childAspectRatio: 0.66,
                         ),
+                        itemCount: filtered.length,
+                        itemBuilder: (_, i) {
+                          final m = filtered[i];
+                          return _MemoryPolaroid(
+                            memory: m,
+                            cat: _safeCat(m.type),
+                            tilt: (i % 2 == 0) ? -0.02 : 0.02,
+                            onTap: () => context.push(
+                                '/notebook/${widget.notebookId}/edit-memory/${m.id}'),
+                            onLongPress: () => _confirmDeleteMemory(context, m),
+                          );
+                        },
                       ),
               ),
             ],
@@ -252,35 +265,6 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   Future<void> _deleteMemory(MemoryModel memory) async {
     await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
         audioUrl: memory.audioUrl, videoKeys: memory.videoKeys);
-  }
-
-  // Un souvenir → un livre sur l'étagère. Tap = écran souvenir actuel.
-  ShelfBook _buildMemoryBook(BuildContext context, MemoryModel m) {
-    final cover = (m.photoUrl != null && m.photoUrl!.isNotEmpty)
-        ? m.photoUrl
-        : (m.mediaUrls.isNotEmpty ? m.mediaUrls.first : null);
-    final cat = _safeCat(m.type);
-    final title = (m.title?.trim().isNotEmpty ?? false)
-        ? m.title!.trim()
-        : (m.rawContent.trim().isNotEmpty ? m.rawContent.trim() : 'Souvenir');
-    String kind;
-    try {
-      kind = DateFormat('d MMM yyyy', 'fr').format(m.date);
-    } catch (_) {
-      kind = '';
-    }
-    return ShelfBook(
-      coverUrl: cover,
-      coverColor: AppColors.sage,
-      emoji: cat?.emoji ?? '📖',
-      title: title,
-      kind: kind,
-      width: 96,
-      height: 168,
-      onTap: () => context
-          .push('/notebook/${widget.notebookId}/edit-memory/${m.id}'),
-      onLongPress: () => _confirmDeleteMemory(context, m),
-    );
   }
 
   Future<void> _confirmDeleteMemory(
@@ -469,6 +453,190 @@ class _BookCta extends StatelessWidget {
             ),
             const Icon(Icons.chevron_right, color: AppColors.amber, size: 18),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// Carte "polaroid" d'un souvenir (grille terracotta).
+class _MemoryPolaroid extends StatelessWidget {
+  final MemoryModel memory;
+  final MilestoneCategory? cat;
+  final double tilt;
+  final VoidCallback onTap;
+  final VoidCallback onLongPress;
+  const _MemoryPolaroid({
+    required this.memory,
+    required this.cat,
+    required this.tilt,
+    required this.onTap,
+    required this.onLongPress,
+  });
+
+  Widget _miniIcon(String e) => Container(
+        width: 22,
+        height: 22,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.45), shape: BoxShape.circle),
+        child: Text(e, style: const TextStyle(fontSize: 10)),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final photos = memory.mediaUrls.isNotEmpty
+        ? memory.mediaUrls
+        : (memory.photoUrl != null && memory.photoUrl!.isNotEmpty
+            ? [memory.photoUrl!]
+            : <String>[]);
+    final cover = photos.isNotEmpty ? photos.first : null;
+    final title = (memory.title?.trim().isNotEmpty ?? false)
+        ? memory.title!.trim()
+        : (memory.rawContent.trim().isNotEmpty
+            ? memory.rawContent.trim()
+            : 'Souvenir');
+    String date;
+    try {
+      date = DateFormat('d MMM', 'fr').format(memory.date).toUpperCase();
+    } catch (_) {
+      date = '';
+    }
+    final loc = memory.location?.trim() ?? '';
+    final sub = loc.isNotEmpty ? '$date · ${loc.toUpperCase()}' : date;
+    final hasVideo = memory.videoKeys.isNotEmpty;
+    final hasAudio = memory.audioUrl != null && memory.audioUrl!.isNotEmpty;
+
+    return Transform.rotate(
+      angle: tilt,
+      child: GestureDetector(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.10),
+                  blurRadius: 16,
+                  offset: const Offset(0, 8)),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(7),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (cover != null)
+                        CachedNetworkImage(
+                          imageUrl: cover,
+                          fit: BoxFit.cover,
+                          placeholder: (_, __) =>
+                              Container(color: AppColors.sageTint),
+                          errorWidget: (_, __, ___) =>
+                              Container(color: AppColors.sageTint),
+                        )
+                      else
+                        Container(
+                          color: AppColors.sageTint,
+                          alignment: Alignment.center,
+                          child: Text(cat?.emoji ?? '📝',
+                              style: const TextStyle(fontSize: 34)),
+                        ),
+                      if (cat != null)
+                        Positioned(
+                          top: 8,
+                          left: 8,
+                          child: Transform.rotate(
+                            angle: -0.04,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withOpacity(0.95),
+                                borderRadius: BorderRadius.circular(7),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(cat!.emoji,
+                                      style: const TextStyle(fontSize: 11)),
+                                  const SizedBox(width: 4),
+                                  Text(cat!.label,
+                                      style: const TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.w600,
+                                          color: AppColors.textDark)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      if (hasVideo || hasAudio)
+                        Positioned(
+                          top: 8,
+                          right: 8,
+                          child: Row(
+                            children: [
+                              if (hasVideo) _miniIcon('🎬'),
+                              if (hasAudio) ...[
+                                const SizedBox(width: 4),
+                                _miniIcon('🎙'),
+                              ],
+                            ],
+                          ),
+                        ),
+                      if (photos.isNotEmpty)
+                        Positioned(
+                          bottom: 8,
+                          right: 8,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text('${photos.length} 📷',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontFamily: 'Fraunces',
+                      fontStyle: FontStyle.italic,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
+                      color: AppColors.textDark)),
+              const SizedBox(height: 3),
+              Text(sub,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      fontSize: 10,
+                      letterSpacing: 0.5,
+                      color: AppColors.textMedium)),
+              const SizedBox(height: 4),
+            ],
+          ),
         ),
       ),
     );
