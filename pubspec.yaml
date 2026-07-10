@@ -102,13 +102,22 @@ flutter:
     - assets/icons/
     - assets/welcome/
   fonts:
+    # Design terracotta : les familles historiques sont repointées vers les
+    # nouvelles polices → toute l'app bascule sans modifier chaque écran.
+    # PlayfairDisplay → Fraunces (serif), DMSans → Outfit (sans).
     - family: PlayfairDisplay
       fonts:
-        - asset: assets/fonts/PlayfairDisplay-Regular.ttf
-        - asset: assets/fonts/PlayfairDisplay-Bold.ttf
-          weight: 700
+        - asset: assets/fonts/Fraunces.ttf
     - family: DMSans
       fonts:
-        - asset: assets/fonts/DMSans-Regular.ttf
-        - asset: assets/fonts/DMSans-Medium.ttf
-          weight: 500
+        - asset: assets/fonts/Outfit.ttf
+    # Noms réels (pour le nouveau code)
+    - family: Fraunces
+      fonts:
+        - asset: assets/fonts/Fraunces.ttf
+    - family: Outfit
+      fonts:
+        - asset: assets/fonts/Outfit.ttf
+    - family: Caveat
+      fonts:
+        - asset: assets/fonts/Caveat.ttf

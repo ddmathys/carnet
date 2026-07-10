@@ -1,28 +1,29 @@
 import 'package:flutter/material.dart';
 
 class AppColors {
-  // ── Brand greens (aligned with auth screen) ────────────────────────────
-  static const sageDark  = Color(0xFF1C3D2B); // hero top, primary CTAs
-  static const sage      = Color(0xFF3A6648); // mid-green, links, accents
-  static const sageLight = Color(0xFF5C8A6A); // hero bottom, tints
-  static const sageTint  = Color(0xFFEAF2ED); // very light green for chips
+  // ── Marque terracotta (les noms "sage" sont conservés pour ne pas casser
+  //    les écrans ; les valeurs sont désormais corail/terracotta) ──────────
+  static const sageDark  = Color(0xFFE8896B); // corail — CTAs primaires, FAB
+  static const sage      = Color(0xFFD9725A); // corail foncé — liens, accents
+  static const sageLight = Color(0xFFF3C0B0); // corail clair — tints
+  static const sageTint  = Color(0xFFFBE9E1); // pêche — chips
 
   // ── Backgrounds ────────────────────────────────────────────────────────
-  static const background = Color(0xFFF5ECD7); // warm cream (auth card)
+  static const background = Color(0xFFFBF6F1); // crème
   static const white      = Color(0xFFFFFFFF);
-  static const cream      = Color(0xFFFFFBF2);
-  static const beige      = Color(0xFFF5ECD7); // alias
+  static const cream      = Color(0xFFFDF4EF); // pêche clair
+  static const beige      = Color(0xFFFBF6F1); // alias
 
   // ── Neutrals ───────────────────────────────────────────────────────────
-  static const textDark   = Color(0xFF1C2D22);
-  static const textMedium = Color(0xFF7A7A72);
-  static const softGray   = Color(0xFF9A9A92);
-  static const border     = Color(0xFFDDD8CC);
+  static const textDark   = Color(0xFF33302E); // encre
+  static const textMedium = Color(0xFF8B8480); // gris
+  static const softGray   = Color(0xFFB8B2AD); // gris clair
+  static const border     = Color(0xFFEBE0D8);
 
   // ── Accents ────────────────────────────────────────────────────────────
-  static const earth     = Color(0xFFC4956A);
-  static const darkEarth = Color(0xFF8B6347);
-  static const amber     = Color(0xFFC98A1A);
+  static const earth     = Color(0xFFE0A65E); // jaune-doré (accent chaud)
+  static const darkEarth = Color(0xFFB87A45);
+  static const amber     = Color(0xFFE0A65E);
   static const error     = Color(0xFFB94040);
 
   // ── Cover palette ──────────────────────────────────────────────────────
@@ -44,8 +45,8 @@ class AppColors {
   static const heroGradient = LinearGradient(
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
-    colors: [sageDark, Color(0xFF2E5339), sageLight],
-    stops: [0.0, 0.5, 1.0],
+    colors: [Color(0xFFEE9C80), sage],
+    stops: [0.0, 1.0],
   );
 }
 
