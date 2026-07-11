@@ -184,7 +184,7 @@ class _ToggleBar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: AppColors.cream,
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -221,7 +221,7 @@ class _ToggleBar extends StatelessWidget {
               style: TextStyle(
                 fontSize: 14,
                 fontWeight: active ? FontWeight.w700 : FontWeight.normal,
-                color: active ? AppColors.sage : Colors.grey.shade500,
+                color: active ? AppColors.sage : AppColors.textMedium,
               ),
             ),
           ),
@@ -333,7 +333,7 @@ class _MultiPointChart extends StatelessWidget {
           const SizedBox(height: 2),
           Text(
             'OMS 2006 — P3, P50, P97',
-            style: TextStyle(fontSize: 10, color: Colors.grey.shade400),
+            style: TextStyle(fontSize: 10, color: AppColors.softGray),
           ),
           const SizedBox(height: 14),
           SizedBox(
@@ -341,9 +341,9 @@ class _MultiPointChart extends StatelessWidget {
             child: LineChart(
               LineChartData(
                 lineBarsData: [
-                  _ref(p3, Colors.grey.shade200),
+                  _ref(p3, AppColors.border),
                   _ref(p50, AppColors.sage.withOpacity(0.35)),
-                  _ref(p97, Colors.grey.shade200),
+                  _ref(p97, AppColors.border),
                   if (childSpots.isNotEmpty)
                     LineChartBarData(
                       spots: childSpots,
@@ -371,7 +371,7 @@ class _MultiPointChart extends StatelessWidget {
                   drawVerticalLine: false,
                   horizontalInterval: yInterval,
                   getDrawingHorizontalLine: (_) =>
-                      FlLine(color: Colors.grey.shade100, strokeWidth: 1),
+                      FlLine(color: AppColors.cream, strokeWidth: 1),
                 ),
                 borderData: FlBorderData(show: false),
                 titlesData: FlTitlesData(
@@ -385,7 +385,7 @@ class _MultiPointChart extends StatelessWidget {
                             ? v.toStringAsFixed(1)
                             : '${v.toInt()}$unit',
                         style: TextStyle(
-                            fontSize: 9, color: Colors.grey.shade400),
+                            fontSize: 9, color: AppColors.softGray),
                       ),
                     ),
                   ),
@@ -396,7 +396,7 @@ class _MultiPointChart extends StatelessWidget {
                       getTitlesWidget: (v, _) => Text(
                         '${v.toInt()}m',
                         style: TextStyle(
-                            fontSize: 9, color: Colors.grey.shade400),
+                            fontSize: 9, color: AppColors.softGray),
                       ),
                     ),
                   ),
@@ -482,11 +482,11 @@ class _SimpleWeightChart extends StatelessWidget {
         decoration: BoxDecoration(
           color: Colors.white,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.shade100),
+          border: Border.all(color: AppColors.cream),
         ),
         child: Center(
           child: Text('Aucun poids enregistré',
-              style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+              style: TextStyle(color: AppColors.softGray, fontSize: 13)),
         ),
       );
     }
@@ -552,7 +552,7 @@ class _SimpleWeightChart extends StatelessWidget {
                   show: true,
                   drawVerticalLine: false,
                   getDrawingHorizontalLine: (_) =>
-                      FlLine(color: Colors.grey.shade100, strokeWidth: 1),
+                      FlLine(color: AppColors.cream, strokeWidth: 1),
                 ),
                 borderData: FlBorderData(show: false),
                 titlesData: FlTitlesData(
@@ -563,7 +563,7 @@ class _SimpleWeightChart extends StatelessWidget {
                       getTitlesWidget: (v, _) => Text(
                         v.toStringAsFixed(0),
                         style: TextStyle(
-                            fontSize: 9, color: Colors.grey.shade400),
+                            fontSize: 9, color: AppColors.softGray),
                       ),
                     ),
                   ),
@@ -582,7 +582,7 @@ class _SimpleWeightChart extends StatelessWidget {
                           child: Text(
                             '${d.day}/${d.month}',
                             style: TextStyle(
-                                fontSize: 8, color: Colors.grey.shade400),
+                                fontSize: 8, color: AppColors.softGray),
                           ),
                         );
                       },
@@ -645,7 +645,7 @@ class _MeasurementList extends StatelessWidget {
           padding: const EdgeInsets.all(20),
           child: Text(
             showWeight ? 'Aucun poids enregistré' : 'Aucune taille enregistrée',
-            style: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+            style: TextStyle(color: AppColors.softGray, fontSize: 13),
           ),
         ),
       );
@@ -695,7 +695,7 @@ class _MeasurementList extends StatelessWidget {
                 border: Border.all(
                   color: isLatest
                       ? AppColors.sage.withOpacity(0.3)
-                      : Colors.grey.shade100,
+                      : AppColors.cream,
                 ),
               ),
               child: Row(
@@ -704,12 +704,12 @@ class _MeasurementList extends StatelessWidget {
                     width: 42,
                     height: 42,
                     decoration: BoxDecoration(
-                      color: isLatest ? AppColors.sage : Colors.grey.shade100,
+                      color: isLatest ? AppColors.sage : AppColors.cream,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       showWeight ? Icons.monitor_weight_outlined : Icons.height,
-                      color: isLatest ? Colors.white : Colors.grey.shade400,
+                      color: isLatest ? Colors.white : AppColors.softGray,
                       size: 20,
                     ),
                   ),
@@ -730,7 +730,7 @@ class _MeasurementList extends StatelessWidget {
                         Text(
                           _label(m),
                           style: TextStyle(
-                              fontSize: 12, color: Colors.grey.shade500),
+                              fontSize: 12, color: AppColors.textMedium),
                         ),
                       ],
                     ),
@@ -754,7 +754,7 @@ class _MeasurementList extends StatelessWidget {
                     ),
                   const SizedBox(width: 6),
                   Icon(Icons.edit_outlined,
-                      size: 16, color: Colors.grey.shade400),
+                      size: 16, color: AppColors.softGray),
                 ],
               ),
             ),
@@ -975,7 +975,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: Colors.grey.shade300,
+                color: AppColors.border,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -1011,7 +1011,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
               ? 'Renseigne la taille et/ou le poids.'
               : 'Renseigne le poids.',
           style: TextStyle(
-              fontSize: 13, color: Colors.grey.shade500, height: 1.5),
+              fontSize: 13, color: AppColors.textMedium, height: 1.5),
         ),
         const SizedBox(height: 20),
 
@@ -1071,21 +1071,21 @@ class _MeasureSheetState extends State<_MeasureSheet> {
           decoration: InputDecoration(
             hintText: 'Note (optionnel) — ex : visite chez le pédiatre',
             hintStyle: TextStyle(
-                color: Colors.grey.shade400, fontSize: 13, height: 1.5),
+                color: AppColors.softGray, fontSize: 13, height: 1.5),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: Colors.grey.shade200),
+              borderSide: BorderSide(color: AppColors.border),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
-              borderSide: BorderSide(color: Colors.grey.shade200),
+              borderSide: BorderSide(color: AppColors.border),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(14),
               borderSide: const BorderSide(color: AppColors.sage, width: 2),
             ),
             filled: true,
-            fillColor: Colors.grey.shade50,
+            fillColor: AppColors.cream,
             contentPadding: const EdgeInsets.all(16),
           ),
         ),
@@ -1094,7 +1094,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
           onPressed: (_canSave && !_saving) ? _save : null,
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.sage,
-            disabledBackgroundColor: Colors.grey.shade200,
+            disabledBackgroundColor: AppColors.border,
             foregroundColor: Colors.white,
             minimumSize: const Size(double.infinity, 52),
             shape: RoundedRectangleBorder(
@@ -1166,23 +1166,23 @@ class _MeasureField extends StatelessWidget {
         suffixText: unit,
         suffixStyle: TextStyle(
             fontSize: 14,
-            color: Colors.grey.shade500,
+            color: AppColors.textMedium,
             fontWeight: FontWeight.w500),
         prefixIcon: Icon(icon, size: 18, color: AppColors.sage),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
+          borderSide: BorderSide(color: AppColors.border),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade200),
+          borderSide: BorderSide(color: AppColors.border),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: const BorderSide(color: AppColors.sage, width: 2),
         ),
         filled: true,
-        fillColor: Colors.grey.shade50,
+        fillColor: AppColors.cream,
       ),
     );
   }
@@ -1214,7 +1214,7 @@ class _EmptyState extends StatelessWidget {
                   : 'Aucun poids enregistré',
               style: TextStyle(
                 fontSize: 16,
-                color: Colors.grey.shade500,
+                color: AppColors.textMedium,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -1224,7 +1224,7 @@ class _EmptyState extends StatelessWidget {
                   ? 'Ajoute la première mesure de ${notebook.title}'
                   : 'Ajoute un premier poids pour suivre l\'évolution',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: Colors.grey.shade400),
+              style: TextStyle(fontSize: 13, color: AppColors.softGray),
             ),
             const SizedBox(height: 28),
             GestureDetector(

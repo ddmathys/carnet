@@ -156,7 +156,7 @@ class _OrderCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+          border: Border.all(color: AppColors.border, width: 0.5),
         ),
         child: Row(
           children: [
@@ -202,7 +202,7 @@ class _OrderTimeline extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -265,7 +265,7 @@ class _TimelineStep extends StatelessWidget {
             ),
             if (!isLast)
               Container(width: 2, height: 28,
-                color: isDone ? AppColors.sage.withOpacity(0.3) : const Color(0xFFDDD8CC)),
+                color: isDone ? AppColors.sage.withOpacity(0.3) : AppColors.border),
           ],
         ),
         const SizedBox(width: 12),
@@ -294,7 +294,7 @@ class _OrderDetailsCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -308,7 +308,7 @@ class _OrderDetailsCard extends StatelessWidget {
           _Row('Commande', '#${order.id.substring(0, 8).toUpperCase()}'),
           _Row('Date', DateFormat('d MMMM yyyy', 'fr').format(order.createdAt)),
           if (order.adminNote != null && order.adminNote!.isNotEmpty) ...[
-            const Divider(height: 24, color: Color(0xFFDDD8CC)),
+            const Divider(height: 24, color: AppColors.border),
             Text(order.adminNote!,
               style: const TextStyle(fontSize: 13, color: AppColors.textMedium, fontStyle: FontStyle.italic)),
           ],
@@ -488,7 +488,7 @@ class _PdfDownloadButtonState extends State<_PdfDownloadButton> {
         decoration: BoxDecoration(
           color: AppColors.background,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFDDD8CC)),
+          border: Border.all(color: AppColors.border),
         ),
         child: const Row(children: [
           SizedBox(width: 16, height: 16,

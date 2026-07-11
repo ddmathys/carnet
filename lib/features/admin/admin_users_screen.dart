@@ -100,7 +100,7 @@ class _UserCardState extends State<_UserCard> {
         border: Border.all(
           color: u.premiumRequested && !u.isPremium
               ? AppColors.amber.withOpacity(0.5)
-              : const Color(0xFFDDD8CC),
+              : AppColors.border,
           width: u.premiumRequested && !u.isPremium ? 1.2 : 0.5,
         ),
       ),
@@ -153,7 +153,7 @@ class _UserCardState extends State<_UserCard> {
               label: const Text('Bloquer (repasser gratuit)'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textMedium,
-                side: const BorderSide(color: Color(0xFFDDD8CC)),
+                side: const BorderSide(color: AppColors.border),
               ),
             )
           else

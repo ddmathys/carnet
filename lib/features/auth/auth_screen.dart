@@ -30,14 +30,16 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   String? _error;
 
   // Palette (reprise de la maquette carnet-login-wow).
-  static const _green900 = Color(0xFF1A2D23);
-  static const _green800 = Color(0xFF2C4636);
-  static const _green700 = Color(0xFF3D5A48);
-  static const _green600 = Color(0xFF4F7059);
-  static const _cream = Color(0xFFF2EAD6);
-  static const _ink = Color(0xFF233028);
-  static const _muted = Color(0xFF7A8A7E);
-  static const _gold = Color(0xFFD8B676);
+  // Palette terracotta (mêmes noms `_green*` conservés — valeurs corail/chaud
+  // pour harmoniser le login avec le reste de l'app).
+  static const _green900 = Color(0xFF3E2C25); // brun chaud — bas du héros
+  static const _green800 = Color(0xFF6B4A3C);
+  static const _green700 = Color(0xFFD9725A); // corail foncé — CTA principal
+  static const _green600 = Color(0xFFE8896B); // corail
+  static const _cream = Color(0xFFFBF6F1);
+  static const _ink = Color(0xFF33302E);
+  static const _muted = Color(0xFF8B8480);
+  static const _gold = Color(0xFFCBA876);
 
   // Photos d'exemple intégrées (assets/welcome/). Aucune donnée privée.
   static const _allPhotos = [

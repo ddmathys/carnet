@@ -170,11 +170,11 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(50),
-            borderSide: const BorderSide(color: Color(0xFFDDD8CC), width: 0.5),
+            borderSide: const BorderSide(color: AppColors.border, width: 0.5),
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(50),
-            borderSide: const BorderSide(color: Color(0xFFDDD8CC), width: 0.5),
+            borderSide: const BorderSide(color: AppColors.border, width: 0.5),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(50),
@@ -405,7 +405,7 @@ class _FilterChip extends StatelessWidget {
           color: selected ? AppColors.sage : AppColors.white,
           borderRadius: BorderRadius.circular(50),
           border: Border.all(
-            color: selected ? AppColors.sage : const Color(0xFFDDD8CC),
+            color: selected ? AppColors.sage : AppColors.border,
             width: 0.5,
           ),
         ),
@@ -750,7 +750,7 @@ class _MemoryTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+            border: Border.all(color: AppColors.border, width: 0.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

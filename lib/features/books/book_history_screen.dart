@@ -240,7 +240,7 @@ class _BookTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+            border: Border.all(color: AppColors.border, width: 0.5),
           ),
           child: Row(
             children: [
