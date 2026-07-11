@@ -70,17 +70,46 @@ class _ProfileScreenState extends State<ProfileScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Avatar
+            // En-tête profil : avatar corail à initiale + nom + email
             Center(
-              child: Container(
-                width: 80,
-                height: 80,
-                decoration: BoxDecoration(
-                  color: AppColors.sage.withOpacity(0.15),
-                  shape: BoxShape.circle,
-                  border: Border.all(color: AppColors.sage.withOpacity(0.3), width: 2),
-                ),
-                child: const Icon(Icons.person, size: 40, color: AppColors.sage),
+              child: Column(
+                children: [
+                  Container(
+                    width: 84,
+                    height: 84,
+                    alignment: Alignment.center,
+                    decoration: const BoxDecoration(
+                        color: AppColors.sageDark, shape: BoxShape.circle),
+                    child: Text(
+                      (user.displayName?.isNotEmpty == true
+                              ? user.displayName!
+                              : (user.email ?? '?'))[0]
+                          .toUpperCase(),
+                      style: const TextStyle(
+                        fontFamily: 'Fraunces',
+                        color: Colors.white,
+                        fontSize: 34,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    user.displayName?.isNotEmpty == true
+                        ? user.displayName!
+                        : 'Bienvenue',
+                    style: const TextStyle(
+                      fontFamily: 'Fraunces',
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textDark,
+                    ),
+                  ),
+                  if (user.email != null)
+                    Text(user.email!,
+                        style: const TextStyle(
+                            fontSize: 13, color: AppColors.textMedium)),
+                ],
               ),
             ),
             const SizedBox(height: 28),
@@ -106,7 +135,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.grey.shade200),
+                            border: Border.all(color: AppColors.border),
                           ),
                           child: Text(
                             user.displayName?.isNotEmpty == true
@@ -116,7 +145,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               fontSize: 15,
                               color: user.displayName?.isNotEmpty == true
                                   ? AppColors.textDark
-                                  : Colors.grey.shade400,
+                                  : AppColors.softGray,
                             ),
                           ),
                         ),
@@ -156,7 +185,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               decoration: BoxDecoration(
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.grey.shade200),
+                border: Border.all(color: AppColors.border),
               ),
               child: Row(
                 children: [
@@ -215,7 +244,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ],
 
             // Divider
-            Divider(color: Colors.grey.shade200),
+            Divider(color: AppColors.border),
             const SizedBox(height: 16),
 
             // Sign out
@@ -225,7 +254,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               label: const Text('Se déconnecter'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.textMedium,
-                side: BorderSide(color: Colors.grey.shade300),
+                side: BorderSide(color: AppColors.border),
                 padding: const EdgeInsets.symmetric(vertical: 14),
               ),
             ),
@@ -448,7 +477,7 @@ class _SectionLabel extends StatelessWidget {
       style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: Colors.grey.shade500,
+          color: AppColors.softGray,
           letterSpacing: 0.5),
     );
   }
@@ -474,7 +503,7 @@ class _ProfileTile extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: AppColors.border),
       ),
       child: Row(
         children: [
@@ -484,7 +513,7 @@ class _ProfileTile extends StatelessWidget {
             child: Text(label,
               style: TextStyle(fontSize: 15, color: color, fontWeight: FontWeight.w500)),
           ),
-          Icon(Icons.chevron_right, size: 18, color: Colors.grey.shade400),
+          Icon(Icons.chevron_right, size: 18, color: AppColors.softGray),
         ],
       ),
     ),

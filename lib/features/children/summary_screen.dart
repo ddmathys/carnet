@@ -275,7 +275,7 @@ class _HeaderCard extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 child.age,
-                style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+                style: TextStyle(fontSize: 14, color: AppColors.textMedium),
               ),
             ],
           ),
@@ -375,7 +375,7 @@ class _InfoCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade100),
+        border: Border.all(color: AppColors.cream),
       ),
       child: Row(
         children: [
@@ -394,7 +394,7 @@ class _InfoCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(title,
-                    style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+                    style: TextStyle(fontSize: 11, color: AppColors.textMedium)),
                 const SizedBox(height: 2),
                 Text(
                   value,
@@ -407,7 +407,7 @@ class _InfoCard extends StatelessWidget {
             ),
           ),
           Text(subtitle,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade400)),
+              style: TextStyle(fontSize: 12, color: AppColors.softGray)),
         ],
       ),
     );
@@ -452,7 +452,7 @@ class _AnecdoteCard extends StatelessWidget {
                 milestone.dateLabel ??
                     formatDateWithPrecision(milestone.date,
                         datePrecisionFromString(milestone.datePrecision)),
-                style: TextStyle(fontSize: 11, color: Colors.grey.shade500),
+                style: TextStyle(fontSize: 11, color: AppColors.textMedium),
               ),
             ],
           ),
@@ -460,7 +460,7 @@ class _AnecdoteCard extends StatelessWidget {
           Text(
             preview,
             style: TextStyle(
-                fontSize: 13, color: Colors.grey.shade700, height: 1.5),
+                fontSize: 13, color: AppColors.textDark, height: 1.5),
           ),
         ],
       ),
@@ -483,7 +483,7 @@ class _BreakdownCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade100),
+        border: Border.all(color: AppColors.cream),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -514,7 +514,7 @@ class _BreakdownCard extends StatelessWidget {
                           style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: Colors.grey.shade600)),
+                              color: AppColors.textMedium)),
                     ],
                   ),
                   const SizedBox(height: 4),
@@ -523,7 +523,7 @@ class _BreakdownCard extends StatelessWidget {
                     child: LinearProgressIndicator(
                       value: pct,
                       minHeight: 6,
-                      backgroundColor: Colors.grey.shade100,
+                      backgroundColor: AppColors.cream,
                       valueColor: AlwaysStoppedAnimation<Color>(cat.$3),
                     ),
                   ),
@@ -547,7 +547,7 @@ class _BreakdownCard extends StatelessWidget {
       case 'mouvement':
         return ('🏃', 'Premier mouvement', AppColors.sage);
       default:
-        return ('✨', type, Colors.grey);
+        return ('✨', type, AppColors.softGray);
     }
   }
 }

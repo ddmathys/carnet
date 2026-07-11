@@ -1016,14 +1016,14 @@ class _ShortcutBtn extends StatelessWidget {
               Text(emoji,
                   style: TextStyle(
                       fontSize: 22,
-                      color: active ? null : Colors.grey.shade400)),
+                      color: active ? null : AppColors.softGray)),
               const SizedBox(height: 4),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.w600,
-                  color: active ? AppColors.textDark : Colors.grey.shade400,
+                  color: active ? AppColors.textDark : AppColors.softGray,
                 ),
               ),
             ],
