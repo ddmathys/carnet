@@ -11,6 +11,7 @@ import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/models/notebook_model.dart';
+import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
@@ -49,7 +50,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool _isRecording = false;
   bool _isPlayingMemo = false;
   String? _localAudioPath; // nouvel enregistrement local non encore uploadé
-  String? _existingAudioUrl; // audio déjà stocké (mode édition)
+  // En édition : `_existingAudioUrl` = URL de LECTURE (Firebase pour l'ancien
+  // format, URL R2 signée pour le nouveau) ; `_existingAudioKey` = clé R2 (à
+  // conserver en base ; l'URL signée ne doit jamais être persistée).
+  String? _existingAudioUrl;
+  String? _existingAudioKey;
   bool _audioRemoved = false; // l'utilisateur a supprimé l'audio existant
   int? _audioDurationMs;
   DateTime? _recordStartedAt;
@@ -179,6 +184,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       if (!mounted) return;
     }
 
+    // Audio : R2 (clé) → URL signée pour la lecture ; sinon URL Firebase.
+    final audioKeyData = data['audioKey'] as String?;
+    String? audioPlayUrl = data['audioUrl'] as String?;
+    if (audioKeyData != null && audioKeyData.isNotEmpty) {
+      audioPlayUrl = await AudioService.signedAudioUrl(widget.memoryId!);
+      if (!mounted) return;
+    }
+
     setState(() {
       _notebook = notebook;
       _selectedCategory = data['type'];
@@ -204,7 +217,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _existingKeyByUrl[url] = key;
         }
       }
-      _existingAudioUrl = data['audioUrl'] as String?;
+      _existingAudioUrl = audioPlayUrl;
+      _existingAudioKey = audioKeyData;
       _audioDurationMs = (data['audioDurationMs'] as num?)?.toInt();
       // Vidéos (nouveau format multi, avec repli sur l'ancien videoKey unique).
       final videoKeys =
@@ -1017,7 +1031,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         for (final u in _existingPhotoUrls)
           if (_existingKeyByUrl.containsKey(u)) _existingKeyByUrl[u]!
       ];
-      final knownAudioUrl = _audioRemoved ? null : _existingAudioUrl;
+      // Audio : ne jamais persister l'URL signée R2 — on écrit la CLÉ (R2) ou
+      // l'ancienne URL Firebase.
+      final knownAudioKey = _audioRemoved ? null : _existingAudioKey;
+      final knownAudioUrl = (_audioRemoved || _existingAudioKey != null)
+          ? null
+          : _existingAudioUrl;
+      // URL Firebase héritée transmise au job (null si l'audio est déjà sur R2).
+      final legacyAudioUrl =
+          _existingAudioKey == null ? _existingAudioUrl : null;
       // Vidéos déjà uploadées et conservées (les nouvelles partent en file).
       final knownVideoKeys = List<String>.of(_existingVideoKeys);
       final knownVideoDurations = List<int>.of(_existingVideoDurations);
@@ -1038,7 +1060,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'mediaKeys': keptPhotoKeys,
         'photoUrl': keptLegacyUrls.isNotEmpty ? keptLegacyUrls.first : null,
         'audioUrl': knownAudioUrl,
-        'audioDurationMs': knownAudioUrl != null ? _audioDurationMs : null,
+        'audioKey': knownAudioKey,
+        'audioDurationMs': (knownAudioUrl != null || knownAudioKey != null)
+            ? _audioDurationMs
+            : null,
         'videoKeys': knownVideoKeys,
         'videoDurationsMs': knownVideoDurations,
         // Miroir hérité (compat anciens lecteurs / page /watch d'origine).
@@ -1091,7 +1116,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           removedPhotoUrls: List<String>.of(_removedPhotoUrls),
           removedPhotoKeys: List<String>.of(_removedPhotoKeys),
           localAudioPath: _localAudioPath,
-          existingAudioUrl: _existingAudioUrl,
+          existingAudioUrl: legacyAudioUrl,
+          existingAudioKey: _existingAudioKey,
           audioRemoved: _audioRemoved,
           audioDurationMs: _audioDurationMs,
           localVideoPaths: List<String>.of(_localVideoPaths),

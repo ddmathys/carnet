@@ -265,6 +265,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   Future<void> _deleteMemory(MemoryModel memory) async {
     await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
         audioUrl: memory.audioUrl,
+        audioKey: memory.audioKey,
         videoKeys: memory.videoKeys,
         mediaKeys: memory.mediaKeys);
   }

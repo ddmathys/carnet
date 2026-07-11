@@ -259,6 +259,7 @@ class PhotoService {
         ...urls.map(deletePhotoByUrl),
         ...photoKeys.map(deletePhotoByKey),
         AudioService.deleteAudioByUrl(data['audioUrl'] as String?),
+        AudioService.deleteAudioByKey(data['audioKey'] as String?),
         VideoService.deleteVideosByKeys(videoKeys),
       ];
     });
@@ -282,6 +283,7 @@ class PhotoService {
   static Future<void> deleteMemory(
       String memoryId, String? photoUrl, List<String> mediaUrls,
       {String? audioUrl,
+      String? audioKey,
       List<String> videoKeys = const [],
       List<String> mediaKeys = const []}) async {
     final allUrls = {
@@ -292,6 +294,7 @@ class PhotoService {
       ...allUrls.map(deletePhotoByUrl),
       ...mediaKeys.map(deletePhotoByKey),
       AudioService.deleteAudioByUrl(audioUrl),
+      AudioService.deleteAudioByKey(audioKey),
       VideoService.deleteVideosByKeys(videoKeys),
       _firestore.collection('memories').doc(memoryId).delete(),
     ]);

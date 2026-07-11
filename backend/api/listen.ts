@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { db } from '../lib/firebase'
 import { escapeHtml } from '../lib/verify'
+import { presignGet } from '../lib/r2'
 
 // Page publique d'écoute d'un mémo vocal — cible des QR codes imprimés dans le livre.
 // Pas d'authentification : le memoryId fait office de capacité (lien non devinable).
@@ -17,8 +18,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const snap = await db.collection('memories').doc(m).get()
     if (snap.exists) {
       const d = snap.data() as Record<string, unknown>
-      audioUrl = (d.audioUrl as string) ?? null
       title = (d.title as string) ?? ''
+      // Double-lecture : audio R2 (clé) → URL signée temporaire ; sinon ancienne
+      // URL Firebase.
+      const audioKey = typeof d.audioKey === 'string' ? d.audioKey : ''
+      audioUrl = audioKey
+        ? await presignGet(audioKey, 3600)
+        : ((d.audioUrl as string) ?? null)
     }
   } catch {
     // ignore — affiche la page "introuvable" ci-dessous

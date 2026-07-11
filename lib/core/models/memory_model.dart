@@ -19,6 +19,8 @@ class MemoryModel {
   // `mediaUrls` (URLs Firebase permanentes) → double-lecture à l'affichage.
   final List<String> mediaKeys;
   final String? audioUrl;
+  // Mémo vocal sur R2 (clé). Ancien format = `audioUrl` (Firebase) → double-lecture.
+  final String? audioKey;
   final int? audioDurationMs;
   // Vidéos souvenir : on stocke les CLÉS des objets R2 (videos/{uid}/…/x.mp4),
   // pas les URLs — l'app et la page /watch reconstruisent l'URL publique depuis
@@ -46,6 +48,7 @@ class MemoryModel {
     this.mediaUrls = const [],
     this.mediaKeys = const [],
     this.audioUrl,
+    this.audioKey,
     this.audioDurationMs,
     this.videoKeys = const [],
     this.videoDurationsMs = const [],
@@ -73,6 +76,7 @@ class MemoryModel {
       mediaUrls: List<String>.from(d['mediaUrls'] ?? []),
       mediaKeys: List<String>.from(d['mediaKeys'] ?? []),
       audioUrl: d['audioUrl'],
+      audioKey: d['audioKey'],
       audioDurationMs: (d['audioDurationMs'] as num?)?.toInt(),
       videoKeys: _readVideoKeys(d),
       videoDurationsMs: _readVideoDurations(d),
@@ -118,6 +122,7 @@ class MemoryModel {
         'mediaUrls': mediaUrls,
         'mediaKeys': mediaKeys,
         'audioUrl': audioUrl,
+        'audioKey': audioKey,
         'audioDurationMs': audioDurationMs,
         'videoKeys': videoKeys,
         'videoDurationsMs': videoDurationsMs,

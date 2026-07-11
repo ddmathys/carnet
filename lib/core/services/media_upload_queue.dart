@@ -18,6 +18,7 @@ class MediaUploadJob {
   final List<String> removedPhotoKeys;
   final String? localAudioPath;
   final String? existingAudioUrl;
+  final String? existingAudioKey; // mémo vocal R2 conservé (édition)
   final bool audioRemoved;
   final int? audioDurationMs;
   // Vidéos (multi). `existing*` = clips conservés, `removed*` = clips à supprimer
@@ -38,6 +39,7 @@ class MediaUploadJob {
     this.removedPhotoKeys = const [],
     required this.localAudioPath,
     required this.existingAudioUrl,
+    this.existingAudioKey,
     required this.audioRemoved,
     required this.audioDurationMs,
     this.localVideoPaths = const [],
@@ -92,13 +94,13 @@ class MediaUploadQueue extends ChangeNotifier {
         photos: job.localPhotos,
         notebookId: job.notebookId,
       );
+      // Audio → R2 (clé). Nouveau mémo → upload ; sinon rien à uploader.
       final Future<String?> audioFuture = job.localAudioPath != null
-          ? AudioService.uploadMemoryAudio(
+          ? AudioService.uploadMemoryAudioToR2(
               audio: File(job.localAudioPath!),
               notebookId: job.notebookId,
             )
-          : Future<String?>.value(
-              job.audioRemoved ? null : job.existingAudioUrl);
+          : Future<String?>.value(null);
 
       // Suppression des médias retirés/remplacés (en parallèle des uploads).
       final deletions = <Future<void>>[
@@ -106,9 +108,14 @@ class MediaUploadQueue extends ChangeNotifier {
         ...job.removedPhotoKeys.map(PhotoService.deletePhotoByKey),
         ...job.removedVideoKeys.map(VideoService.deleteVideoByKey),
       ];
-      if (job.existingAudioUrl != null &&
-          (job.localAudioPath != null || job.audioRemoved)) {
-        deletions.add(AudioService.deleteAudioByUrl(job.existingAudioUrl));
+      // Ancien mémo remplacé/retiré → on le supprime (URL Firebase OU clé R2).
+      if (job.localAudioPath != null || job.audioRemoved) {
+        if (job.existingAudioUrl != null) {
+          deletions.add(AudioService.deleteAudioByUrl(job.existingAudioUrl));
+        }
+        if (job.existingAudioKey != null) {
+          deletions.add(AudioService.deleteAudioByKey(job.existingAudioKey));
+        }
       }
 
       // Upload des nouvelles vidéos SÉQUENTIELLEMENT. `video_compress` ne gère
@@ -141,8 +148,17 @@ class MediaUploadQueue extends ChangeNotifier {
       }
 
       final newKeys = await photoFuture;
-      final audioUrl = await audioFuture;
+      final uploadedAudioKey = await audioFuture;
       await Future.wait(deletions);
+
+      // Audio final : nouveau (R2) ; sinon conservé (clé R2 ou ancienne URL) ;
+      // sinon rien (retiré).
+      final keepOldAudio = job.localAudioPath == null && !job.audioRemoved;
+      final finalAudioKey = job.localAudioPath != null
+          ? uploadedAudioKey
+          : (keepOldAudio ? job.existingAudioKey : null);
+      final finalAudioUrl = keepOldAudio ? job.existingAudioUrl : null;
+      final hasAudio = finalAudioKey != null || finalAudioUrl != null;
 
       // Photos R2 : clés conservées + nouvelles. Les anciennes photos Firebase
       // (mediaUrls) sont préservées telles quelles → souvenir potentiellement
@@ -156,8 +172,9 @@ class MediaUploadQueue extends ChangeNotifier {
         'mediaKeys': allKeys,
         'mediaUrls': legacyUrls,
         'photoUrl': legacyUrls.isNotEmpty ? legacyUrls.first : null,
-        'audioUrl': audioUrl,
-        'audioDurationMs': audioUrl != null ? job.audioDurationMs : null,
+        'audioUrl': finalAudioUrl,
+        'audioKey': finalAudioKey,
+        'audioDurationMs': hasAudio ? job.audioDurationMs : null,
         'videoKeys': videoKeys,
         'videoDurationsMs': videoDurationsMs,
         // Miroir hérité (compat anciens lecteurs / page /watch d'origine).
@@ -178,7 +195,8 @@ class MediaUploadQueue extends ChangeNotifier {
           removedPhotoUrls: const [],
           existingPhotoKeys: allKeys,
           localAudioPath: null,
-          existingAudioUrl: audioUrl,
+          existingAudioUrl: finalAudioUrl,
+          existingAudioKey: finalAudioKey,
           audioRemoved: false,
           audioDurationMs: job.audioDurationMs,
           localVideoPaths: failedVideoPaths,

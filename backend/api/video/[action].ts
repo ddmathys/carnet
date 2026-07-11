@@ -2,7 +2,12 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomUUID } from 'crypto'
 import { requireAuth } from '../../lib/verify'
 import { presignPut, presignGet, deleteObject, r2PublicHost } from '../../lib/r2'
-import { memoryIfMember, videoKeysOf, photoKeysOf } from '../../lib/access'
+import {
+  memoryIfMember,
+  videoKeysOf,
+  photoKeysOf,
+  audioKeyOf,
+} from '../../lib/access'
 
 // Route dynamique regroupant les endpoints vidéo + la config publique en UNE
 // seule fonction serverless (le plan Hobby de Vercel plafonne à 12 fonctions).
@@ -117,6 +122,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'photo-delete') {
     const key = (body.key ?? '') as string
     if (!key || !key.startsWith(`photos/${user.uid}/`)) {
+      return res.status(403).json({ error: 'Clé invalide' })
+    }
+    try {
+      await deleteObject(key)
+      return res.status(200).json({ ok: true })
+    } catch {
+      return res.status(500).json({ error: 'Suppression impossible' })
+    }
+  }
+
+  // ── Audio / mémos vocaux (même infra R2 privée + URLs signées) ───────────
+  if (action === 'audio-upload-url') {
+    const notebookId = (body.notebookId ?? '') as string
+    if (!notebookId) {
+      return res.status(400).json({ error: 'notebookId manquant' })
+    }
+    const contentType = 'audio/mp4'
+    const key = `audio/${user.uid}/${notebookId}/${randomUUID()}.m4a`
+    try {
+      const uploadUrl = await presignPut(key, contentType)
+      return res.status(200).json({ uploadUrl, key, contentType })
+    } catch {
+      return res.status(500).json({ error: 'Signature impossible' })
+    }
+  }
+
+  if (action === 'audio-play') {
+    const memoryId = (body.memoryId ?? '') as string
+    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    if (!mem) return res.status(403).json({ error: 'Accès refusé' })
+    const key = audioKeyOf(mem)
+    const url = key ? await presignGet(key, 3600) : null
+    return res.status(200).json({ key, url })
+  }
+
+  if (action === 'audio-delete') {
+    const key = (body.key ?? '') as string
+    if (!key || !key.startsWith(`audio/${user.uid}/`)) {
       return res.status(403).json({ error: 'Clé invalide' })
     }
     try {

@@ -62,3 +62,9 @@ export function photoKeysOf(mem: Record<string, unknown>): string[] {
   }
   return []
 }
+
+/** Clé audio R2 d'un souvenir (`audioKey`). Vide pour les anciens (URL Firebase
+ *  dans `audioUrl`) → double-lecture. */
+export function audioKeyOf(mem: Record<string, unknown>): string {
+  return typeof mem.audioKey === 'string' ? (mem.audioKey as string) : ''
+}
