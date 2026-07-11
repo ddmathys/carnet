@@ -143,7 +143,7 @@ class _FilterChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? AppColors.sage : AppColors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? AppColors.sage : const Color(0xFFDDD8CC), width: 1),
+          border: Border.all(color: selected ? AppColors.sage : const AppColors.border, width: 1),
         ),
         child: Text(label,
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
@@ -281,7 +281,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+        border: Border.all(color: const AppColors.border, width: 0.5),
       ),
       child: Column(
         children: [
@@ -323,7 +323,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
           ),
           // Détail + actions
           if (_expanded) ...[
-            const Divider(height: 1, color: Color(0xFFDDD8CC)),
+            const Divider(height: 1, color: AppColors.border),
             Padding(
               padding: const EdgeInsets.all(14),
               child: Column(
@@ -350,7 +350,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                           decoration: BoxDecoration(
                             color: sel ? AppColors.sage : AppColors.background,
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: sel ? AppColors.sage : const Color(0xFFDDD8CC)),
+                            border: Border.all(color: sel ? AppColors.sage : const AppColors.border),
                           ),
                           child: Text(
                             OrderModel(id:'',userId:'',userEmail:'',bookTitle:'',coverType:'',price:0,
@@ -577,7 +577,7 @@ class _PdfStatusWidget extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.background,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const Color(0xFFDDD8CC)),
+            border: Border.all(color: const AppColors.border),
           ),
           child: const Row(children: [
             SizedBox(width: 14, height: 14,

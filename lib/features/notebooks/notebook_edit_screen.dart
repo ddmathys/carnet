@@ -461,7 +461,7 @@ class _NotebookEditScreenState extends State<NotebookEditScreen> {
               decoration: BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+                border: Border.all(color: const AppColors.border, width: 0.5),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -546,7 +546,7 @@ class _NotebookEditScreenState extends State<NotebookEditScreen> {
               color: selected ? AppColors.sage.withOpacity(0.15) : AppColors.white,
               borderRadius: BorderRadius.circular(50),
               border: Border.all(
-                color: selected ? AppColors.sage : const Color(0xFFDDD8CC),
+                color: selected ? AppColors.sage : const AppColors.border,
                 width: selected ? 1.5 : 0.5,
               ),
             ),
@@ -591,7 +591,7 @@ class _NotebookEditScreenState extends State<NotebookEditScreen> {
                 color: selected ? AppColors.sage.withOpacity(0.12) : AppColors.white,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: selected ? AppColors.sage : const Color(0xFFDDD8CC),
+                  color: selected ? AppColors.sage : const AppColors.border,
                   width: selected ? 1.5 : 0.5,
                 ),
               ),
@@ -664,7 +664,7 @@ class _GenderChip extends StatelessWidget {
           color: selected ? AppColors.sage.withOpacity(0.12) : AppColors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? AppColors.sage : const Color(0xFFDDD8CC),
+            color: selected ? AppColors.sage : const AppColors.border,
             width: selected ? 2 : 0.5,
           ),
         ),

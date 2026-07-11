@@ -216,7 +216,7 @@ class _DashboardBodyState extends State<_DashboardBody> {
           decoration: BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+            border: Border.all(color: const AppColors.border, width: 0.5),
           ),
           child: Row(
             children: [
@@ -246,7 +246,7 @@ class _DashboardBodyState extends State<_DashboardBody> {
         decoration: BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+          border: Border.all(color: const AppColors.border, width: 0.5),
         ),
         child: Row(
           children: [
@@ -723,7 +723,7 @@ class _TimelineBubble extends StatelessWidget {
     }
   }
 
-  static const _line = Color(0xFFDDD8CC);
+  static const _line = AppColors.border;
 
   @override
   Widget build(BuildContext context) {
@@ -1008,7 +1008,7 @@ class _ShortcutBtn extends StatelessWidget {
           decoration: BoxDecoration(
             color: active ? AppColors.white : AppColors.white.withOpacity(0.5),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+            border: Border.all(color: const AppColors.border, width: 0.5),
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1063,7 +1063,7 @@ class _MemoryPreviewTile extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.white,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFFDDD8CC), width: 0.5),
+          border: Border.all(color: const AppColors.border, width: 0.5),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.center,
