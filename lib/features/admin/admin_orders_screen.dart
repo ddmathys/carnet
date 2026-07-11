@@ -143,7 +143,7 @@ class _FilterChip extends StatelessWidget {
         decoration: BoxDecoration(
           color: selected ? AppColors.sage : AppColors.white,
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: selected ? AppColors.sage : const AppColors.border, width: 1),
+          border: Border.all(color: selected ? AppColors.sage : AppColors.border, width: 1),
         ),
         child: Text(label,
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
@@ -281,7 +281,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
       decoration: BoxDecoration(
         color: AppColors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const AppColors.border, width: 0.5),
+        border: Border.all(color: AppColors.border, width: 0.5),
       ),
       child: Column(
         children: [
@@ -350,7 +350,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                           decoration: BoxDecoration(
                             color: sel ? AppColors.sage : AppColors.background,
                             borderRadius: BorderRadius.circular(20),
-                            border: Border.all(color: sel ? AppColors.sage : const AppColors.border),
+                            border: Border.all(color: sel ? AppColors.sage : AppColors.border),
                           ),
                           child: Text(
                             OrderModel(id:'',userId:'',userEmail:'',bookTitle:'',coverType:'',price:0,
@@ -577,7 +577,7 @@ class _PdfStatusWidget extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.background,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: const AppColors.border),
+            border: Border.all(color: AppColors.border),
           ),
           child: const Row(children: [
             SizedBox(width: 14, height: 14,

@@ -305,7 +305,7 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final borderColor = featured ? AppColors.sage : const AppColors.border;
+    final borderColor = featured ? AppColors.sage : AppColors.border;
     final bg = featured ? AppColors.sage.withOpacity(0.04) : AppColors.white;
 
     return Container(

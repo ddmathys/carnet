@@ -100,7 +100,7 @@ class _UserCardState extends State<_UserCard> {
         border: Border.all(
           color: u.premiumRequested && !u.isPremium
               ? AppColors.amber.withOpacity(0.5)
-              : const AppColors.border,
+              : AppColors.border,
           width: u.premiumRequested && !u.isPremium ? 1.2 : 0.5,
         ),
       ),

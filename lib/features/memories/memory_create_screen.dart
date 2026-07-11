@@ -1204,7 +1204,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                     color: AppColors.white,
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: const AppColors.border, width: 0.5),
+                        color: AppColors.border, width: 0.5),
                   ),
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -1645,7 +1645,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               decoration: BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const AppColors.border, width: 0.5),
+                border: Border.all(color: AppColors.border, width: 0.5),
               ),
               child: const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -1733,7 +1733,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                     : AppColors.white,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                  color: _isRecording ? AppColors.error : const AppColors.border,
+                  color: _isRecording ? AppColors.error : AppColors.border,
                   width: _isRecording ? 1 : 0.5,
                 ),
               ),
@@ -1809,7 +1809,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                     color: AppColors.white,
                     borderRadius: BorderRadius.circular(10),
                     border:
-                        Border.all(color: const AppColors.border, width: 0.5),
+                        Border.all(color: AppColors.border, width: 0.5),
                   ),
                   child: const Center(
                     child: SizedBox(
@@ -1890,7 +1890,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
-                    color: const AppColors.border, width: 0.5),
+                    color: AppColors.border, width: 0.5),
               ),
               child: Row(
                 children: [
@@ -2063,7 +2063,7 @@ class _Pill extends StatelessWidget {
         color: selected ? AppColors.sage : AppColors.white,
         borderRadius: BorderRadius.circular(50),
         border: Border.all(
-          color: selected ? AppColors.sage : const AppColors.border,
+          color: selected ? AppColors.sage : AppColors.border,
           width: selected ? 1.5 : 0.5,
         ),
       ),

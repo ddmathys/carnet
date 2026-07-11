@@ -403,7 +403,7 @@ class _FilterChip extends StatelessWidget {
           color: selected ? AppColors.sage : AppColors.white,
           borderRadius: BorderRadius.circular(50),
           border: Border.all(
-            color: selected ? AppColors.sage : const AppColors.border,
+            color: selected ? AppColors.sage : AppColors.border,
             width: 0.5,
           ),
         ),
@@ -737,7 +737,7 @@ class _MemoryTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: AppColors.white,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const AppColors.border, width: 0.5),
+            border: Border.all(color: AppColors.border, width: 0.5),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

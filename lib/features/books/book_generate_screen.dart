@@ -636,8 +636,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           : null,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-      border: border(const AppColors.border, 0.5),
-      enabledBorder: border(const AppColors.border, 0.5),
+      border: border(AppColors.border, 0.5),
+      enabledBorder: border(AppColors.border, 0.5),
       focusedBorder: border(AppColors.sage, 1.5),
     );
   }
@@ -714,7 +714,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               decoration: BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const AppColors.border, width: 0.5),
+                border: Border.all(color: AppColors.border, width: 0.5),
               ),
               child: Row(
                 children: [
@@ -1069,7 +1069,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               color: AppColors.white,
               borderRadius: BorderRadius.circular(14),
               border:
-                  Border.all(color: const AppColors.border, width: 0.5),
+                  Border.all(color: AppColors.border, width: 0.5),
             ),
             child: Column(
               children: [
@@ -1562,7 +1562,7 @@ class _FormatCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color:
-                selected ? AppColors.sage : const AppColors.border,
+                selected ? AppColors.sage : AppColors.border,
             width: selected ? 2 : 0.5,
           ),
         ),

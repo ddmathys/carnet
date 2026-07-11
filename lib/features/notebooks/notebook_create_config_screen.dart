@@ -455,7 +455,7 @@ class _NotebookCreateConfigScreenState
               decoration: BoxDecoration(
                 color: AppColors.white,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: const AppColors.border, width: 0.5),
+                border: Border.all(color: AppColors.border, width: 0.5),
               ),
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -545,7 +545,7 @@ class _NotebookCreateConfigScreenState
                   : AppColors.white,
               borderRadius: BorderRadius.circular(50),
               border: Border.all(
-                color: selected ? AppColors.sage : const AppColors.border,
+                color: selected ? AppColors.sage : AppColors.border,
                 width: selected ? 1.5 : 0.5,
               ),
             ),
@@ -594,7 +594,7 @@ class _NotebookCreateConfigScreenState
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color:
-                      selected ? AppColors.sage : const AppColors.border,
+                      selected ? AppColors.sage : AppColors.border,
                   width: selected ? 1.5 : 0.5,
                 ),
               ),
@@ -678,7 +678,7 @@ class _GenderChip extends StatelessWidget {
               : AppColors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: selected ? AppColors.sage : const AppColors.border,
+            color: selected ? AppColors.sage : AppColors.border,
             width: selected ? 2 : 0.5,
           ),
         ),
