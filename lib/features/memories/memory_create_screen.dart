@@ -27,11 +27,15 @@ import '../milestones/widgets/flexible_date_sheet.dart';
 class MemoryCreateScreen extends StatefulWidget {
   final String notebookId;
   final String? memoryId;
+  // Flux « importer des médias » depuis le dashboard : ouvre directement la
+  // galerie une fois le carnet chargé, puis l'utilisateur finalise le formulaire.
+  final bool startImport;
 
   const MemoryCreateScreen({
     super.key,
     required this.notebookId,
     this.memoryId,
+    this.startImport = false,
   });
 
   @override
@@ -137,11 +141,18 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       setState(() {
         _notebook = NotebookModel.fromFirestore(doc);
         // Pas de choix de type pour ce carnet → formulaire direct.
-        if (!_hasTypePicker) {
+        // Le flux « importer des médias » saute aussi le choix de type.
+        if (!_hasTypePicker || widget.startImport) {
           _selectedCategory = 'anecdote';
           _step = 1;
         }
       });
+      // Flux d'import : on ouvre la galerie tout de suite après le 1er rendu.
+      if (widget.startImport && !_isEditing) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _pickMediaFromGallery();
+        });
+      }
     }
   }
 
@@ -950,7 +961,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         break;
       case 'anecdote':
       case null:
-        if (_textController.text.trim().isEmpty) missing.add('description');
+        // Description facultative → rien à signaler ici.
         break;
       default:
         break;
@@ -971,9 +982,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool get _titleRequiredEmpty => _titleController.text.trim().isEmpty;
   bool get _locationRequiredEmpty => _locationController.text.trim().isEmpty;
 
-  bool get _descriptionRequiredEmpty =>
-      (_selectedCategory == 'anecdote' || _selectedCategory == null) &&
-      _textController.text.trim().isEmpty;
+  // La description est désormais facultative (demande de David) : on ne bloque
+  // plus l'enregistrement dessus. Requis pour un souvenir : titre + lieu + date.
+  bool get _descriptionRequiredEmpty => false;
 
   // Bordure rouge pour les champs obligatoires non remplis.
   OutlineInputBorder get _errorBorder => OutlineInputBorder(
@@ -992,7 +1003,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         return !_measurementMissing;
       case 'anecdote':
       case null:
-        return _textController.text.trim().isNotEmpty;
+        // Description facultative → titre + lieu + date suffisent.
+        return true;
       default:
         return true;
     }
@@ -1617,8 +1629,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             controller: _textController,
             maxLines: 6,
             decoration: InputDecoration(
-              labelText: 'Qu\'est-ce qui t\'a marqué pour ce souvenir ?',
-              hintText: 'Partage-le ici…',
+              labelText: 'Description (facultatif)',
+              hintText: 'Qu\'est-ce qui t\'a marqué pour ce souvenir ?',
               alignLabelWithHint: true,
               // Encadré rouge tant que la description (obligatoire ici) est vide.
               enabledBorder: _descriptionRequiredEmpty ? _errorBorder : null,

@@ -9,6 +9,8 @@ import '../../core/models/memory_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/constants/notebook_types.dart';
 import '../../core/services/user_service.dart';
+import '../memories/widgets/memory_polaroid.dart';
+import '../memories/widgets/import_media_cta.dart';
 import 'share_notebook_sheet.dart';
 
 class NotebookDashboardScreen extends StatelessWidget {
@@ -128,12 +130,19 @@ class _DashboardBodyState extends State<_DashboardBody> {
         slivers: [
           _buildHeader(context),
           SliverPadding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 100),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 40),
             sliver: SliverList(
               delegate: SliverChildListDelegate([
-                // CTA livre — toujours accessible dès qu'il y a un souvenir.
-                // L'exigence n'est plus un nombre de souvenirs mais le minimum
-                // d'impression (29 pages), rappelé sur la carte.
+                // Même bouton d'ajout que le dashboard (importer des médias →
+                // créer un souvenir), à la place de l'ancien FAB.
+                const SizedBox(height: 16),
+                ImportMediaCta(
+                  padding: EdgeInsets.zero,
+                  onTap: () => context
+                      .push('/notebook/${notebook.id}/add-memory?import=1'),
+                ),
+                // CTA livre — génère un livre imprimé (le minimum d'impression
+                // de 29 pages est rappelé sur la carte).
                 if (total > 0) ...[
                   const SizedBox(height: 16),
                   _BookCta(count: total, notebookId: notebook.id),
@@ -145,8 +154,11 @@ class _DashboardBodyState extends State<_DashboardBody> {
                   _MemoryTimeline(notebook: notebook, memories: memories),
                   const SizedBox(height: 20),
                 ],
-                _ShortcutsRow(notebook: notebook),
-                const SizedBox(height: 24),
+                // Accès courbe de croissance (enfant / carnet « Moi »).
+                if (_showGrowth) ...[
+                  _GrowthShortcut(notebook: notebook),
+                  const SizedBox(height: 24),
+                ],
                 if (memories.isNotEmpty) ...[
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -170,35 +182,50 @@ class _DashboardBodyState extends State<_DashboardBody> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  ...memories
-                      .take(3)
-                      .map((m) => _MemoryPreviewTile(memory: m, notebookId: notebook.id)),
+                  // Derniers souvenirs en polaroïdes (rangée horizontale).
+                  SizedBox(
+                    height: 210,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      itemCount: memories.take(3).length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 14),
+                      itemBuilder: (_, i) {
+                        final m = memories[i];
+                        return SizedBox(
+                          width: 145,
+                          child: MemoryPolaroid(
+                            memory: m,
+                            cat: _safeCat(m.type),
+                            tilt: (i % 2 == 0) ? -0.02 : 0.02,
+                            onTap: () => context.push(
+                                '/notebook/${notebook.id}/edit-memory/${m.id}'),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
                 ],
               ]),
             ),
           ),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          // Carnets avec suivi de croissance (enfant / poids) → menu de choix ;
-          // ailleurs, accès direct au nouveau souvenir.
-          final showGrowth = notebook.type == 'enfant' ||
-              getNotebookTypeById(notebook.type).hasWeightTracking;
-          if (showGrowth) {
-            _showAddMenu(context);
-          } else {
-            context.push('/notebook/${notebook.id}/add-memory');
-          }
-        },
-        backgroundColor: AppColors.sage,
-        foregroundColor: AppColors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Ajouter'),
-        shape: const StadiumBorder(),
-      ),
       ),
     );
+  }
+
+  // Carnets avec suivi de croissance (enfant / poids) → bouton courbe.
+  bool get _showGrowth =>
+      notebook.type == 'enfant' ||
+      getNotebookTypeById(notebook.type).hasWeightTracking;
+
+  MilestoneCategory? _safeCat(String type) {
+    try {
+      return getMilestoneCategoryById(type);
+    } catch (_) {
+      return null;
+    }
   }
 
   // Ligne « Partagé avec · avatars +N » (tap → gestion). Si personne, propose
@@ -299,54 +326,6 @@ class _DashboardBodyState extends State<_DashboardBody> {
     );
   }
 
-  // Menu « + » pour les carnets avec suivi de croissance : nouveau souvenir
-  // ou nouvelle mesure (poids & taille → courbe de croissance).
-  void _showAddMenu(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: AppColors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (_) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(height: 8),
-            Container(
-              width: 36,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.softGray.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 8),
-            ListTile(
-              leading: const Icon(Icons.edit_note_outlined, color: AppColors.sage),
-              title: const Text('Nouveau souvenir'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/notebook/${notebook.id}/add-memory');
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.monitor_weight_outlined,
-                  color: AppColors.sage),
-              title: const Text('Nouveau poids & taille'),
-              subtitle: const Text('Pour la courbe de croissance'),
-              onTap: () {
-                Navigator.pop(context);
-                context.push('/notebook/${notebook.id}/growth?add=1');
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
   void _showNotebookMenu(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -404,6 +383,12 @@ class _DashboardBodyState extends State<_DashboardBody> {
         onPressed: () => context.go('/home'),
       ),
       actions: [
+        // Le livre en haut à droite (comme sur le dashboard).
+        IconButton(
+          icon: const Icon(Icons.menu_book_outlined, color: Colors.white),
+          tooltip: 'Le livre',
+          onPressed: () => context.push('/notebook/${notebook.id}/books'),
+        ),
         IconButton(
           icon: const Icon(Icons.person_add_outlined, color: Colors.white),
           tooltip: 'Partager',
@@ -952,239 +937,40 @@ class _TimelineDetailCard extends StatelessWidget {
   }
 }
 
-class _ShortcutsRow extends StatelessWidget {
+// Accès rapide à la courbe de croissance (enfant → courbes OMS ; carnet
+// « Moi » → suivi de poids). Le journal a été retiré (doublon de « Voir tout »)
+// et le livre est passé en haut à droite.
+class _GrowthShortcut extends StatelessWidget {
   final NotebookModel notebook;
-  const _ShortcutsRow({required this.notebook});
+  const _GrowthShortcut({required this.notebook});
 
   @override
   Widget build(BuildContext context) {
-    // Courbe OMS pour l'enfant ; courbe de poids pour le carnet « Moi » (adulte).
     final isChild = notebook.type == 'enfant';
-    final hasWeight =
-        getNotebookTypeById(notebook.type).hasWeightTracking;
-    final showGrowth = isChild || hasWeight;
-    return Row(
-      children: [
-        _ShortcutBtn(
-          emoji: '📔',
-          label: 'Journal',
-          onTap: () => context.push('/notebook/${notebook.id}/memories'),
-        ),
-        const SizedBox(width: 10),
-        _ShortcutBtn(
-          emoji: showGrowth ? '📊' : '📈',
-          label: isChild ? 'Courbes' : (hasWeight ? 'Poids' : 'Stats'),
-          onTap: showGrowth
-              ? () => context.push('/notebook/${notebook.id}/growth')
-              : null,
-        ),
-        const SizedBox(width: 10),
-        _ShortcutBtn(
-          emoji: '📖',
-          label: 'Livre',
-          onTap: () => context.push('/notebook/${notebook.id}/books'),
-        ),
-      ],
-    );
-  }
-}
-
-class _ShortcutBtn extends StatelessWidget {
-  final String emoji;
-  final String label;
-  final VoidCallback? onTap;
-
-  const _ShortcutBtn(
-      {required this.emoji, required this.label, this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final active = onTap != null;
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 14),
-          decoration: BoxDecoration(
-            color: active ? AppColors.white : AppColors.white.withOpacity(0.5),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: AppColors.border, width: 0.5),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(emoji,
-                  style: TextStyle(
-                      fontSize: 22,
-                      color: active ? null : AppColors.softGray)),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: active ? AppColors.textDark : AppColors.softGray,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _MemoryPreviewTile extends StatelessWidget {
-  final MemoryModel memory;
-  final String notebookId;
-  const _MemoryPreviewTile({required this.memory, required this.notebookId});
-
-  String get _typeLabel {
-    try {
-      final cat = getMilestoneCategoryById(memory.type);
-      return '${cat.emoji} ${cat.label}';
-    } catch (_) {
-      return memory.type;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final hasPhoto = memory.photoUrl != null && memory.photoUrl!.isNotEmpty;
-    final hasVideo = memory.videoKeys.isNotEmpty;
-    const thumbRadius = BorderRadius.only(
-      topLeft: Radius.circular(12),
-      bottomLeft: Radius.circular(12),
-    );
     return GestureDetector(
-      onTap: () => context.push('/notebook/$notebookId/memories?filter=${memory.type}'),
+      onTap: () => context.push('/notebook/${notebook.id}/growth'),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
         decoration: BoxDecoration(
           color: AppColors.white,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(14),
           border: Border.all(color: AppColors.border, width: 0.5),
         ),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            if (hasPhoto)
-              ClipRRect(
-                borderRadius: thumbRadius,
-                child: Stack(
-                  children: [
-                    CachedNetworkImage(
-                      imageUrl: memory.photoUrl!,
-                      width: 64,
-                      height: 64,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
-                          width: 64, height: 64, color: AppColors.background),
-                      errorWidget: (_, __, ___) => Container(
-                          width: 64,
-                          height: 64,
-                          color: AppColors.background,
-                          child: const Icon(Icons.broken_image_outlined,
-                              color: AppColors.softGray, size: 20)),
-                    ),
-                    // Petit badge ▶ si le souvenir porte aussi des vidéos.
-                    if (hasVideo)
-                      const Positioned(
-                        bottom: 3,
-                        right: 3,
-                        child: Icon(Icons.play_circle_fill,
-                            color: Colors.white, size: 18,
-                            shadows: [
-                              Shadow(color: Colors.black54, blurRadius: 3)
-                            ]),
-                      ),
-                  ],
-                ),
-              )
-            // Souvenir sans photo mais avec vidéo(s) : vignette placeholder.
-            else if (hasVideo)
-              ClipRRect(
-                borderRadius: thumbRadius,
-                child: Container(
-                  width: 64,
-                  height: 64,
-                  color: const Color(0xFF2D2D2D),
-                  child: const Icon(Icons.play_circle_outline,
-                      color: Colors.white, size: 26),
-                ),
-              ),
+            Text(isChild ? '📊' : '📈', style: const TextStyle(fontSize: 22)),
+            const SizedBox(width: 12),
             Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _typeLabel,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.sage,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          if (memory.title != null && memory.title!.isNotEmpty) ...[
-                            Text(
-                              memory.title!,
-                              style: const TextStyle(
-                                fontFamily: 'PlayfairDisplay',
-                                fontSize: 13,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textDark,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                          ],
-                          if (memory.location != null && memory.location!.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                const Icon(Icons.place_outlined, size: 11, color: AppColors.softGray),
-                                const SizedBox(width: 2),
-                                Expanded(
-                                  child: Text(
-                                    memory.location!,
-                                    style: const TextStyle(fontSize: 11, color: AppColors.softGray),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 3),
-                          ],
-                          Text(
-                            memory.rawContent,
-                            style: const TextStyle(
-                                color: AppColors.textDark,
-                                fontSize: 13,
-                                height: 1.4),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      DateFormat('d MMM', 'fr').format(memory.date),
-                      style: const TextStyle(
-                          fontSize: 11, color: AppColors.textMedium),
-                    ),
-                  ],
+              child: Text(
+                isChild ? 'Courbes de croissance' : 'Suivi du poids',
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDark,
                 ),
               ),
             ),
+            const Icon(Icons.chevron_right, color: AppColors.softGray, size: 20),
           ],
         ),
       ),

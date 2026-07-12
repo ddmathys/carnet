@@ -109,8 +109,10 @@ final _router = GoRouter(
     ),
     GoRoute(
       path: '/notebook/:notebookId/add-memory',
-      builder: (_, state) =>
-          MemoryCreateScreen(notebookId: state.pathParameters['notebookId']!),
+      builder: (_, state) => MemoryCreateScreen(
+        notebookId: state.pathParameters['notebookId']!,
+        startImport: state.uri.queryParameters['import'] == '1',
+      ),
     ),
     GoRoute(
       path: '/notebook/:notebookId/edit-memory/:memoryId',

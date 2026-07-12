@@ -6,11 +6,15 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
+import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
+import '../../core/constants/milestone_types.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
 import '../library/book_shelf.dart';
+import '../memories/widgets/memory_polaroid.dart';
+import '../memories/widgets/import_media_cta.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -28,6 +32,8 @@ class _HomeScreenState extends State<HomeScreen> {
   // Nombre réel de souvenirs par carnet (le champ notebook.memoriesCount n'est
   // jamais incrémenté → on compte en direct via une requête d'agrégation).
   Map<String, int> _memCounts = {};
+  // 3 souvenirs les plus récents (tous carnets confondus) pour le dashboard.
+  List<MemoryModel> _recentMemories = [];
   StreamSubscription? _ownSub;
   StreamSubscription? _sharedSub;
 
@@ -62,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
               .compareTo(a.lastMemoryAt ?? a.createdAt));
       });
       _refreshMemCounts();
+      _refreshRecentMemories();
     });
 
     _sharedSub = FirebaseFirestore.instance
@@ -78,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
               .compareTo(a.lastMemoryAt ?? a.createdAt));
       });
       _refreshMemCounts();
+      _refreshRecentMemories();
     });
   }
 
@@ -100,6 +108,34 @@ class _HomeScreenState extends State<HomeScreen> {
       } catch (_) {}
     }));
     if (mounted) setState(() => _memCounts = counts);
+  }
+
+  // Les 3 souvenirs les plus récents, tous carnets confondus. Les souvenirs
+  // sont indexés par `notebookId` (pas `userId`) → on interroge par lots de 10
+  // (limite `whereIn`), on fusionne et on trie côté client. Rafraîchi quand la
+  // liste des carnets change (un nouveau souvenir met à jour son carnet).
+  Future<void> _refreshRecentMemories() async {
+    final ids = <String>{
+      ..._ownNotebooks.map((n) => n.id),
+      ..._sharedNotebooks.map((n) => n.id),
+    }.toList();
+    if (ids.isEmpty) {
+      if (mounted) setState(() => _recentMemories = []);
+      return;
+    }
+    final all = <MemoryModel>[];
+    for (var i = 0; i < ids.length; i += 10) {
+      final batch = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
+      try {
+        final snap = await FirebaseFirestore.instance
+            .collection('memories')
+            .where('notebookId', whereIn: batch)
+            .get();
+        all.addAll(snap.docs.map((d) => MemoryModel.fromFirestore(d)));
+      } catch (_) {}
+    }
+    all.sort((a, b) => b.date.compareTo(a.date));
+    if (mounted) setState(() => _recentMemories = all.take(3).toList());
   }
 
   Future<void> _loadQuota() async {
@@ -128,6 +164,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return CustomScrollView(
       slivers: [
+        // 1) Logo
         SliverToBoxAdapter(
           child: _TopBar(
             initial: _initial,
@@ -138,91 +175,96 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         ),
         SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
+
+        // 2) Le livre → page « créer un livre »
         SliverToBoxAdapter(
-          child: _CreateMemoryCta(onTap: () => _startCreateMemory(context)),
+          child: _CreateBookCta(onTap: () => context.push('/book/select')),
+        ),
+
+        // 3) Importer des médias (créer un souvenir)
+        SliverToBoxAdapter(
+          child: ImportMediaCta(onTap: () => _startCreateMemory(context)),
         ),
 
         // ── Commandes en cours ───────────────────────────────────────
         _ActiveOrdersBanner(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
 
+        // 4) Mes derniers souvenirs (3, format polaroïde)
+        if (_recentMemories.isNotEmpty) ...[
+          _sectionHeader('Mes derniers souvenirs', ''),
+          SliverToBoxAdapter(child: _recentMemoriesRail(context)),
+        ],
+
+        // 5) Mes carnets (même format) + bouton « + » à la fin
         if (isEmpty)
-          const SliverFillRemaining(child: _EmptyState())
+          const SliverToBoxAdapter(child: _EmptyState())
         else ...[
           if (allOwn.isNotEmpty) ...[
             _sectionHeader('Mes carnets',
                 '${allOwn.length} carnet${allOwn.length > 1 ? 's' : ''}'),
-            SliverToBoxAdapter(child: _carnetRail(context, allOwn, true)),
+            SliverToBoxAdapter(
+              child: _carnetRail(context, allOwn, true,
+                  onAdd: () => context.push('/notebook/create/template')),
+            ),
           ],
           if (allShared.isNotEmpty) ...[
             _sectionHeader('Partagés avec moi', '${allShared.length}'),
             SliverToBoxAdapter(child: _carnetRail(context, allShared, false)),
           ],
-          _sectionHeader('Mes statistiques', ''),
-          SliverToBoxAdapter(child: _statsRail(allOwn.length + allShared.length)),
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
+        const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );
   }
 
-  Widget _statsRail(int carnetCount) {
-    final totalMem = _memCounts.values.fold<int>(0, (s, c) => s + c);
-    final stats = <Widget>[
-      _StatCard(
-          emoji: '📖',
-          value: '$carnetCount',
-          label: 'carnets',
-          tint: const Color(0xFFFBE4DB),
-          iconColor: AppColors.sage),
-      _StatCard(
-          emoji: '📷',
-          value: '${_quota?.current ?? 0}',
-          label: 'photos',
-          tint: const Color(0xFFE2F0E3),
-          iconColor: const Color(0xFF7BA87E)),
-      _StatCard(
-          emoji: '🎬',
-          value: '${_videoQuota?.current ?? 0}',
-          label: 'vidéos',
-          tint: const Color(0xFFEDE7F7),
-          iconColor: const Color(0xFF9B8BC4)),
-      _StatCard(
-          emoji: '🎙',
-          value: '${_audioQuota?.current ?? 0}',
-          label: 'audios',
-          tint: const Color(0xFFFAF0DD),
-          iconColor: AppColors.amber),
-      _StatCard(
-          emoji: '✎',
-          value: '$totalMem',
-          label: 'souvenirs',
-          tint: const Color(0xFFFBE4DB),
-          iconColor: AppColors.sage),
-    ];
+  // Rangée horizontale des 3 derniers souvenirs (format polaroïde partagé).
+  Widget _recentMemoriesRail(BuildContext context) {
     return SizedBox(
-      height: 108,
+      height: 210,
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(22, 2, 22, 8),
-        itemCount: stats.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 10),
-        itemBuilder: (_, i) => stats[i],
+        padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+        itemCount: _recentMemories.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (_, i) {
+          final m = _recentMemories[i];
+          return SizedBox(
+            width: 145,
+            child: MemoryPolaroid(
+              memory: m,
+              cat: _safeCat(m.type),
+              tilt: (i % 2 == 0) ? -0.02 : 0.02,
+              onTap: () => context
+                  .push('/notebook/${m.notebookId}/edit-memory/${m.id}'),
+            ),
+          );
+        },
       ),
     );
   }
 
+  MilestoneCategory? _safeCat(String type) {
+    try {
+      return getMilestoneCategoryById(type);
+    } catch (_) {
+      return null;
+    }
+  }
+
   // Carnets en livres sur une étagère (les uns après les autres).
   Widget _carnetRail(
-      BuildContext context, List<NotebookModel> list, bool owner) {
+      BuildContext context, List<NotebookModel> list, bool owner,
+      {VoidCallback? onAdd}) {
     return BookShelfRail(
       books: [for (final n in list) _notebookBook(context, n, owner)],
+      onAdd: onAdd,
     );
   }
 
   ShelfBook _notebookBook(
       BuildContext context, NotebookModel n, bool owner) {
-    final count = _memCounts[n.id] ?? n.memoriesCount;
-    final h = 150.0 + (count.clamp(0, 12) * 3.5);
+    // Tous les carnets au même format (même hauteur / largeur).
+    const h = 176.0;
     Color color;
     try {
       color =
@@ -265,8 +307,9 @@ class _HomeScreenState extends State<HomeScreen> {
     return e.isNotEmpty ? e[0].toUpperCase() : '·';
   }
 
-  // Nouveau flux : créer un souvenir → choisir le carnet cible → formulaire
-  // (le formulaire s'adapte déjà au type du carnet côté écran de création).
+  // Flux « importer des médias » : choisir le carnet cible → écran de création
+  // qui ouvre directement la galerie (?import=1), puis l'utilisateur finalise
+  // le formulaire (titre, description facultative, date, lieu).
   Future<void> _startCreateMemory(BuildContext context) async {
     final books = _ownNotebooks;
     if (books.isEmpty) {
@@ -274,7 +317,7 @@ class _HomeScreenState extends State<HomeScreen> {
       return;
     }
     if (books.length == 1) {
-      context.push('/notebook/${books.first.id}/add-memory');
+      context.push('/notebook/${books.first.id}/add-memory?import=1');
       return;
     }
     final chosen = await showModalBottomSheet<String>(
@@ -283,7 +326,7 @@ class _HomeScreenState extends State<HomeScreen> {
       builder: (_) => _PickNotebookSheet(notebooks: books),
     );
     if (chosen != null && context.mounted) {
-      context.push('/notebook/$chosen/add-memory');
+      context.push('/notebook/$chosen/add-memory?import=1');
     }
   }
 
@@ -361,35 +404,11 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Plus de FAB : le livre et la création de carnet ont leurs propres entrées
+    // dans le corps du dashboard (bouton livre en haut, « + » sur l'étagère).
     return Scaffold(
       backgroundColor: AppColors.background,
       body: _buildBody(context),
-      floatingActionButton: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          // Secondary FAB: create book
-          FloatingActionButton.extended(
-            heroTag: 'book',
-            onPressed: () => context.push('/book/select'),
-            backgroundColor: AppColors.earth,
-            foregroundColor: Colors.white,
-            icon: const Icon(Icons.menu_book_outlined, size: 20),
-            label: const Text('Créer un livre',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-            shape: const StadiumBorder(),
-          ),
-          const SizedBox(height: 10),
-          // Primary FAB: new notebook
-          FloatingActionButton.extended(
-            heroTag: 'notebook',
-            onPressed: () => context.push('/notebook/create/template'),
-            icon: const Icon(Icons.add),
-            label: const Text('Nouveau carnet'),
-            shape: const StadiumBorder(),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -419,29 +438,48 @@ class _TopBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 10, 18, 2),
         child: Row(
           children: [
-            Transform.rotate(
-              angle: -0.07,
-              child: Container(
-                width: 34,
-                height: 34,
-                decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.sage, width: 2),
-                  borderRadius: BorderRadius.circular(9),
-                ),
-                child: const Center(
-                  child: Text('♥',
-                      style: TextStyle(color: AppColors.sage, fontSize: 15)),
-                ),
+            // Logo repensé (terracotta) : badge plein + mot « Carnet » sur une
+            // ligne, dans la police serif de la nouvelle identité.
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: AppColors.sageDark,
+                borderRadius: BorderRadius.circular(11),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.sageDark.withOpacity(0.35),
+                    blurRadius: 10,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
               ),
+              child: const Icon(Icons.auto_stories_rounded,
+                  color: Colors.white, size: 20),
             ),
-            const SizedBox(width: 9),
-            const Text('Carnet',
-                style: TextStyle(
-                  fontFamily: 'Caveat',
-                  fontSize: 30,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.sage,
-                )),
+            const SizedBox(width: 10),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: const [
+                Text('Carnet',
+                    style: TextStyle(
+                      fontFamily: 'Fraunces',
+                      fontSize: 25,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textDark,
+                      height: 1,
+                    )),
+                SizedBox(width: 2),
+                Text('.',
+                    style: TextStyle(
+                      fontFamily: 'Fraunces',
+                      fontSize: 25,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.sageDark,
+                      height: 1,
+                    )),
+              ],
+            ),
             const Spacer(),
             _SpaceGauge(ratio: maxUsage, warn: warn, onTap: onSpace),
             const SizedBox(width: 12),
@@ -560,60 +598,65 @@ class _HeroGreeting extends StatelessWidget {
   }
 }
 
-class _CreateMemoryCta extends StatelessWidget {
+// « Le livre » : bandeau cliquable menant à la page de création de livre.
+class _CreateBookCta extends StatelessWidget {
   final VoidCallback onTap;
-  const _CreateMemoryCta({required this.onTap});
+  const _CreateBookCta({required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 16, 22, 18),
+      padding: const EdgeInsets.fromLTRB(22, 6, 22, 4),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
-          padding: const EdgeInsets.all(18),
+          padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: AppColors.sageTint,
+            gradient: const LinearGradient(
+              colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
             borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF3C2814).withOpacity(0.28),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
           ),
           child: Row(
             children: [
               Container(
-                width: 62,
-                height: 62,
+                width: 54,
+                height: 54,
                 decoration: BoxDecoration(
-                  color: AppColors.sageDark,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppColors.sageDark.withOpacity(0.45),
-                      blurRadius: 18,
-                      offset: const Offset(0, 8),
-                    ),
-                  ],
+                  color: Colors.white.withOpacity(0.16),
+                  borderRadius: BorderRadius.circular(16),
                 ),
-                child: const Icon(Icons.add, color: Colors.white, size: 32),
+                child: const Icon(Icons.menu_book_rounded,
+                    color: Colors.white, size: 28),
               ),
               const SizedBox(width: 16),
               const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Créer un souvenir',
+                    Text('Créer un livre',
                         style: TextStyle(
                           fontFamily: 'Fraunces',
                           fontSize: 19,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.textDark,
+                          color: Colors.white,
                         )),
                     SizedBox(height: 3),
-                    Text('Photo, vidéo, audio ou texte.',
-                        style: TextStyle(
-                            fontSize: 12.5, color: AppColors.textMedium)),
+                    Text('Transforme tes souvenirs en livre imprimé.',
+                        style: TextStyle(fontSize: 12.5, color: Colors.white70)),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right, color: AppColors.sage),
+              const Icon(Icons.chevron_right, color: Colors.white70),
             ],
           ),
         ),
@@ -763,63 +806,6 @@ class _NewCarnetCard extends StatelessWidget {
                     color: AppColors.sage)),
           ],
         ),
-      ),
-    );
-  }
-}
-
-class _StatCard extends StatelessWidget {
-  final String emoji;
-  final String value;
-  final String label;
-  final Color tint;
-  final Color iconColor;
-  const _StatCard({
-    required this.emoji,
-    required this.value,
-    required this.label,
-    required this.tint,
-    required this.iconColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 96,
-      padding: const EdgeInsets.all(13),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-              color: const Color(0xFF785A46).withOpacity(0.07),
-              blurRadius: 10,
-              offset: const Offset(0, 2)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 34,
-            height: 34,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-                color: tint, borderRadius: BorderRadius.circular(11)),
-            child: Text(emoji, style: const TextStyle(fontSize: 16)),
-          ),
-          const SizedBox(height: 9),
-          Text(value,
-              style: const TextStyle(
-                  fontFamily: 'Fraunces',
-                  fontSize: 21,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textDark,
-                  height: 1)),
-          Text(label,
-              style: const TextStyle(
-                  fontSize: 11.5, color: AppColors.textMedium)),
-        ],
       ),
     );
   }

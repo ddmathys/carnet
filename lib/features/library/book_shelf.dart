@@ -244,13 +244,20 @@ class ShelfPlank extends StatelessWidget {
 }
 
 /// Étagère horizontale défilante (dashboard : peu de carnets).
+/// [onAdd] ≠ null → un bouton « + » (aux mêmes dimensions qu'un livre) est
+/// ajouté à la fin de la rangée pour créer un nouveau carnet.
 class BookShelfRail extends StatelessWidget {
   final List<ShelfBook> books;
-  const BookShelfRail({super.key, required this.books});
+  final VoidCallback? onAdd;
+  const BookShelfRail({super.key, required this.books, this.onAdd});
 
   @override
   Widget build(BuildContext context) {
-    final maxH = books.fold<double>(0, (m, b) => b.height > m ? b.height : m);
+    // Hauteur/largeur de référence (tous les livres partagent le même format).
+    final refW = books.isNotEmpty ? books.first.width : 104.0;
+    final refH = books.fold<double>(0, (m, b) => b.height > m ? b.height : m);
+    final maxH = refH > 0 ? refH : 176.0;
+    final itemCount = books.length + (onAdd != null ? 1 : 0);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -259,20 +266,73 @@ class BookShelfRail extends StatelessWidget {
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.fromLTRB(26, 12, 26, 0),
-            itemCount: books.length,
+            itemCount: itemCount,
             separatorBuilder: (_, __) => const SizedBox(width: 6),
-            itemBuilder: (_, i) => SizedBox(
-              width: books[i].width,
-              height: maxH + 14,
-              child: Align(
-                alignment: Alignment.bottomLeft,
-                child: books[i],
-              ),
-            ),
+            itemBuilder: (_, i) {
+              final isAdd = onAdd != null && i == books.length;
+              return SizedBox(
+                width: isAdd ? refW : books[i].width,
+                height: maxH + 14,
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: isAdd
+                      ? _AddBook(width: refW, height: maxH, onTap: onAdd!)
+                      : books[i],
+                ),
+              );
+            },
           ),
         ),
         const ShelfPlank(),
       ],
+    );
+  }
+}
+
+/// Tuile « + » au format d'un livre, pour ajouter un carnet depuis l'étagère.
+class _AddBook extends StatelessWidget {
+  final double width;
+  final double height;
+  final VoidCallback onTap;
+  const _AddBook(
+      {required this.width, required this.height, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: width,
+        height: height,
+        decoration: BoxDecoration(
+          color: const Color(0xFFF3E9DC).withOpacity(0.55),
+          borderRadius: BorderRadius.circular(4),
+          border: Border.all(
+            color: _gold.withOpacity(0.8),
+            width: 1.4,
+          ),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.add, color: _woodDark.withOpacity(0.8), size: 28),
+            const SizedBox(height: 6),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: Text(
+                'Nouveau\ncarnet',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: _woodDark.withOpacity(0.85),
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  height: 1.15,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

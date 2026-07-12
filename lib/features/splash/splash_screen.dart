@@ -45,7 +45,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       if (!mounted) return;
       context.go('/home');
     } else {
-      context.go('/welcome');
+      // Non connecté → directement le login (la page « souvenirs protégés »
+      // n'est plus imposée en plein écran, elle est en option dans le login).
+      context.go('/auth');
     }
   }
 

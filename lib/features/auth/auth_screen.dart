@@ -51,15 +51,17 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     'assets/welcome/m11.jpg', 'assets/welcome/m12.jpg',
   ];
 
-  // 4 emplacements de polaroids (cluster haut-droite), inspirés de la maquette.
+  // 5 polaroids répartis dans le héros (cluster haut-droite + une photo à
+  // gauche pour un rendu plus imagé), inspirés de la maquette.
   static const _slots = <_Slot>[
-    _Slot(top: 58, right: 12, w: 118, h: 140, rot: 0.16, depth: 22, phase: 0.15),
-    _Slot(top: 150, right: 92, w: 90, h: 106, rot: -0.21, depth: 16, phase: 0.35),
-    _Slot(top: 36, right: 116, w: 82, h: 98, rot: -0.07, depth: 11, phase: 0.5),
-    _Slot(top: 172, right: 4, w: 72, h: 86, rot: 0.26, depth: 8, phase: 0.62),
+    _Slot(top: 74, right: 14, w: 128, h: 152, rot: 0.15, depth: 22, phase: 0.15),
+    _Slot(top: 186, right: 104, w: 98, h: 116, rot: -0.20, depth: 16, phase: 0.35),
+    _Slot(top: 44, right: 132, w: 88, h: 104, rot: -0.07, depth: 11, phase: 0.5),
+    _Slot(top: 210, right: 6, w: 80, h: 94, rot: 0.24, depth: 8, phase: 0.62),
+    _Slot(top: 128, right: 214, w: 76, h: 90, rot: -0.16, depth: 6, phase: 0.28),
   ];
 
-  late final List<String> _deck; // 4 photos tirées au hasard
+  late final List<String> _deck; // 5 photos tirées au hasard
   late final AnimationController _aurora;
   late final AnimationController _shine;
   late final AnimationController _float;
@@ -70,7 +72,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     // Aléatoire à chaque arrivée sur l'écran.
-    _deck = (List<String>.from(_allPhotos)..shuffle()).take(4).toList();
+    _deck = (List<String>.from(_allPhotos)..shuffle()).take(5).toList();
     _aurora = AnimationController(
         vsync: this, duration: const Duration(seconds: 18))
       ..repeat(reverse: true);
@@ -205,26 +207,160 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
         _ => 'Une erreur est survenue. Réessaie.',
       };
 
+  // Détail « Tes souvenirs, protégés » — en option depuis le login (remplace
+  // l'ancienne page d'accueil imposée aux utilisateurs non connectés).
+  void _showSecuritySheet(BuildContext context) {
+    const points = <(IconData, String, String)>[
+      (
+        Icons.lock_outline,
+        'Privé par défaut',
+        'Chaque carnet n\'est visible que par toi et les proches que tu invites. Personne d\'autre.'
+      ),
+      (
+        Icons.shield_outlined,
+        'Photos & vidéos protégées',
+        'Stockées de façon privée, accessibles uniquement via des liens sécurisés et temporaires.'
+      ),
+      (
+        Icons.verified_user_outlined,
+        'Connexion sécurisée',
+        'Via Google ou email, gérée par Firebase. L\'app ne conserve jamais ton mot de passe.'
+      ),
+      (
+        Icons.import_export,
+        'Tu gardes le contrôle',
+        'Exporte tes souvenirs en livre ou supprime-les définitivement, quand tu veux.'
+      ),
+    ];
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: _cream,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      ),
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 44,
+                  height: 5,
+                  margin: const EdgeInsets.only(bottom: 18),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFD3C8AC),
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                ),
+              ),
+              const Text('Tes souvenirs, en sécurité',
+                  style: TextStyle(
+                    fontFamily: 'PlayfairDisplay',
+                    fontWeight: FontWeight.w800,
+                    fontSize: 24,
+                    color: _ink,
+                  )),
+              const SizedBox(height: 6),
+              const Text(
+                'Pensé pour la confidentialité et la transparence.',
+                style: TextStyle(color: _muted, fontSize: 14, height: 1.35),
+              ),
+              const SizedBox(height: 18),
+              for (final (icon, title, desc) in points)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Container(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: _green700.withOpacity(0.12),
+                          borderRadius: BorderRadius.circular(11),
+                        ),
+                        child: Icon(icon, color: _green700, size: 21),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(title,
+                                style: const TextStyle(
+                                  color: _ink,
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                )),
+                            const SizedBox(height: 3),
+                            Text(desc,
+                                style: const TextStyle(
+                                  color: _muted,
+                                  fontSize: 13,
+                                  height: 1.35,
+                                )),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              const SizedBox(height: 4),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: () => Navigator.pop(context),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _green700,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 15),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16)),
+                    textStyle: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 15.5),
+                  ),
+                  child: const Text('Compris'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final kb = MediaQuery.of(context).viewInsets.bottom;
+    final size = MediaQuery.of(context).size;
+    // Hero à hauteur fixe (généreuse) pour que les photos soient toujours
+    // visibles en haut ; tout l'écran défile → l'utilisateur scrolle pour
+    // atteindre le formulaire (plus simple que de tout tasser).
+    final heroHeight = math.max(430.0, size.height * 0.54);
     return Scaffold(
-      backgroundColor: _green900,
-      resizeToAvoidBottomInset: false,
-      body: Column(
-        children: [
-          Expanded(child: _buildHero()),
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
-            transform: Matrix4.translationValues(0, -kb, 0),
-            decoration: const BoxDecoration(
-              color: _cream,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+      backgroundColor: _cream,
+      body: SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: Column(
+          children: [
+            SizedBox(height: heroHeight, child: _buildHero()),
+            // Feuille crème qui remonte légèrement sur le héros (coins arrondis).
+            Transform.translate(
+              offset: const Offset(0, -28),
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: _cream,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
+                ),
+                child: _buildForm(),
+              ),
             ),
-            child: _buildForm(),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -233,13 +369,15 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   Widget _buildHero() {
     return ClipRect(
       child: GestureDetector(
-        onPanUpdate: (d) => setState(() {
+        // Parallaxe horizontale uniquement : les drags verticaux passent au
+        // défilement de la page (sinon le scroll serait capté par le héros).
+        onHorizontalDragUpdate: (d) => setState(() {
           _parallax = Offset(
             (_parallax.dx + d.delta.dx).clamp(-24.0, 24.0),
-            (_parallax.dy + d.delta.dy).clamp(-16.0, 16.0),
+            0,
           );
         }),
-        onPanEnd: (_) => setState(() => _parallax = Offset.zero),
+        onHorizontalDragEnd: (_) => setState(() => _parallax = Offset.zero),
         child: Stack(
           children: [
             // Fond aurora animé
@@ -445,10 +583,11 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
   }
 
   // ── Feuille crème : formulaire + badges de confiance ───────────────────────
+  // (Non scrollable : le défilement est géré par la page entière.)
   Widget _buildForm() {
-    return SingleChildScrollView(
+    return Padding(
       padding: EdgeInsets.fromLTRB(
-          28, 12, 28, MediaQuery.of(context).padding.bottom + 24),
+          28, 24, 28, MediaQuery.of(context).padding.bottom + 24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -479,48 +618,42 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
             style: const TextStyle(color: _muted, fontSize: 14.5, height: 1.35),
           ),
 
-          // Badges de confiance
-          const SizedBox(height: 20),
-          Row(
-            children: [
-              const Text('TES SOUVENIRS, PROTÉGÉS',
-                  style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.5,
-                    color: Color(0xFFA8844F),
-                  )),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Container(
-                    height: 1,
-                    color: _gold.withOpacity(0.4)),
+          // Sécurité en option : un lien discret ouvre le détail (plutôt qu'une
+          // page « souvenirs protégés » imposée en plein écran).
+          const SizedBox(height: 16),
+          GestureDetector(
+            onTap: () => _showSecuritySheet(context),
+            behavior: HitTestBehavior.opaque,
+            child: Container(
+              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFE7D2),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: const Color(0xFFDDD0B0)),
               ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Container(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 4),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFFECE2C9), Color(0xFFE5DBC0)],
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_outline,
+                      size: 18, color: Color(0xFFA8844F)),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text('Tes souvenirs, protégés',
+                        style: TextStyle(
+                          fontSize: 13.5,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF6B5330),
+                        )),
+                  ),
+                  const Text('En savoir plus',
+                      style: TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFFA8844F),
+                      )),
+                  const Icon(Icons.chevron_right,
+                      size: 18, color: Color(0xFFA8844F)),
+                ],
               ),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: const Color(0xFFDDD0B0)),
-            ),
-            child: const Row(
-              children: [
-                _TrustBadge(icon: Icons.lock_outline, label: 'Privé\npar défaut'),
-                _TrustDivider(),
-                _TrustBadge(
-                    icon: Icons.verified_user_outlined,
-                    label: 'Connexion\nsécurisée'),
-                _TrustDivider(),
-                _TrustBadge(
-                    icon: Icons.import_export, label: 'Export &\nsuppression'),
-              ],
             ),
           ),
 
@@ -715,51 +848,6 @@ class _Slot {
     required this.depth,
     required this.phase,
   });
-}
-
-class _TrustBadge extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  const _TrustBadge({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Expanded(
-      child: Column(
-        children: [
-          Container(
-            width: 46,
-            height: 46,
-            decoration: const BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [Color(0xFF3D5A48), Color(0xFF1A2D23)],
-              ),
-            ),
-            child: Icon(icon, color: Colors.white, size: 22),
-          ),
-          const SizedBox(height: 9),
-          Text(label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 12,
-                height: 1.2,
-                fontWeight: FontWeight.w700,
-                color: Color(0xFF233028),
-              )),
-        ],
-      ),
-    );
-  }
-}
-
-class _TrustDivider extends StatelessWidget {
-  const _TrustDivider();
-  @override
-  Widget build(BuildContext context) =>
-      Container(width: 1, height: 58, color: const Color(0xFFD9CDB1));
 }
 
 class _AuthField extends StatelessWidget {
