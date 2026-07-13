@@ -249,7 +249,8 @@ class TagService {
     final batch = _db.batch();
     for (final doc in memories) {
       final ids = List<String>.from(doc.data()['tagIds'] ?? []);
-      batch.update(doc.reference, {'sharedWith': _sharedUnion(ids, tagsById)});
+      batch.update(
+          doc.reference, {'sharedWith': _sharedUnion(ids, tagsById, uid)});
     }
     await batch.commit();
   }

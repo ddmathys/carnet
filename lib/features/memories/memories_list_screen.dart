@@ -276,32 +276,6 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
     }
   }
 
-  Widget _buildFilterChips(List<String> types) {
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        children: [
-          _FilterChip(
-            label: 'Tous',
-            selected: _filterType == null,
-            onTap: () => setState(() => _filterType = null),
-          ),
-          ...types.map((t) {
-            final cat = _safeCat(t);
-            return _FilterChip(
-              label: '${cat?.emoji ?? ''} ${cat?.label ?? t}',
-              selected: _filterType == t,
-              onTap: () => setState(
-                  () => _filterType = _filterType == t ? null : t),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
   MilestoneCategory? _safeCat(String type) {
     try {
       return getMilestoneCategoryById(type);
