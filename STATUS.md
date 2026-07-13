@@ -2,6 +2,95 @@
 
 Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
+---
+
+## ⚡ REPRISE — 13.07.2026 (soir) : les carnets sont devenus des tags
+
+**Tout est en prod** (`master`, dernier commit `fefa4da`) : APK compilé par
+GitHub Actions ✅, règles Firestore déployées ✅, backend Vercel déployé ✅.
+APK de test : `C:\Users\karin\Downloads\carnet-apk\app-release.apk` (97 Mo,
+signé avec le keystore fixe → s'installe par-dessus l'ancien).
+
+### Ce qui a changé
+
+Le **souvenir** devient l'objet central ; **les carnets disparaissent de l'UI**
+et sont remplacés par des **tags**. La collection `notebooks` reste en coulisse
+comme « espace » unique par utilisateur (`SpaceService`) : elle porte encore la
+sécurité héritée, les quotas et les clés de stockage R2. **Ne pas la supprimer.**
+
+- **Tags** (collection `tags`) : `label`, `kind` (`libre` / `annee` / `lieu` /
+  `enfant`), `color`, `birthdate` pour un tag enfant, `sharedWith`,
+  `invitedEmails`. À la création d'un souvenir, **l'année et le lieu sont
+  tagués d'office** (retirables).
+- **Souvenirs** : nouveaux champs `userId`, `tagIds`, `tagLabels`, `sharedWith`.
+  `sharedWith` = réunion des collaborateurs des tags **+ le propriétaire de
+  chaque tag**, moins le propriétaire du souvenir. C'est ce champ dénormalisé
+  que lisent les règles Firestore et le contrôle d'accès aux médias — il doit
+  être recopié à chaque changement de tag ou de partage
+  (`TagService._propagateSharing`).
+- **Partage par tag, par lien uniquement** (`api/tag/[action].ts` → `invite` /
+  `join`, Admin SDK) : l'invité voit et enrichit les souvenirs du tag, présents
+  et futurs. Pas d'invitation par email (l'invité n'a pas le droit d'écrire chez
+  le propriétaire tant qu'il n'a pas rejoint → impasse).
+- **Migration one-shot** (`TagMigrationService`, jouée au splash) : 1 carnet →
+  1 tag de même nom (partage repris), chaque souvenir reçoit le tag de son
+  carnet + celui de son année, `userId`/`sharedWith` remplis, `notebookId`
+  repointé sur l'espace. Flag `users/{uid}.tagsMigratedAt`. **Le lieu n'est PAS
+  tagué rétroactivement** (le texte libre aurait fabriqué des doublons).
+- **Écrans** : dashboard (import direct → `/memory/new?import=1`, filtre par
+  tags, **6 derniers souvenirs**, « Mes livres », « Créer un livre » **en bas**) ;
+  création (médias → titre → description facultative → date → lieu → tags →
+  **mémo vocal en dernier**) ; `/memories` ; `/book/select` (filtre par tags +
+  coche souvenir par souvenir) ; `/books` ; `/growth/:tagId` (tag enfant).
+- **Sélecteur de tags unique** (`tag_picker_sheet.dart`), utilisé partout :
+  sections **Date / Lieu / Événement**, multi-sélection, bouton Valider,
+  création à la volée. Filtre = **OU dans une catégorie, ET entre catégories**.
+- **Supprimés** : tous les écrans carnet, `book_shelf`, `multi_notebook_select`,
+  `notebook_share_service`, écrans `children`/`milestones` hérités.
+
+### ⚠️ À savoir
+
+- **Un collaborateur resté sur l'ANCIEN APK est bloqué** : il ne peut plus créer
+  (la règle exige `userId`) et ne voit plus rien (son app cherche encore par
+  `notebookId`, or les souvenirs ont été repointés sur l'espace). C'est ce qui
+  est arrivé à la femme de David → **elle doit installer le nouvel APK**.
+- **L'aperçu du livre était cassé depuis la refonte terracotta** (10.07), pas par
+  les tags : le PDF charge ses polices **par chemin** (`rootBundle`), or les
+  familles avaient été repointées vers Fraunces/Outfit → les TTF historiques
+  n'étaient plus embarqués dans l'APK (« Unable to load asset
+  PlayfairDisplay-Regular.ttf »). Corrigé en ajoutant `assets/fonts/` aux assets
+  du `pubspec.yaml`. **À revérifier sur device.**
+- Pas de SDK Flutter sur ce PC → **le build GitHub Actions est le compilateur**
+  (`gh run watch`, erreurs Dart via `gh run view <id> --log-failed`).
+
+### 🔜 Chantier suivant : tout migrer de Firebase Storage vers R2
+
+David veut **plus aucun média sur Firebase**. Aujourd'hui : les médias créés
+**depuis le 11.07 sont sur R2** ; les plus anciens sont restés sur Firebase
+Storage (URLs à jeton permanent, lues en double-lecture). Les uploads neufs vont
+tous sur R2 (`MediaUploadQueue`).
+
+Script déjà écrit : **`backend/scripts/firebase-to-r2.ts`** (`--scan` / `--copy`
+/ `--purge` ; la purge vérifie l'existence de la copie R2 avant toute
+suppression, et `--copy` note les chemins d'origine dans `legacyStoragePaths`).
+
+**Blocage à lever** : `vercel env pull` renvoie des **valeurs vides** (variables
+sensibles chiffrées) → impossible de lancer le script en local sans les secrets.
+Deux options, à trancher avec David :
+
+- **A (recommandé)** : exposer la migration en action d'administration sur le
+  backend Vercel (là où les clés vivent déjà), protégée par un jeton posé en
+  variable d'env, et la piloter par lots depuis le poste. Aucun secret ne
+  transite. ⚠️ Plan Hobby = **12 fonctions max** → greffer l'action sur une
+  route dynamique existante, ne PAS créer un nouveau fichier dans `api/`.
+- **B** : récupérer en local la clé de service Firebase (console → Comptes de
+  service) et les identifiants R2 (Cloudflare), puis lancer le script tel quel.
+
+Les **PDF des livres** (`pdfs/`, `orders/`) restent sur Firebase Storage : Gelato
+a besoin d'une URL stable. À traiter séparément si on veut vraiment tout fermer.
+
+---
+
 ## Contexte
 
 Bloom (nom de travail — aussi appelé Folio dans les prompts IA et Carnet dans
