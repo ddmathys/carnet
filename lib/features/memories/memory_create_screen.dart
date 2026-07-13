@@ -25,6 +25,7 @@ import '../../core/widgets/date_mask_field.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../milestones/widgets/growth_curve_chart.dart';
 import '../milestones/widgets/flexible_date_sheet.dart';
+import '../tags/tag_picker_sheet.dart';
 
 class MemoryCreateScreen extends StatefulWidget {
   final String? memoryId;
@@ -216,41 +217,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         _tagLabels.add(label);
         _dismissedAuto.remove(label);
       }
-    });
-  }
-
-  Future<void> _createTagDialog() async {
-    final ctrl = TextEditingController();
-    final label = await showDialog<String>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Nouveau tag',
-            style: TextStyle(
-                fontFamily: 'Fraunces',
-                fontWeight: FontWeight.w600,
-                color: AppColors.textDark)),
-        content: TextField(
-          controller: ctrl,
-          autofocus: true,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(hintText: 'Ex : Vacances, Léa, Amis…'),
-          onSubmitted: (v) => Navigator.pop(ctx, v),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, ctrl.text),
-              child: const Text('Ajouter')),
-        ],
-      ),
-    );
-    final clean = label?.trim() ?? '';
-    if (clean.isEmpty || !mounted) return;
-    setState(() {
-      _tagLabels.add(clean);
-      _dismissedAuto.remove(clean);
     });
   }
 
@@ -1707,14 +1673,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   // ── Tags ───────────────────────────────────────────────────────────────────
 
-  /// Sélecteur de tags : ceux du souvenir (dont l'année et le lieu, posés
-  /// d'office), les tags déjà utilisés ailleurs, et un bouton pour en créer.
+  /// Tags du souvenir : l'année et le lieu sont posés d'office, le reste se
+  /// choisit dans le même sélecteur que le filtre du dashboard (Date / Lieu /
+  /// Événement, multi-sélection, et création d'un tag à la volée).
   Widget _buildTagSection() {
     final selected = _tagLabels.toList()..sort();
-    final others = [
-      for (final t in _allTags)
-        if (!_tagLabels.contains(t.label)) t.label,
-    ];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1735,19 +1698,39 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                 onTap: () => _toggleTag(label),
                 child: _TagChip(label: label, selected: true),
               ),
-            for (final label in others)
-              GestureDetector(
-                onTap: () => _toggleTag(label),
-                child: _TagChip(label: label, selected: false),
-              ),
             GestureDetector(
-              onTap: _createTagDialog,
-              child: const _TagChip(label: '+ Nouveau tag', selected: false),
+              onTap: _openTagPicker,
+              child: const _TagChip(
+                  label: '＋ Choisir des tags', selected: false),
             ),
           ],
         ),
       ],
     );
+  }
+
+  Future<void> _openTagPicker() async {
+    final result = await showTagPickerSheet(
+      context,
+      tags: _allTags,
+      initialLabels: _tagLabels,
+      allowCreate: true,
+      title: 'Tags du souvenir',
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      // Décocher un tag automatique (année, lieu) reste un choix : on ne le
+      // remet pas d'office au prochain changement de date ou de lieu.
+      for (final label in _tagLabels) {
+        if (!result.contains(label) && _autoAdded.contains(label)) {
+          _dismissedAuto.add(label);
+        }
+      }
+      _dismissedAuto.removeWhere(result.contains);
+      _tagLabels
+        ..clear()
+        ..addAll(result);
+    });
   }
 
   // ── Photos widget (multi, scrollable row) ────────────────────────────────

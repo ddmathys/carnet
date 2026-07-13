@@ -14,6 +14,7 @@ import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
 import '../../core/services/video_service.dart';
 import '../tags/share_tag_sheet.dart';
+import '../tags/tag_picker_sheet.dart';
 import 'widgets/memory_polaroid.dart';
 
 /// Tous les souvenirs visibles, filtrables par tag. Remplace le « journal »
@@ -29,7 +30,8 @@ class MemoriesListScreen extends StatefulWidget {
 }
 
 class _MemoriesListScreenState extends State<MemoriesListScreen> {
-  String? _tagId;
+  /// Filtre courant : les libellés de tags cochés (multi-sélection).
+  final Set<String> _filterLabels = {};
   final _searchController = TextEditingController();
   String _searchQuery = '';
   List<TagModel> _tags = [];
@@ -38,9 +40,19 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   @override
   void initState() {
     super.initState();
-    _tagId = widget.initialTagId;
     _tagsSub = TagService.streamMine().listen((tags) {
-      if (mounted) setState(() => _tags = tags);
+      if (!mounted) return;
+      setState(() {
+        _tags = tags;
+        // Arrivée depuis un tag précis (partage rejoint, CTA livre) : il est
+        // coché d'emblée, mais reste modifiable comme n'importe quel filtre.
+        final initial = widget.initialTagId;
+        if (initial != null && _filterLabels.isEmpty) {
+          for (final t in tags) {
+            if (t.id == initial) _filterLabels.add(t.label);
+          }
+        }
+      });
     });
   }
 
@@ -51,16 +63,32 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
     super.dispose();
   }
 
-  TagModel? get _currentTag {
-    for (final t in _tags) {
-      if (t.id == _tagId) return t;
-    }
-    return null;
+  List<TagModel> get _selectedTags =>
+      [for (final t in _tags) if (_filterLabels.contains(t.label)) t];
+
+  /// Un seul tag coché → on peut le partager / voir sa croissance depuis l'appbar.
+  TagModel? get _soleTag {
+    final sel = _selectedTags;
+    return sel.length == 1 ? sel.first : null;
+  }
+
+  Future<void> _openFilter() async {
+    final result = await showTagPickerSheet(
+      context,
+      tags: _tags,
+      initialLabels: _filterLabels,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _filterLabels
+        ..clear()
+        ..addAll(result);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    final tag = _currentTag;
+    final tag = _soleTag;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
@@ -101,8 +129,8 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push(
-            '/memory/new${_tagId != null ? '?tag=$_tagId' : ''}'),
+        onPressed: () => context
+            .push('/memory/new${tag != null ? '?tag=${tag.id}' : ''}'),
         backgroundColor: AppColors.sage,
         foregroundColor: AppColors.white,
         icon: const Icon(Icons.add),
@@ -120,17 +148,17 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           final all = snap.data!;
-          final tagFiltered = _tagId == null
-              ? all
-              : all.where((m) => m.tagIds.contains(_tagId)).toList();
+          final selected = _selectedTags;
+          final tagFiltered =
+              all.where((m) => memoryMatchesTags(m, selected)).toList();
           final filtered = _applySearch(tagFiltered);
 
           return Column(
             children: [
               _buildSearchBar(),
-              if (_tags.isNotEmpty) _buildTagChips(),
+              if (_tags.isNotEmpty) _buildFilterBar(),
               if (tagFiltered.length >= 10)
-                _BookCta(count: tagFiltered.length, tagId: _tagId),
+                _BookCta(count: tagFiltered.length, tagId: _soleTag?.id),
               Expanded(
                 child: filtered.isEmpty
                     ? _EmptyState(
@@ -139,7 +167,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                           _searchController.clear();
                           setState(() {
                             _searchQuery = '';
-                            _tagId = null;
+                            _filterLabels.clear();
                           });
                         },
                       )
@@ -170,24 +198,57 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
         });
   }
 
-  Widget _buildTagChips() {
-    return SizedBox(
-      height: 48,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+  /// Même filtre que le dashboard : un bouton qui ouvre le sélecteur par
+  /// catégories (Date / Lieu / Événement), et le rappel des tags cochés.
+  Widget _buildFilterBar() {
+    final selected = _filterLabels.toList()..sort();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _FilterChip(
-            label: 'Tous',
-            selected: _tagId == null,
-            onTap: () => setState(() => _tagId = null),
+          Row(
+            children: [
+              _FilterChip(
+                label: _filterLabels.isEmpty
+                    ? '⚙ Filtrer par tag'
+                    : '⚙ ${_filterLabels.length} tag${_filterLabels.length > 1 ? 's' : ''}',
+                selected: _filterLabels.isNotEmpty,
+                onTap: _openFilter,
+              ),
+              if (_filterLabels.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(_filterLabels.clear),
+                  child: const Text('Effacer',
+                      style:
+                          TextStyle(color: AppColors.textMedium, fontSize: 13)),
+                ),
+            ],
           ),
-          ..._tags.map((t) => _FilterChip(
-                label: t.label,
-                selected: _tagId == t.id,
-                onTap: () =>
-                    setState(() => _tagId = _tagId == t.id ? null : t.id),
-              )),
+          if (selected.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 6, bottom: 2),
+              child: Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  for (final label in selected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.sageTint,
+                        borderRadius: BorderRadius.circular(50),
+                      ),
+                      child: Text(label,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.sageDark,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );

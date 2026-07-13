@@ -7,6 +7,7 @@ import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
+import '../tags/tag_picker_sheet.dart';
 
 /// Choix des souvenirs qui composeront le livre.
 ///
@@ -21,7 +22,8 @@ class MemorySelectScreen extends StatefulWidget {
 }
 
 class _MemorySelectScreenState extends State<MemorySelectScreen> {
-  String? _tagId;
+  /// Filtre par tags (multi-sélection, même sélecteur que le dashboard).
+  final Set<String> _filterLabels = {};
   final Set<String> _selected = {};
   List<TagModel> _tags = [];
   List<MemoryModel> _all = [];
@@ -32,9 +34,17 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
   @override
   void initState() {
     super.initState();
-    _tagId = widget.initialTagId;
     _tagsSub = TagService.streamMine().listen((tags) {
-      if (mounted) setState(() => _tags = tags);
+      if (!mounted) return;
+      setState(() {
+        _tags = tags;
+        final initial = widget.initialTagId;
+        if (initial != null && _filterLabels.isEmpty) {
+          for (final t in tags) {
+            if (t.id == initial) _filterLabels.add(t.label);
+          }
+        }
+      });
     });
     _memSub = MemoryQueryService.visible().listen((memories) {
       if (!mounted) return;
@@ -57,14 +67,25 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
     super.dispose();
   }
 
-  List<MemoryModel> get _visible => _tagId == null
-      ? _all
-      : _all.where((m) => m.tagIds.contains(_tagId)).toList();
+  List<TagModel> get _selectedTags =>
+      [for (final t in _tags) if (_filterLabels.contains(t.label)) t];
 
-  void _pickTag(String? id) {
+  List<MemoryModel> get _visible =>
+      _all.where((m) => memoryMatchesTags(m, _selectedTags)).toList();
+
+  Future<void> _openFilter() async {
+    final result = await showTagPickerSheet(
+      context,
+      tags: _tags,
+      initialLabels: _filterLabels,
+      title: 'Souvenirs à inclure',
+    );
+    if (result == null || !mounted) return;
     setState(() {
-      _tagId = id;
-      // Changer de tag redéfinit la sélection : on prend tout le tag.
+      _filterLabels
+        ..clear()
+        ..addAll(result);
+      // Changer de filtre redéfinit la sélection : on prend tout ce qui reste.
       _selected
         ..clear()
         ..addAll(_visible.map((m) => m.id));
@@ -99,7 +120,7 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
-                _buildTagChips(),
+                _buildFilterBar(),
                 if (visible.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 2, 12, 0),
@@ -181,27 +202,51 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
 
   void _continue() {
     final ids = _selected.join(',');
-    final tag = _tagId != null ? '&tag=$_tagId' : '';
+    // Un seul tag coché → il donne le titre et la couleur de la couverture.
+    final sole = _selectedTags.length == 1 ? _selectedTags.first : null;
+    final tag = sole != null ? '&tag=${sole.id}' : '';
     context.push('/book/new?memories=$ids$tag');
   }
 
-  Widget _buildTagChips() {
-    return SizedBox(
-      height: 52,
-      child: ListView(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+  /// Filtre par tags — même sélecteur (Date / Lieu / Événement) que partout.
+  Widget _buildFilterBar() {
+    final selected = _filterLabels.toList()..sort();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 2),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _Chip(
-            label: 'Tous',
-            selected: _tagId == null,
-            onTap: () => _pickTag(null),
+            label: _filterLabels.isEmpty
+                ? '⚙ Filtrer par tag'
+                : '⚙ ${_filterLabels.length} tag${_filterLabels.length > 1 ? 's' : ''}',
+            selected: _filterLabels.isNotEmpty,
+            onTap: _openFilter,
           ),
-          ..._tags.map((t) => _Chip(
-                label: t.label,
-                selected: _tagId == t.id,
-                onTap: () => _pickTag(_tagId == t.id ? null : t.id),
-              )),
+          if (selected.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Wrap(
+                spacing: 7,
+                runSpacing: 7,
+                children: [
+                  for (final label in selected)
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.sageTint,
+                        borderRadius: BorderRadius.circular(50),
+                      ),
+                      child: Text(label,
+                          style: const TextStyle(
+                              fontSize: 12,
+                              color: AppColors.sageDark,
+                              fontWeight: FontWeight.w600)),
+                    ),
+                ],
+              ),
+            ),
         ],
       ),
     );

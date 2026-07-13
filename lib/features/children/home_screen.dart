@@ -15,6 +15,7 @@ import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
 import '../memories/widgets/memory_polaroid.dart';
 import '../memories/widgets/import_media_cta.dart';
+import '../tags/tag_picker_sheet.dart';
 
 /// Dashboard : importer un média (le geste principal), les derniers souvenirs,
 /// les tags qui les organisent, les livres déjà faits — et, tout en bas, la
@@ -34,7 +35,9 @@ class _HomeScreenState extends State<HomeScreen> {
   List<TagModel> _myTags = [];
   List<TagModel> _sharedTags = [];
   List<MemoryModel> _recentMemories = [];
-  Map<String, int> _memoriesPerTag = {};
+
+  /// Filtre courant : les libellés de tags cochés dans le sélecteur.
+  final Set<String> _filterLabels = {};
 
   StreamSubscription? _myTagsSub;
   StreamSubscription? _sharedTagsSub;
@@ -86,20 +89,37 @@ class _HomeScreenState extends State<HomeScreen> {
     for (final d in snap.docs) {
       _memoriesById[d.id] = MemoryModel.fromFirestore(d);
     }
-    final all = _memoriesById.values.toList()
+    if (mounted) setState(_applyFilter);
+  }
+
+  /// Les 6 derniers souvenirs — filtrés si des tags sont cochés.
+  void _applyFilter() {
+    final selected = _selectedTags;
+    final all = _memoriesById.values
+        .where((m) => memoryMatchesTags(m, selected))
+        .toList()
       ..sort((a, b) => b.date.compareTo(a.date));
-    final counts = <String, int>{};
-    for (final m in all) {
-      for (final id in m.tagIds) {
-        counts[id] = (counts[id] ?? 0) + 1;
-      }
-    }
-    if (mounted) {
-      setState(() {
-        _recentMemories = all.take(3).toList();
-        _memoriesPerTag = counts;
-      });
-    }
+    _recentMemories = all.take(6).toList();
+  }
+
+  List<TagModel> get _allTags => [..._myTags, ..._sharedTags];
+
+  List<TagModel> get _selectedTags =>
+      [for (final t in _allTags) if (_filterLabels.contains(t.label)) t];
+
+  Future<void> _openFilter() async {
+    final result = await showTagPickerSheet(
+      context,
+      tags: _allTags,
+      initialLabels: _filterLabels,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _filterLabels
+        ..clear()
+        ..addAll(result);
+      _applyFilter();
+    });
   }
 
   Future<void> _loadQuota() async {
@@ -130,7 +150,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildBody(BuildContext context) {
-    final allTags = [..._myTags, ..._sharedTags];
     final hasMemories = _memoriesById.isNotEmpty;
 
     return CustomScrollView(
@@ -157,16 +176,16 @@ class _HomeScreenState extends State<HomeScreen> {
         if (!hasMemories)
           const SliverToBoxAdapter(child: _EmptyState())
         else ...[
-          // 2) Les derniers souvenirs.
-          _sectionHeader('Mes derniers souvenirs', 'Tout voir',
-              onAction: () => context.push('/memories')),
-          SliverToBoxAdapter(child: _recentMemoriesRail(context)),
-
-          // 3) Les tags — l'organisation des souvenirs.
-          if (allTags.isNotEmpty) ...[
-            _sectionHeader('Mes tags', '${allTags.length}'),
-            SliverToBoxAdapter(child: _tagsWrap(context, allTags)),
-          ],
+          // 2) Le filtre par tags (date / lieu / événement), puis les souvenirs.
+          _sectionHeader(
+            _filterLabels.isEmpty
+                ? 'Mes derniers souvenirs'
+                : 'Souvenirs filtrés',
+            'Tout voir',
+            onAction: () => context.push('/memories'),
+          ),
+          SliverToBoxAdapter(child: _filterBar(context)),
+          SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
         ],
 
         // 4) Les livres déjà faits (PDF générés et livres commandés).
@@ -183,47 +202,131 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _recentMemoriesRail(BuildContext context) {
-    return SizedBox(
-      height: 210,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
-        itemCount: _recentMemories.length,
-        separatorBuilder: (_, __) => const SizedBox(width: 14),
-        itemBuilder: (_, i) {
-          final m = _recentMemories[i];
-          return SizedBox(
-            width: 145,
-            child: MemoryPolaroid(
-              memory: m,
-              cat: _safeCat(m.type),
-              tilt: (i % 2 == 0) ? -0.02 : 0.02,
-              onTap: () => context.push('/memory/${m.id}/edit'),
+  /// Barre de filtre : un bouton qui ouvre le sélecteur (Date / Lieu /
+  /// Événement, multi-sélection), et le rappel des tags cochés.
+  Widget _filterBar(BuildContext context) {
+    final selected = _filterLabels.toList()..sort();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 0, 22, 6),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              GestureDetector(
+                onTap: _openFilter,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+                  decoration: BoxDecoration(
+                    color: _filterLabels.isEmpty
+                        ? AppColors.white
+                        : AppColors.sageDark,
+                    borderRadius: BorderRadius.circular(50),
+                    border: Border.all(
+                      color: _filterLabels.isEmpty
+                          ? AppColors.border
+                          : AppColors.sageDark,
+                      width: _filterLabels.isEmpty ? 0.5 : 1.5,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.tune,
+                          size: 16,
+                          color: _filterLabels.isEmpty
+                              ? AppColors.textMedium
+                              : Colors.white),
+                      const SizedBox(width: 6),
+                      Text(
+                        _filterLabels.isEmpty
+                            ? 'Filtrer par tag'
+                            : '${_filterLabels.length} tag${_filterLabels.length > 1 ? 's' : ''}',
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: _filterLabels.isEmpty
+                              ? AppColors.textMedium
+                              : Colors.white,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              if (_filterLabels.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() {
+                    _filterLabels.clear();
+                    _applyFilter();
+                  }),
+                  child: const Text('Effacer',
+                      style:
+                          TextStyle(color: AppColors.textMedium, fontSize: 13)),
+                ),
+            ],
+          ),
+          if (selected.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                for (final label in selected)
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      color: AppColors.sageTint,
+                      borderRadius: BorderRadius.circular(50),
+                    ),
+                    child: Text(label,
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: AppColors.sageDark,
+                            fontWeight: FontWeight.w600)),
+                  ),
+              ],
             ),
-          );
-        },
+          ],
+        ],
       ),
     );
   }
 
-  Widget _tagsWrap(BuildContext context, List<TagModel> tags) {
+  /// Les 6 derniers souvenirs (du filtre courant), en polaroïdes.
+  Widget _recentMemoriesGrid(BuildContext context) {
+    if (_recentMemories.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.fromLTRB(22, 14, 22, 10),
+        child: Text(
+          'Aucun souvenir avec ces tags.',
+          style: TextStyle(color: AppColors.textMedium, fontSize: 13),
+        ),
+      );
+    }
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 4, 22, 4),
-      child: Wrap(
-        spacing: 8,
-        runSpacing: 8,
-        children: [
-          for (final t in tags)
-            GestureDetector(
-              onTap: () => context.push('/memories?tag=${t.id}'),
-              child: _TagPill(
-                tag: t,
-                count: _memoriesPerTag[t.id] ?? 0,
-                shared: t.isShared || !t.isOwner(_uid),
-              ),
-            ),
-        ],
+      padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
+      child: GridView.builder(
+        shrinkWrap: true,
+        physics: const NeverScrollableScrollPhysics(),
+        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: 2,
+          mainAxisSpacing: 18,
+          crossAxisSpacing: 14,
+          childAspectRatio: 0.66,
+        ),
+        itemCount: _recentMemories.length,
+        itemBuilder: (_, i) {
+          final m = _recentMemories[i];
+          return MemoryPolaroid(
+            memory: m,
+            cat: _safeCat(m.type),
+            tilt: (i % 2 == 0) ? -0.02 : 0.02,
+            onTap: () => context.push('/memory/${m.id}/edit'),
+          );
+        },
       ),
     );
   }
@@ -268,8 +371,6 @@ class _HomeScreenState extends State<HomeScreen> {
       return null;
     }
   }
-
-  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
   double get _maxUsageRatio {
     final rs = [
@@ -521,62 +622,6 @@ class _HeroGreeting extends StatelessWidget {
             ),
           ),
           const Text('📖', style: TextStyle(fontSize: 40)),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Tag ──────────────────────────────────────────────────────────────────────
-
-class _TagPill extends StatelessWidget {
-  final TagModel tag;
-  final int count;
-  final bool shared;
-  const _TagPill(
-      {required this.tag, required this.count, required this.shared});
-
-  Color get _color {
-    try {
-      return Color(int.parse('FF${tag.color.replaceAll('#', '')}', radix: 16));
-    } catch (_) {
-      return AppColors.sage;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-      decoration: BoxDecoration(
-        color: _color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(50),
-        border: Border.all(color: _color.withOpacity(0.45), width: 1),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (tag.isChild) ...[
-            const Text('👶', style: TextStyle(fontSize: 12)),
-            const SizedBox(width: 5),
-          ],
-          Text(tag.label,
-              style: TextStyle(
-                  color: _color,
-                  fontSize: 13.5,
-                  fontWeight: FontWeight.w600)),
-          if (count > 0) ...[
-            const SizedBox(width: 6),
-            Text('$count',
-                style: TextStyle(
-                    color: _color.withOpacity(0.7),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500)),
-          ],
-          if (shared) ...[
-            const SizedBox(width: 5),
-            Icon(Icons.people_outline, size: 13, color: _color.withOpacity(0.8)),
-          ],
         ],
       ),
     );
