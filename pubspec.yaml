@@ -101,6 +101,11 @@ flutter:
     - assets/images/animals/
     - assets/icons/
     - assets/welcome/
+    # Le PDF du livre charge ses polices par CHEMIN (rootBundle), pas par
+    # famille. Depuis que les familles sont repointées vers Fraunces/Outfit,
+    # les TTF historiques n'étaient plus embarqués → l'aperçu échouait sur
+    # « Unable to load asset assets/fonts/PlayfairDisplay-Regular.ttf ».
+    - assets/fonts/
   fonts:
     # Design terracotta : les familles historiques sont repointées vers les
     # nouvelles polices → toute l'app bascule sans modifier chaque écran.
