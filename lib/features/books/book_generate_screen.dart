@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:go_router/go_router.dart';
@@ -15,26 +14,30 @@ import '../../core/models/order_model.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/book_pricing.dart';
+import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
+import '../../core/services/tag_service.dart';
 
+/// Génération d'un livre à partir d'une sélection de SOUVENIRS (plus d'un
+/// carnet) : ils viennent d'un tag, d'un choix manuel, ou des deux.
 class BookGenerateScreen extends StatefulWidget {
-  /// Single notebook mode: pass [notebookId]
-  /// Multi-notebook mode: pass [notebookIds] (notebookId is ignored when notebookIds is non-empty)
-  final String notebookId;
-  final List<String> notebookIds;
+  /// Les souvenirs retenus, choisis à l'écran précédent.
+  final List<String> memoryIds;
+
+  /// Tag d'origine, s'il y en a un : il donne le titre et la couleur par défaut
+  /// de la couverture (et, pour un tag enfant, la courbe de croissance).
+  final String? tagId;
+
   /// Démarre directement sur les options d'achat (format + adresse), en sautant
   /// l'étape couverture/aperçu. Utilisé depuis « Mes livres » → Commander.
   final bool startAtOrder;
 
   const BookGenerateScreen({
     super.key,
-    this.notebookId = '',
-    this.notebookIds = const [],
+    this.memoryIds = const [],
+    this.tagId,
     this.startAtOrder = false,
   });
-
-  List<String> get _ids =>
-      notebookIds.isNotEmpty ? notebookIds : [notebookId];
 
   @override
   State<BookGenerateScreen> createState() => _BookGenerateScreenState();
@@ -168,37 +171,41 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // ── Load ───────────────────────────────────────────────────────────────────
 
   Future<void> _loadData() async {
-    final ids = widget._ids;
     if (mounted) setState(() => _loadError = null);
     const t = Duration(seconds: 20);
     try {
-      // Load primary notebook (first in list)
-      final nbDoc = await FirebaseFirestore.instance
-          .collection('notebooks')
-          .doc(ids.first)
-          .get()
-          .timeout(t);
+      // Les souvenirs retenus à l'écran de sélection, dans l'ordre chronologique.
+      final visible = await MemoryQueryService.visible().first.timeout(t);
       if (!mounted) return;
-      if (!nbDoc.exists) {
-        setState(() => _loadError = 'Carnet introuvable.');
+      final wanted = widget.memoryIds.toSet();
+      final allMemories = visible
+          .where((m) => wanted.isEmpty || wanted.contains(m.id))
+          .toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+
+      if (allMemories.isEmpty) {
+        setState(() => _loadError = 'Aucun souvenir à mettre dans ce livre.');
         return;
       }
 
-      // Load memories from ALL notebooks
-      final allMemories = <MemoryModel>[];
-      for (final id in ids) {
-        final memSnap = await FirebaseFirestore.instance
-            .collection('memories')
-            .where('notebookId', isEqualTo: id)
-            .get()
-            .timeout(t);
-        allMemories
-            .addAll(memSnap.docs.map((d) => MemoryModel.fromFirestore(d)));
-      }
-      allMemories.sort((a, b) => a.date.compareTo(b.date));
-
+      // Le PDF est écrit pour un « carnet » : sans carnet, on lui en fabrique un
+      // à partir du tag d'origine (titre, couleur, date de naissance) ou, à
+      // défaut, un carnet générique.
+      final tag = widget.tagId != null
+          ? await TagService.byId(widget.tagId!).timeout(t)
+          : null;
       if (!mounted) return;
-      final nb = NotebookModel.fromFirestore(nbDoc);
+      final nb = tag?.asNotebook() ??
+          NotebookModel(
+            id: '',
+            userId: FirebaseAuth.instance.currentUser?.uid ?? '',
+            type: 'libre',
+            title: 'Mes souvenirs',
+            coverColor: '#C4714B',
+            createdAt: DateTime.now(),
+            updatedAt: DateTime.now(),
+          );
+
       // Photo de couverture par défaut : la première photo trouvée parmi les
       // souvenirs (ordre chronologique). L'utilisateur peut en changer ensuite.
       String? defaultCover;
@@ -347,7 +354,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       bookTitle: bookTitle,
       subtitle: null,
       coverType: _coverType,
-      notebookId: widget.notebookId,
+      notebookId: widget.tagId ?? '',
       memoriesCount: _selectedMemories.length,
     );
 
@@ -485,7 +492,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         country: _countryCtrl.text.trim(),
         status: 'received',
         createdAt: DateTime.now(),
-        notebookId: widget.notebookId,
+        notebookId: widget.tagId ?? '',
         memoryCount: _selectedMemories.length,
         pageCount: pageCount,
         pdfUrl: pdfUrl,
@@ -494,7 +501,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
       // 4. Historique des livres (imprimé)
       await BookHistoryService.recordBook(
-        notebookId: widget.notebookId,
+        notebookId: widget.tagId ?? '',
         title: bookTitle,
         subtitle: null,
         format: 'printed',
@@ -529,7 +536,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
             onPressed: () =>
-                context.go('/notebook/${widget.notebookId}/dashboard'),
+                context.go('/home'),
           ),
         ),
         body: Center(
@@ -592,7 +599,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               } else if (_step > 0) {
                 setState(() => _step--);
               } else {
-                context.go('/notebook/${widget.notebookId}/dashboard');
+                context.go('/home');
               }
             },
           ),

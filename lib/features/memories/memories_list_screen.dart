@@ -1,63 +1,98 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import 'package:video_player/video_player.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
+import '../../core/models/tag_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/memory_query_service.dart';
+import '../../core/services/tag_service.dart';
 import '../../core/services/video_service.dart';
+import '../tags/share_tag_sheet.dart';
 import 'widgets/memory_polaroid.dart';
 
+/// Tous les souvenirs visibles, filtrables par tag. Remplace le « journal »
+/// d'un carnet : il n'y a plus qu'une seule collection de souvenirs, et les
+/// tags en sont les rayons.
 class MemoriesListScreen extends StatefulWidget {
-  final String notebookId;
-  final String? initialFilter;
-  const MemoriesListScreen({super.key, required this.notebookId, this.initialFilter});
+  /// Tag pré-sélectionné (arrivée depuis une puce de tag du dashboard).
+  final String? initialTagId;
+  const MemoriesListScreen({super.key, this.initialTagId});
 
   @override
   State<MemoriesListScreen> createState() => _MemoriesListScreenState();
 }
 
 class _MemoriesListScreenState extends State<MemoriesListScreen> {
-  String? _filterType;
+  String? _tagId;
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  List<TagModel> _tags = [];
+  StreamSubscription? _tagsSub;
 
   @override
   void initState() {
     super.initState();
-    _filterType = widget.initialFilter;
+    _tagId = widget.initialTagId;
+    _tagsSub = TagService.streamMine().listen((tags) {
+      if (mounted) setState(() => _tags = tags);
+    });
   }
 
   @override
   void dispose() {
     _searchController.dispose();
+    _tagsSub?.cancel();
     super.dispose();
+  }
+
+  TagModel? get _currentTag {
+    for (final t in _tags) {
+      if (t.id == _tagId) return t;
+    }
+    return null;
   }
 
   @override
   Widget build(BuildContext context) {
+    final tag = _currentTag;
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
-        title: const Text(
-          'Journal',
-          style: TextStyle(
-            fontFamily: 'PlayfairDisplay',
-            fontWeight: FontWeight.bold,
+        title: Text(
+          tag?.label ?? 'Mes souvenirs',
+          style: const TextStyle(
+            fontFamily: 'Fraunces',
+            fontWeight: FontWeight.w600,
             color: AppColors.textDark,
           ),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
-          onPressed: () =>
-              context.go('/notebook/${widget.notebookId}/dashboard'),
+          onPressed: () => context.go('/home'),
         ),
+        actions: [
+          // Un tag « enfant » garde sa courbe de croissance.
+          if (tag != null && tag.isChild)
+            IconButton(
+              icon: const Icon(Icons.show_chart, color: AppColors.textDark),
+              tooltip: 'Croissance',
+              onPressed: () => context.push('/growth/${tag.id}'),
+            ),
+          if (tag != null)
+            IconButton(
+              icon: const Icon(Icons.ios_share, color: AppColors.textDark),
+              tooltip: 'Partager ce tag',
+              onPressed: () => showShareTagSheet(context, tag),
+            ),
+        ],
       ),
       body: Column(
         children: [
@@ -66,8 +101,8 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () =>
-            context.push('/notebook/${widget.notebookId}/add-memory'),
+        onPressed: () => context.push(
+            '/memory/new${_tagId != null ? '?tag=$_tagId' : ''}'),
         backgroundColor: AppColors.sage,
         foregroundColor: AppColors.white,
         icon: const Icon(Icons.add),
@@ -78,34 +113,24 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   }
 
   Widget _buildMemoriesStream() {
-    return StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('memories')
-            .where('notebookId', isEqualTo: widget.notebookId)
-            .snapshots(),
+    return StreamBuilder<List<MemoryModel>>(
+        stream: MemoryQueryService.visible(),
         builder: (context, snap) {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final all = snap.data!.docs
-              .map((d) => MemoryModel.fromFirestore(d))
-              .toList()
-            ..sort((a, b) => b.date.compareTo(a.date));
-
-          final typeFiltered = _filterType == null
+          final all = snap.data!;
+          final tagFiltered = _tagId == null
               ? all
-              : all.where((m) => m.type == _filterType).toList();
-
-          final filtered = _applySearch(typeFiltered);
-
-          final types = all.map((m) => m.type).toSet().toList();
+              : all.where((m) => m.tagIds.contains(_tagId)).toList();
+          final filtered = _applySearch(tagFiltered);
 
           return Column(
             children: [
               _buildSearchBar(),
-              if (types.isNotEmpty) _buildFilterChips(types),
-              if (all.length >= 10)
-                _BookCta(count: all.length, notebookId: widget.notebookId),
+              if (_tags.isNotEmpty) _buildTagChips(),
+              if (tagFiltered.length >= 10)
+                _BookCta(count: tagFiltered.length, tagId: _tagId),
               Expanded(
                 child: filtered.isEmpty
                     ? _EmptyState(
@@ -114,7 +139,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                           _searchController.clear();
                           setState(() {
                             _searchQuery = '';
-                            _filterType = null;
+                            _tagId = null;
                           });
                         },
                       )
@@ -134,8 +159,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                             memory: m,
                             cat: _safeCat(m.type),
                             tilt: (i % 2 == 0) ? -0.02 : 0.02,
-                            onTap: () => context.push(
-                                '/notebook/${widget.notebookId}/edit-memory/${m.id}'),
+                            onTap: () => context.push('/memory/${m.id}/edit'),
                             onLongPress: () => _confirmDeleteMemory(context, m),
                           );
                         },
@@ -144,6 +168,29 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
             ],
           );
         });
+  }
+
+  Widget _buildTagChips() {
+    return SizedBox(
+      height: 48,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: [
+          _FilterChip(
+            label: 'Tous',
+            selected: _tagId == null,
+            onTap: () => setState(() => _tagId = null),
+          ),
+          ..._tags.map((t) => _FilterChip(
+                label: t.label,
+                selected: _tagId == t.id,
+                onTap: () =>
+                    setState(() => _tagId = _tagId == t.id ? null : t.id),
+              )),
+        ],
+      ),
+    );
   }
 
   Widget _buildSearchBar() {
@@ -426,13 +473,14 @@ class _FilterChip extends StatelessWidget {
 
 class _BookCta extends StatelessWidget {
   final int count;
-  final String notebookId;
-  const _BookCta({required this.count, required this.notebookId});
+  final String? tagId;
+  const _BookCta({required this.count, this.tagId});
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: () => context.push('/notebook/$notebookId/book'),
+      onTap: () => context
+          .push('/book/select${tagId != null ? '?tag=$tagId' : ''}'),
       child: Container(
         margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -463,264 +511,6 @@ class _BookCta extends StatelessWidget {
   }
 }
 
-class _MemoryTile extends StatelessWidget {
-  final MemoryModel memory;
-  final String notebookId;
-  final VoidCallback onDelete;
-
-  const _MemoryTile(
-      {required this.memory,
-      required this.notebookId,
-      required this.onDelete});
-
-  String get _typeLabel {
-    try {
-      final cat = getMilestoneCategoryById(memory.type);
-      return '${cat.emoji} ${cat.label}';
-    } catch (_) {
-      return memory.type;
-    }
-  }
-
-  List<String> get _allPhotos {
-    final seen = <String>{};
-    final result = <String>[];
-    void add(String? url) {
-      if (url != null && url.isNotEmpty && seen.add(url)) result.add(url);
-    }
-    add(memory.photoUrl);
-    for (final u in memory.mediaUrls) { add(u); }
-    return result;
-  }
-
-  /// Médias du souvenir dans l'ordre d'affichage : photos d'abord, puis vidéos.
-  List<_MediaItem> get _allMedia => [
-        for (final url in _allPhotos) _MediaItem.photo(url),
-        for (final key in memory.videoKeys) _MediaItem.video(key),
-      ];
-
-  void _openMedia(BuildContext context, int index) {
-    Navigator.of(context).push(
-      PageRouteBuilder(
-        opaque: false,
-        barrierColor: Colors.black87,
-        pageBuilder: (_, __, ___) => _MediaViewer(
-            items: _allMedia, initialIndex: index, memoryId: memory.id),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final photos = _allPhotos;
-    final videoCount = memory.videoKeys.length;
-    return Dismissible(
-      key: Key(memory.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        decoration: BoxDecoration(
-          color: AppColors.error.withOpacity(0.15),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: const Icon(Icons.delete_outline, color: AppColors.error),
-      ),
-      confirmDismiss: (_) => showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Supprimer ce souvenir ?'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Annuler')),
-            ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.error,
-                  minimumSize: Size.zero,
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 20, vertical: 10)),
-              child: const Text('Supprimer'),
-            ),
-          ],
-        ),
-      ),
-      onDismissed: (_) => onDelete(),
-      child: GestureDetector(
-        onTap: () => context
-            .push('/notebook/$notebookId/edit-memory/${memory.id}'),
-        child: Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(
-            color: AppColors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: AppColors.border, width: 0.5),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Vignette média — photos et/ou vidéos, tap = visualiseur plein écran
-              if (photos.isNotEmpty)
-                GestureDetector(
-                  onTap: () => _openMedia(context, 0),
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: const BorderRadius.vertical(
-                            top: Radius.circular(12)),
-                        child: CachedNetworkImage(
-                          imageUrl: photos.first,
-                          width: double.infinity,
-                          height: 160,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => Container(
-                            height: 160,
-                            color: AppColors.background,
-                            child: const Center(
-                                child: CircularProgressIndicator(strokeWidth: 2)),
-                          ),
-                          errorWidget: (_, __, ___) => Container(
-                            height: 160,
-                            color: AppColors.background,
-                            child: const Center(
-                                child: Icon(Icons.broken_image_outlined,
-                                    color: AppColors.softGray)),
-                          ),
-                        ),
-                      ),
-                      if (photos.length > 1)
-                        Positioned(
-                          bottom: 8,
-                          right: 8,
-                          child: _MediaCountBadge(
-                            icon: Icons.photo_library_outlined,
-                            count: photos.length,
-                          ),
-                        ),
-                      if (videoCount > 0)
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: _MediaCountBadge(
-                            icon: Icons.play_circle_outline,
-                            count: videoCount,
-                          ),
-                        ),
-                    ],
-                  ),
-                )
-              // Souvenir sans photo mais avec vidéo(s) : placeholder lisible
-              else if (videoCount > 0)
-                GestureDetector(
-                  onTap: () => _openMedia(context, 0),
-                  child: ClipRRect(
-                    borderRadius:
-                        const BorderRadius.vertical(top: Radius.circular(12)),
-                    child: Container(
-                      height: 160,
-                      width: double.infinity,
-                      color: const Color(0xFF2D2D2D),
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          const Icon(Icons.play_circle_outline,
-                              color: Colors.white, size: 44),
-                          const SizedBox(height: 6),
-                          Text(
-                            videoCount > 1
-                                ? '$videoCount vidéos'
-                                : '1 vidéo',
-                            style: const TextStyle(
-                                color: Colors.white, fontSize: 12),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _typeLabel,
-                            style: const TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.sage,
-                            ),
-                          ),
-                          const SizedBox(height: 4),
-                          if (memory.title != null && memory.title!.isNotEmpty) ...[
-                            Text(
-                              memory.title!,
-                              style: const TextStyle(
-                                fontFamily: 'PlayfairDisplay',
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                                color: AppColors.textDark,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                            const SizedBox(height: 2),
-                          ],
-                          if (memory.location != null && memory.location!.isNotEmpty) ...[
-                            Row(
-                              children: [
-                                const Icon(Icons.place_outlined, size: 12, color: AppColors.softGray),
-                                const SizedBox(width: 3),
-                                Expanded(
-                                  child: Text(
-                                    memory.location!,
-                                    style: const TextStyle(fontSize: 11, color: AppColors.softGray),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 4),
-                          ],
-                          Text(
-                            memory.rawContent,
-                            style: const TextStyle(
-                                color: AppColors.textDark,
-                                fontSize: 14,
-                                height: 1.4),
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Text(
-                      DateFormat('d MMM\nyyyy', 'fr').format(memory.date),
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(
-                          fontSize: 11,
-                          color: AppColors.textMedium,
-                          height: 1.4),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
 
 /// Un média d'un souvenir : photo (URL directe) ou vidéo (clé R2 à résoudre).
 class _MediaItem {

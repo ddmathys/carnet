@@ -60,15 +60,53 @@ service cloud.firestore {
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
     }
 
-    // ── Memories (collection racine, liées par notebookId) ─────────────────
+    // ── Tags (organisation + partage) ───────────────────────────────────────
+    // Le partage se pilote ici : les collaborateurs d'un tag sont recopiés dans
+    // le champ `sharedWith` de chaque souvenir qui le porte (voir memories).
+    match /tags/{tagId} {
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid
+        || request.auth.uid in resource.data.get('sharedWith', [])
+        || (request.auth.token.email != null
+            && request.auth.token.email in resource.data.get('invitedEmails', []))
+      );
+
+      allow create: if isAuth()
+        && request.resource.data.userId == request.auth.uid;
+
+      allow update: if isAuth() && (
+        resource.data.userId == request.auth.uid
+        // Invité par email : convertit son invitation en accès à la connexion
+        || (request.auth.token.email != null
+            && request.auth.token.email in resource.data.get('invitedEmails', [])
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['sharedWith', 'invitedEmails']))
+      );
+
+      allow delete: if isAuth() && resource.data.userId == request.auth.uid;
+    }
+
+    // ── Memories ────────────────────────────────────────────────────────────
+    // Trois portes d'entrée, dans l'ordre du moins cher au plus cher :
+    //  1. `userId`     → le propriétaire ;
+    //  2. `sharedWith` → un collaborateur, via un tag partagé (champ recopié) ;
+    //  3. `notebookId` → repli pour les souvenirs d'avant les tags (une lecture
+    //     supplémentaire ; disparaîtra quand tous les comptes seront migrés).
     match /memories/{memoryId} {
-      allow read: if isAuth() && canAccessNotebook(resource.data.notebookId);
-      allow create: if isAuth() && canAccessNotebook(request.resource.data.notebookId);
-      // Interdit de déplacer un souvenir vers un carnet auquel on n'a pas accès
+      function memberOfMemory(mem) {
+        return mem.get('userId', '') == request.auth.uid
+            || request.auth.uid in mem.get('sharedWith', [])
+            || (mem.get('notebookId', '') != ''
+                && canAccessNotebook(mem.notebookId));
+      }
+
+      allow read: if isAuth() && memberOfMemory(resource.data);
+      allow create: if isAuth()
+        && request.resource.data.get('userId', '') == request.auth.uid;
       allow update: if isAuth()
-        && canAccessNotebook(resource.data.notebookId)
-        && request.resource.data.notebookId == resource.data.notebookId;
-      allow delete: if isAuth() && canAccessNotebook(resource.data.notebookId);
+        && memberOfMemory(resource.data)
+        && memberOfMemory(request.resource.data);
+      allow delete: if isAuth() && memberOfMemory(resource.data);
     }
 
     // ── Books (histoires IA, legacy) ────────────────────────────────────────

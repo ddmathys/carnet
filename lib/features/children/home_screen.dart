@@ -2,20 +2,23 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
+import '../../core/models/tag_model.dart';
+import '../../core/models/generated_book_model.dart';
 import '../../core/constants/milestone_types.dart';
-import '../../core/services/photo_service.dart';
+import '../../core/services/book_history_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
-import '../library/book_shelf.dart';
+import '../../core/services/tag_service.dart';
 import '../memories/widgets/memory_polaroid.dart';
 import '../memories/widgets/import_media_cta.dart';
 
+/// Dashboard : importer un média (le geste principal), les derniers souvenirs,
+/// les tags qui les organisent, les livres déjà faits — et, tout en bas, la
+/// création d'un nouveau livre.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -27,15 +30,20 @@ class _HomeScreenState extends State<HomeScreen> {
   QuotaStatus? _videoQuota;
   QuotaStatus? _audioQuota;
   String _tier = 'free';
-  List<NotebookModel> _ownNotebooks = [];
-  List<NotebookModel> _sharedNotebooks = [];
-  // Nombre réel de souvenirs par carnet (le champ notebook.memoriesCount n'est
-  // jamais incrémenté → on compte en direct via une requête d'agrégation).
-  Map<String, int> _memCounts = {};
-  // 3 souvenirs les plus récents (tous carnets confondus) pour le dashboard.
+
+  List<TagModel> _myTags = [];
+  List<TagModel> _sharedTags = [];
   List<MemoryModel> _recentMemories = [];
-  StreamSubscription? _ownSub;
-  StreamSubscription? _sharedSub;
+  Map<String, int> _memoriesPerTag = {};
+
+  StreamSubscription? _myTagsSub;
+  StreamSubscription? _sharedTagsSub;
+  StreamSubscription? _mineSub;
+  StreamSubscription? _sharedMemSub;
+
+  // Les souvenirs arrivent par deux flux (les miens, ceux qu'on m'a partagés) :
+  // on les fusionne par id avant d'afficher.
+  final Map<String, MemoryModel> _memoriesById = {};
 
   @override
   void initState() {
@@ -46,96 +54,52 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   void dispose() {
-    _ownSub?.cancel();
-    _sharedSub?.cancel();
+    _myTagsSub?.cancel();
+    _sharedTagsSub?.cancel();
+    _mineSub?.cancel();
+    _sharedMemSub?.cancel();
     super.dispose();
   }
 
   void _setupStreams() {
     final uid = FirebaseAuth.instance.currentUser!.uid;
 
-    _ownSub = FirebaseFirestore.instance
-        .collection('notebooks')
+    _myTagsSub = TagService.streamMine().listen((tags) {
+      if (mounted) setState(() => _myTags = tags);
+    });
+    _sharedTagsSub = TagService.streamSharedWithMe().listen((tags) {
+      if (mounted) setState(() => _sharedTags = tags);
+    });
+
+    final memories = FirebaseFirestore.instance.collection('memories');
+    _mineSub = memories
         .where('userId', isEqualTo: uid)
         .snapshots()
-        .listen((snap) {
-      if (!mounted) return;
-      setState(() {
-        _ownNotebooks = snap.docs
-            .map((d) => NotebookModel.fromFirestore(d))
-            .toList()
-          ..sort((a, b) => (b.lastMemoryAt ?? b.createdAt)
-              .compareTo(a.lastMemoryAt ?? a.createdAt));
-      });
-      _refreshMemCounts();
-      _refreshRecentMemories();
-    });
-
-    _sharedSub = FirebaseFirestore.instance
-        .collection('notebooks')
+        .listen((snap) => _mergeMemories(snap));
+    _sharedMemSub = memories
         .where('sharedWith', arrayContains: uid)
         .snapshots()
-        .listen((snap) {
-      if (!mounted) return;
-      setState(() {
-        _sharedNotebooks = snap.docs
-            .map((d) => NotebookModel.fromFirestore(d))
-            .toList()
-          ..sort((a, b) => (b.lastMemoryAt ?? b.createdAt)
-              .compareTo(a.lastMemoryAt ?? a.createdAt));
-      });
-      _refreshMemCounts();
-      _refreshRecentMemories();
-    });
+        .listen((snap) => _mergeMemories(snap));
   }
 
-  // Compte les souvenirs de chaque carnet (agrégation côté serveur — ne lit pas
-  // les documents). Rafraîchi à chaque changement de la liste des carnets.
-  Future<void> _refreshMemCounts() async {
-    final ids = <String>{
-      ..._ownNotebooks.map((n) => n.id),
-      ..._sharedNotebooks.map((n) => n.id),
-    };
+  void _mergeMemories(QuerySnapshot<Map<String, dynamic>> snap) {
+    for (final d in snap.docs) {
+      _memoriesById[d.id] = MemoryModel.fromFirestore(d);
+    }
+    final all = _memoriesById.values.toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
     final counts = <String, int>{};
-    await Future.wait(ids.map((id) async {
-      try {
-        final agg = await FirebaseFirestore.instance
-            .collection('memories')
-            .where('notebookId', isEqualTo: id)
-            .count()
-            .get();
-        counts[id] = agg.count ?? 0;
-      } catch (_) {}
-    }));
-    if (mounted) setState(() => _memCounts = counts);
-  }
-
-  // Les 3 souvenirs les plus récents, tous carnets confondus. Les souvenirs
-  // sont indexés par `notebookId` (pas `userId`) → on interroge par lots de 10
-  // (limite `whereIn`), on fusionne et on trie côté client. Rafraîchi quand la
-  // liste des carnets change (un nouveau souvenir met à jour son carnet).
-  Future<void> _refreshRecentMemories() async {
-    final ids = <String>{
-      ..._ownNotebooks.map((n) => n.id),
-      ..._sharedNotebooks.map((n) => n.id),
-    }.toList();
-    if (ids.isEmpty) {
-      if (mounted) setState(() => _recentMemories = []);
-      return;
+    for (final m in all) {
+      for (final id in m.tagIds) {
+        counts[id] = (counts[id] ?? 0) + 1;
+      }
     }
-    final all = <MemoryModel>[];
-    for (var i = 0; i < ids.length; i += 10) {
-      final batch = ids.sublist(i, i + 10 > ids.length ? ids.length : i + 10);
-      try {
-        final snap = await FirebaseFirestore.instance
-            .collection('memories')
-            .where('notebookId', whereIn: batch)
-            .get();
-        all.addAll(snap.docs.map((d) => MemoryModel.fromFirestore(d)));
-      } catch (_) {}
+    if (mounted) {
+      setState(() {
+        _recentMemories = all.take(3).toList();
+        _memoriesPerTag = counts;
+      });
     }
-    all.sort((a, b) => b.date.compareTo(a.date));
-    if (mounted) setState(() => _recentMemories = all.take(3).toList());
   }
 
   Future<void> _loadQuota() async {
@@ -157,14 +121,20 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      body: _buildBody(context),
+    );
+  }
+
   Widget _buildBody(BuildContext context) {
-    final allOwn = _ownNotebooks;
-    final allShared = _sharedNotebooks;
-    final isEmpty = allOwn.isEmpty && allShared.isEmpty;
+    final allTags = [..._myTags, ..._sharedTags];
+    final hasMemories = _memoriesById.isNotEmpty;
 
     return CustomScrollView(
       slivers: [
-        // 1) Logo
         SliverToBoxAdapter(
           child: _TopBar(
             initial: _initial,
@@ -176,48 +146,43 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
 
-        // 2) Le livre → page « créer un livre »
+        // 1) Le geste principal : importer des médias → nouveau souvenir.
+        SliverToBoxAdapter(
+          child: ImportMediaCta(
+              onTap: () => context.push('/memory/new?import=1')),
+        ),
+
+        _ActiveOrdersBanner(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
+
+        if (!hasMemories)
+          const SliverToBoxAdapter(child: _EmptyState())
+        else ...[
+          // 2) Les derniers souvenirs.
+          _sectionHeader('Mes derniers souvenirs', 'Tout voir',
+              onAction: () => context.push('/memories')),
+          SliverToBoxAdapter(child: _recentMemoriesRail(context)),
+
+          // 3) Les tags — l'organisation des souvenirs.
+          if (allTags.isNotEmpty) ...[
+            _sectionHeader('Mes tags', '${allTags.length}'),
+            SliverToBoxAdapter(child: _tagsWrap(context, allTags)),
+          ],
+        ],
+
+        // 4) Les livres déjà faits (PDF générés et livres commandés).
+        _sectionHeader('Mes livres', 'Tout voir',
+            onAction: () => context.push('/books')),
+        SliverToBoxAdapter(child: _booksRail(context)),
+
+        // 5) Créer un livre — tout en bas, l'aboutissement.
         SliverToBoxAdapter(
           child: _CreateBookCta(onTap: () => context.push('/book/select')),
         ),
-
-        // 3) Importer des médias (créer un souvenir)
-        SliverToBoxAdapter(
-          child: ImportMediaCta(onTap: () => _startCreateMemory(context)),
-        ),
-
-        // ── Commandes en cours ───────────────────────────────────────
-        _ActiveOrdersBanner(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
-
-        // 4) Mes derniers souvenirs (3, format polaroïde)
-        if (_recentMemories.isNotEmpty) ...[
-          _sectionHeader('Mes derniers souvenirs', ''),
-          SliverToBoxAdapter(child: _recentMemoriesRail(context)),
-        ],
-
-        // 5) Mes carnets (même format) + bouton « + » à la fin
-        if (isEmpty)
-          const SliverToBoxAdapter(child: _EmptyState())
-        else ...[
-          if (allOwn.isNotEmpty) ...[
-            _sectionHeader('Mes carnets',
-                '${allOwn.length} carnet${allOwn.length > 1 ? 's' : ''}'),
-            SliverToBoxAdapter(
-              child: _carnetRail(context, allOwn, true,
-                  onAdd: () => context.push('/notebook/create/template')),
-            ),
-          ],
-          if (allShared.isNotEmpty) ...[
-            _sectionHeader('Partagés avec moi', '${allShared.length}'),
-            SliverToBoxAdapter(child: _carnetRail(context, allShared, false)),
-          ],
-        ],
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );
   }
 
-  // Rangée horizontale des 3 derniers souvenirs (format polaroïde partagé).
   Widget _recentMemoriesRail(BuildContext context) {
     return SizedBox(
       height: 210,
@@ -234,12 +199,65 @@ class _HomeScreenState extends State<HomeScreen> {
               memory: m,
               cat: _safeCat(m.type),
               tilt: (i % 2 == 0) ? -0.02 : 0.02,
-              onTap: () => context
-                  .push('/notebook/${m.notebookId}/edit-memory/${m.id}'),
+              onTap: () => context.push('/memory/${m.id}/edit'),
             ),
           );
         },
       ),
+    );
+  }
+
+  Widget _tagsWrap(BuildContext context, List<TagModel> tags) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 4, 22, 4),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final t in tags)
+            GestureDetector(
+              onTap: () => context.push('/memories?tag=${t.id}'),
+              child: _TagPill(
+                tag: t,
+                count: _memoriesPerTag[t.id] ?? 0,
+                shared: t.isShared || !t.isOwner(_uid),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Rangée « Mes livres » : PDF générés et livres commandés, du plus récent au
+  /// plus ancien. Vide → une invitation discrète à en créer un.
+  Widget _booksRail(BuildContext context) {
+    return StreamBuilder<List<GeneratedBookModel>>(
+      stream: BookHistoryService.streamForUser(),
+      builder: (context, snap) {
+        final books = snap.data ?? const <GeneratedBookModel>[];
+        if (books.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.fromLTRB(22, 2, 22, 6),
+            child: Text(
+              'Aucun livre pour l\'instant — compose-en un depuis tes tags.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 13),
+            ),
+          );
+        }
+        return SizedBox(
+          height: 176,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+            itemCount: books.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 14),
+            itemBuilder: (_, i) => _BookCard(
+              book: books[i],
+              onTap: () => context.push('/books'),
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -251,43 +269,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  // Carnets en livres sur une étagère (les uns après les autres).
-  Widget _carnetRail(
-      BuildContext context, List<NotebookModel> list, bool owner,
-      {VoidCallback? onAdd}) {
-    return BookShelfRail(
-      books: [for (final n in list) _notebookBook(context, n, owner)],
-      onAdd: onAdd,
-    );
-  }
+  String get _uid => FirebaseAuth.instance.currentUser?.uid ?? '';
 
-  ShelfBook _notebookBook(
-      BuildContext context, NotebookModel n, bool owner) {
-    // Tous les carnets au même format (même hauteur / largeur).
-    const h = 176.0;
-    Color color;
-    try {
-      color =
-          Color(int.parse('FF${n.coverColor.replaceAll('#', '')}', radix: 16));
-    } catch (_) {
-      color = AppColors.sage;
-    }
-    return ShelfBook(
-      coverUrl: n.coverPhotoUrl,
-      coverColor: color,
-      emoji: n.emoji,
-      title: n.title,
-      kind: n.subtitle,
-      width: 104,
-      height: h,
-      tilt: 0.42,
-      flag: owner ? null : 'partagé',
-      onTap: () => context.go('/notebook/${n.id}/dashboard'),
-      onLongPress: owner ? () => _confirmDeleteNotebook(context, n) : null,
-    );
-  }
-
-  // ── Jauge d'espace (compteur discret dans le header) ───────────────────
   double get _maxUsageRatio {
     final rs = [
       _quota?.ratio ?? 0,
@@ -305,29 +288,6 @@ class _HomeScreenState extends State<HomeScreen> {
   String get _initial {
     final e = FirebaseAuth.instance.currentUser?.email ?? '';
     return e.isNotEmpty ? e[0].toUpperCase() : '·';
-  }
-
-  // Flux « importer des médias » : choisir le carnet cible → écran de création
-  // qui ouvre directement la galerie (?import=1), puis l'utilisateur finalise
-  // le formulaire (titre, description facultative, date, lieu).
-  Future<void> _startCreateMemory(BuildContext context) async {
-    final books = _ownNotebooks;
-    if (books.isEmpty) {
-      context.push('/notebook/create/template');
-      return;
-    }
-    if (books.length == 1) {
-      context.push('/notebook/${books.first.id}/add-memory?import=1');
-      return;
-    }
-    final chosen = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _PickNotebookSheet(notebooks: books),
-    );
-    if (chosen != null && context.mounted) {
-      context.push('/notebook/$chosen/add-memory?import=1');
-    }
   }
 
   void _showMonEspace(BuildContext context) {
@@ -348,37 +308,8 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Future<void> _confirmDeleteNotebook(
-      BuildContext context, NotebookModel n) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Supprimer ce carnet ?',
-            style: TextStyle(
-                fontFamily: 'PlayfairDisplay',
-                fontWeight: FontWeight.bold,
-                color: AppColors.textDark)),
-        content: Text(
-            'Le carnet "${n.title}" et tous ses souvenirs seront supprimés.',
-            style: const TextStyle(color: AppColors.textMedium, height: 1.5)),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Annuler')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-              child: const Text('Supprimer')),
-        ],
-      ),
-    );
-    if (ok == true) {
-      await PhotoService.deleteNotebookCascade(n.id);
-    }
-  }
-
-  SliverToBoxAdapter _sectionHeader(String title, String count) =>
+  SliverToBoxAdapter _sectionHeader(String title, String trailing,
+          {VoidCallback? onAction}) =>
       SliverToBoxAdapter(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(22, 16, 22, 8),
@@ -386,10 +317,22 @@ class _HomeScreenState extends State<HomeScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(title,
-                style: const TextStyle(
-                  fontSize: 12, fontWeight: FontWeight.w700,
-                  color: AppColors.textMedium, letterSpacing: 1.2)),
-              Text(count, style: const TextStyle(fontSize: 12, color: AppColors.textMedium)),
+                  style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textMedium,
+                      letterSpacing: 1.2)),
+              GestureDetector(
+                onTap: onAction,
+                child: Text(trailing,
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight:
+                            onAction != null ? FontWeight.w600 : FontWeight.w400,
+                        color: onAction != null
+                            ? AppColors.sageDark
+                            : AppColors.textMedium)),
+              ),
             ],
           ),
         ),
@@ -401,21 +344,10 @@ class _HomeScreenState extends State<HomeScreen> {
     if (h < 18) return 'Bon après-midi';
     return 'Bonsoir';
   }
-
-  @override
-  Widget build(BuildContext context) {
-    // Plus de FAB : le livre et la création de carnet ont leurs propres entrées
-    // dans le corps du dashboard (bouton livre en haut, « + » sur l'étagère).
-    return Scaffold(
-      backgroundColor: AppColors.background,
-      body: _buildBody(context),
-    );
-  }
 }
 
-// ── Hero header ──────────────────────────────────────────────────────────────
+// ── Barre du haut : logo + jauge d'espace + avatar ───────────────────────────
 
-// ── Barre du haut : logo + jauge d'espace + avatar ─────────────────────────
 class _TopBar extends StatelessWidget {
   final String initial;
   final double maxUsage;
@@ -438,8 +370,6 @@ class _TopBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 10, 18, 2),
         child: Row(
           children: [
-            // Logo repensé (terracotta) : badge plein + mot « Carnet » sur une
-            // ligne, dans la police serif de la nouvelle identité.
             Container(
               width: 36,
               height: 36,
@@ -504,7 +434,6 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-// Anneau circulaire discret : usage max parmi photos/vidéos/vocaux.
 class _SpaceGauge extends StatelessWidget {
   final double ratio;
   final bool warn;
@@ -598,7 +527,144 @@ class _HeroGreeting extends StatelessWidget {
   }
 }
 
-// « Le livre » : bandeau cliquable menant à la page de création de livre.
+// ── Tag ──────────────────────────────────────────────────────────────────────
+
+class _TagPill extends StatelessWidget {
+  final TagModel tag;
+  final int count;
+  final bool shared;
+  const _TagPill(
+      {required this.tag, required this.count, required this.shared});
+
+  Color get _color {
+    try {
+      return Color(int.parse('FF${tag.color.replaceAll('#', '')}', radix: 16));
+    } catch (_) {
+      return AppColors.sage;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      decoration: BoxDecoration(
+        color: _color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(color: _color.withOpacity(0.45), width: 1),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (tag.isChild) ...[
+            const Text('👶', style: TextStyle(fontSize: 12)),
+            const SizedBox(width: 5),
+          ],
+          Text(tag.label,
+              style: TextStyle(
+                  color: _color,
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600)),
+          if (count > 0) ...[
+            const SizedBox(width: 6),
+            Text('$count',
+                style: TextStyle(
+                    color: _color.withOpacity(0.7),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w500)),
+          ],
+          if (shared) ...[
+            const SizedBox(width: 5),
+            Icon(Icons.people_outline, size: 13, color: _color.withOpacity(0.8)),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── Livre (carte de l'étagère « Mes livres ») ────────────────────────────────
+
+class _BookCard extends StatelessWidget {
+  final GeneratedBookModel book;
+  final VoidCallback onTap;
+  const _BookCard({required this.book, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 118,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 118,
+              height: 132,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF3C2814).withOpacity(0.25),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    book.title,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFamily: 'Fraunces',
+                      color: Colors.white,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      height: 1.2,
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 7, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.18),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      book.isPrinted ? 'commandé' : 'PDF',
+                      style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${book.memoriesCount} souvenir${book.memoriesCount > 1 ? 's' : ''}',
+              style: const TextStyle(fontSize: 11.5, color: AppColors.textMedium),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// « Créer un livre » : le bandeau d'aboutissement, en bas du dashboard.
 class _CreateBookCta extends StatelessWidget {
   final VoidCallback onTap;
   const _CreateBookCta({required this.onTap});
@@ -606,7 +672,7 @@ class _CreateBookCta extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 6, 22, 4),
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 4),
       child: GestureDetector(
         onTap: onTap,
         child: Container(
@@ -651,7 +717,7 @@ class _CreateBookCta extends StatelessWidget {
                           color: Colors.white,
                         )),
                     SizedBox(height: 3),
-                    Text('Transforme tes souvenirs en livre imprimé.',
+                    Text('Choisis un tag ou tes souvenirs un par un.',
                         style: TextStyle(fontSize: 12.5, color: Colors.white70)),
                   ],
                 ),
@@ -665,266 +731,8 @@ class _CreateBookCta extends StatelessWidget {
   }
 }
 
-// Carte carnet façon vignette (maquette terracotta).
-class _CarnetCard extends StatelessWidget {
-  final NotebookModel notebook;
-  final int? count;
-  final VoidCallback onTap;
-  final VoidCallback? onLongPress;
-  const _CarnetCard({
-    required this.notebook,
-    required this.count,
-    required this.onTap,
-    this.onLongPress,
-  });
+// ── Feuille « Mon espace » ───────────────────────────────────────────────────
 
-  Color get _cover {
-    try {
-      return Color(
-          int.parse('FF${notebook.coverColor.replaceAll('#', '')}', radix: 16));
-    } catch (_) {
-      return AppColors.sage;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final c = count ?? notebook.memoriesCount;
-    return GestureDetector(
-      onTap: onTap,
-      onLongPress: onLongPress,
-      child: SizedBox(
-        width: 140,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(16),
-              child: SizedBox(
-                height: 142,
-                width: 140,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    if (notebook.coverPhotoUrl != null &&
-                        notebook.coverPhotoUrl!.isNotEmpty)
-                      CachedNetworkImage(
-                        imageUrl: notebook.coverPhotoUrl!,
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) => _plain(),
-                        errorWidget: (_, __, ___) => _plain(),
-                      )
-                    else
-                      _plain(),
-                    Positioned(
-                      top: 9,
-                      right: 9,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withOpacity(0.92),
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                        child: Text('🖼 $c',
-                            style: const TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                                color: AppColors.textDark)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(notebook.title,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textDark)),
-            const SizedBox(height: 1),
-            Text(notebook.subtitle,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style:
-                    const TextStyle(fontSize: 12, color: AppColors.textMedium)),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _plain() => Container(
-        color: _cover,
-        alignment: Alignment.center,
-        child: Text(notebook.emoji, style: const TextStyle(fontSize: 40)),
-      );
-}
-
-class _NewCarnetCard extends StatelessWidget {
-  final VoidCallback onTap;
-  const _NewCarnetCard({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 130,
-        height: 150,
-        decoration: BoxDecoration(
-          color: AppColors.cream,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.sage.withOpacity(0.5), width: 1.5),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 8,
-                      offset: const Offset(0, 3)),
-                ],
-              ),
-              child: const Icon(Icons.add, color: AppColors.sage, size: 22),
-            ),
-            const SizedBox(height: 9),
-            const Text('Nouveau carnet',
-                style: TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w500,
-                    color: AppColors.sage)),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Sélecteur de carnet quand on crée un souvenir depuis l'accueil.
-class _PickNotebookSheet extends StatelessWidget {
-  final List<NotebookModel> notebooks;
-  const _PickNotebookSheet({required this.notebooks});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      decoration: const BoxDecoration(
-        color: AppColors.background,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(26)),
-      ),
-      padding: const EdgeInsets.fromLTRB(22, 10, 22, 8),
-      child: SafeArea(
-        top: false,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40,
-                height: 4,
-                margin: const EdgeInsets.only(bottom: 16),
-                decoration: BoxDecoration(
-                    color: AppColors.softGray,
-                    borderRadius: BorderRadius.circular(99)),
-              ),
-            ),
-            const Text('Dans quel carnet ?',
-                style: TextStyle(
-                    fontFamily: 'Fraunces',
-                    fontSize: 21,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.textDark)),
-            const SizedBox(height: 4),
-            const Text('Choisis où ranger ce souvenir.',
-                style: TextStyle(fontSize: 12.5, color: AppColors.textMedium)),
-            const SizedBox(height: 14),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: notebooks.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 8),
-                itemBuilder: (_, i) {
-                  final n = notebooks[i];
-                  Color color;
-                  try {
-                    color = Color(int.parse(
-                        'FF${n.coverColor.replaceAll('#', '')}',
-                        radix: 16));
-                  } catch (_) {
-                    color = AppColors.sage;
-                  }
-                  return GestureDetector(
-                    onTap: () => Navigator.pop(context, n.id),
-                    child: Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(14),
-                        border:
-                            Border.all(color: AppColors.border, width: 0.5),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 42,
-                            height: 42,
-                            alignment: Alignment.center,
-                            decoration: BoxDecoration(
-                                color: color,
-                                borderRadius: BorderRadius.circular(11)),
-                            child: Text(n.emoji,
-                                style: const TextStyle(fontSize: 20)),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(n.title,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.textDark)),
-                                Text(n.subtitle,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 12,
-                                        color: AppColors.textMedium)),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.chevron_right,
-                              color: AppColors.sage, size: 20),
-                        ],
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// Feuille « Mon espace » : compteurs discrets + alerte ciblée.
 class _MonEspaceSheet extends StatelessWidget {
   final String tier;
   final QuotaStatus? quota;
@@ -1012,8 +820,7 @@ class _MonEspaceSheet extends StatelessWidget {
                           SizedBox(height: 2),
                           Text('Médias sans limite + livres −20 %',
                               style: TextStyle(
-                                  fontSize: 12,
-                                  color: AppColors.textMedium)),
+                                  fontSize: 12, color: AppColors.textMedium)),
                         ],
                       ),
                     ),
@@ -1026,8 +833,8 @@ class _MonEspaceSheet extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(99)),
                       ),
-                      child: const Text('Découvrir',
-                          style: TextStyle(fontSize: 13)),
+                      child:
+                          const Text('Découvrir', style: TextStyle(fontSize: 13)),
                     ),
                   ],
                 ),
@@ -1100,262 +907,7 @@ class _GaugeRow extends StatelessWidget {
   }
 }
 
-class _HeroHeader extends StatelessWidget {
-  final String greeting;
-  final int notebookCount;
-  final int memoryCount;
-  final QuotaStatus? quota;
-  final QuotaStatus? videoQuota;
-  final QuotaStatus? audioQuota;
-  final String tier;
-  final VoidCallback onProfile;
-  final VoidCallback onSubscription;
-
-  const _HeroHeader({
-    required this.greeting,
-    required this.notebookCount,
-    required this.memoryCount,
-    required this.quota,
-    required this.videoQuota,
-    required this.audioQuota,
-    required this.tier,
-    required this.onProfile,
-    required this.onSubscription,
-  });
-
-  // Message d'alerte pour la 1re ressource proche de sa limite (photos →
-  // vidéos → vocaux), ou null si tout va bien.
-  String? _firstQuotaAlert() {
-    final candidates = <(String, QuotaStatus?)>[
-      ('photos', quota),
-      ('vidéos', videoQuota),
-      ('vocaux', audioQuota),
-    ];
-    for (final (label, q) in candidates) {
-      if (q != null && q.nearLimit) {
-        return q.isAtLimit
-            ? 'Limite $label atteinte — Passer à Premium →'
-            : '${q.remaining} $label restant${q.remaining > 1 ? 's' : ''} — Passer à Premium →';
-      }
-    }
-    return null;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // Gradient wraps all content so the quota alert is never clipped
-    return Container(
-      decoration: const BoxDecoration(gradient: AppColors.heroGradient),
-      child: Stack(
-        children: [
-          // Decorative circles (Positioned so they don't affect Stack size)
-          Positioned(
-            top: -60, right: -60,
-            child: Container(
-              width: 220, height: 220,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                border: Border.all(color: Colors.white.withOpacity(0.07), width: 1.5),
-              ),
-            ),
-          ),
-          Positioned(
-            top: -20, right: -20,
-            child: Container(
-              width: 130, height: 130,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withOpacity(0.05),
-              ),
-            ),
-          ),
-          // Content determines the height of the whole widget
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(22, 16, 22, 24),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Top bar
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '$greeting 👋',
-                              style: TextStyle(
-                                color: Colors.white.withOpacity(0.75),
-                                fontSize: 13,
-                              ),
-                            ),
-                            const SizedBox(height: 2),
-                            const Text(
-                              'Mes carnets',
-                              style: TextStyle(
-                                fontFamily: 'PlayfairDisplay',
-                                fontSize: 30,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                                height: 1.1,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      GestureDetector(
-                        onTap: onProfile,
-                        child: Container(
-                          width: 40, height: 40,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.15),
-                            shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white.withOpacity(0.3)),
-                          ),
-                          child: const Icon(Icons.person_outline, color: Colors.white, size: 20),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                  // Stats chips
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 6,
-                    children: [
-                      _HeroChip(
-                        icon: Icons.book_outlined,
-                        label: '$notebookCount carnet${notebookCount != 1 ? 's' : ''}',
-                      ),
-                      _HeroChip(
-                        icon: Icons.auto_stories_outlined,
-                        label: '$memoryCount souvenir${memoryCount != 1 ? 's' : ''}',
-                      ),
-                      // Quotas affichés pour TOUS les paliers (premium inclus)
-                      // pour que l'utilisateur voie toujours sa consommation.
-                      if (quota != null)
-                          GestureDetector(
-                            onTap: onSubscription,
-                            child: _HeroChip(
-                              icon: Icons.photo_outlined,
-                              label: '${quota!.current}/${quota!.limit} photos',
-                              warn: quota!.nearLimit,
-                            ),
-                          ),
-                        if (videoQuota != null)
-                          GestureDetector(
-                            onTap: onSubscription,
-                            child: _HeroChip(
-                              icon: Icons.videocam_outlined,
-                              label:
-                                  '${videoQuota!.current}/${videoQuota!.limit} vidéos',
-                              warn: videoQuota!.nearLimit,
-                            ),
-                          ),
-                        if (audioQuota != null)
-                          GestureDetector(
-                            onTap: onSubscription,
-                            child: _HeroChip(
-                              icon: Icons.mic_none_outlined,
-                              label:
-                                  '${audioQuota!.current}/${audioQuota!.limit} vocaux',
-                              warn: audioQuota!.nearLimit,
-                            ),
-                          ),
-                    ],
-                  ),
-                  // Alerte premium — pour la 1re ressource proche de sa limite.
-                  if (tier == 'free') ...[
-                    Builder(builder: (_) {
-                      final alert = _firstQuotaAlert();
-                      if (alert == null) return const SizedBox.shrink();
-                      return Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: GestureDetector(
-                          onTap: onSubscription,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.12),
-                              borderRadius: BorderRadius.circular(8),
-                              border:
-                                  Border.all(color: Colors.white.withOpacity(0.25)),
-                            ),
-                            child: Row(children: [
-                              const Icon(Icons.warning_amber_outlined,
-                                  color: Colors.white, size: 14),
-                              const SizedBox(width: 6),
-                              Expanded(
-                                child: Text(
-                                  alert,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w500),
-                                ),
-                              ),
-                            ]),
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeroChip extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final bool warn;
-  const _HeroChip({required this.icon, required this.label, this.warn = false});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: warn
-            ? Colors.orange.withOpacity(0.25)
-            : Colors.white.withOpacity(0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: warn
-              ? Colors.orange.withOpacity(0.5)
-              : Colors.white.withOpacity(0.3),
-          width: 0.5,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 13, color: Colors.white.withOpacity(0.9)),
-          const SizedBox(width: 5),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 12,
-              color: Colors.white.withOpacity(0.9),
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── Écran vide ───────────────────────────────────────────────────────────────
 
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
@@ -1368,7 +920,8 @@ class _EmptyState extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Container(
-              width: 90, height: 90,
+              width: 90,
+              height: 90,
               decoration: BoxDecoration(
                 gradient: RadialGradient(colors: [
                   AppColors.sage.withOpacity(0.18),
@@ -1376,29 +929,26 @@ class _EmptyState extends StatelessWidget {
                 ]),
                 shape: BoxShape.circle,
               ),
-              child: const Center(child: Text('📔', style: TextStyle(fontSize: 40))),
+              child:
+                  const Center(child: Text('📸', style: TextStyle(fontSize: 40))),
             ),
             const SizedBox(height: 22),
             const Text(
-              'Ton premier carnet t\'attend',
+              'Ton premier souvenir t\'attend',
               style: TextStyle(
-                fontFamily: 'PlayfairDisplay',
+                fontFamily: 'Fraunces',
                 fontSize: 22,
-                fontWeight: FontWeight.bold,
+                fontWeight: FontWeight.w600,
                 color: AppColors.textDark,
               ),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 10),
             const Text(
-              'Voyage, famille, enfant, grossesse…\nchaque histoire mérite d\'être racontée.',
+              'Importe des photos ou des vidéos :\nl\'année et le lieu deviennent tes premiers tags.',
               textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textMedium, height: 1.6, fontSize: 14),
-            ),
-            const SizedBox(height: 28),
-            ElevatedButton(
-              onPressed: () => context.push('/notebook/create/template'),
-              child: const Text('Créer un carnet'),
+              style: TextStyle(
+                  color: AppColors.textMedium, height: 1.6, fontSize: 14),
             ),
           ],
         ),
@@ -1407,188 +957,7 @@ class _EmptyState extends StatelessWidget {
   }
 }
 
-// ── Notebook card ─────────────────────────────────────────────────────────────
-
-class _NotebookCard extends StatelessWidget {
-  final NotebookModel notebook;
-  final bool isOwner;
-  final int? memoryCount; // compte réel (null = pas encore chargé)
-  const _NotebookCard(
-      {required this.notebook, this.isOwner = true, this.memoryCount});
-
-  Color get _cover {
-    try {
-      return Color(int.parse('FF${notebook.coverColor.replaceAll('#', '')}', radix: 16));
-    } catch (_) { return AppColors.sage; }
-  }
-
-  Future<void> _confirmDelete(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Supprimer ce carnet ?',
-          style: TextStyle(fontFamily: 'PlayfairDisplay', fontWeight: FontWeight.bold, color: AppColors.textDark)),
-        content: Text('Le carnet "${notebook.title}" et tous ses souvenirs seront supprimés.',
-          style: const TextStyle(color: AppColors.textMedium, height: 1.5)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Annuler')),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.error, minimumSize: Size.zero,
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10)),
-            child: const Text('Supprimer')),
-        ],
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
-    await PhotoService.deleteNotebookCascade(notebook.id);
-  }
-
-  String _lastActivity() {
-    final last = notebook.lastMemoryAt;
-    if (last == null) return 'Aucun souvenir';
-    final days = DateTime.now().difference(last).inDays;
-    if (days == 0) return "Aujourd'hui";
-    if (days == 1) return 'Hier';
-    if (days < 7) return 'Il y a $days jours';
-    if (days < 30) return 'Il y a ${(days / 7).round()} sem.';
-    if (days < 365) return 'Il y a ${(days / 30).round()} mois';
-    return 'Il y a ${(days / 365).round()} an(s)';
-  }
-
-  String _typeLabel(String type) => switch (type) {
-    'enfant' => 'Carnet enfant',
-    'voyage' => 'Carnet voyage',
-    'famille' => 'Gazette familiale',
-    'grossesse' => 'Journal de grossesse',
-    'scolaire' => 'Années scolaires',
-    _ => 'Carnet',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final color = _cover;
-    return GestureDetector(
-      onTap: () => context.go('/notebook/${notebook.id}/dashboard'),
-      onLongPress: () => _confirmDelete(context),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: AppColors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppColors.border, width: 0.5),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withOpacity(0.04),
-              blurRadius: 10, offset: const Offset(0, 3),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            // Cover strip
-            ClipRRect(
-              borderRadius: const BorderRadius.only(
-                topLeft: Radius.circular(16), bottomLeft: Radius.circular(16)),
-              child: notebook.coverPhotoUrl != null
-                  ? CachedNetworkImage(
-                      imageUrl: notebook.coverPhotoUrl!,
-                      width: 85, height: 95, fit: BoxFit.cover,
-                      placeholder: (_, __) => _Strip(color: color, emoji: notebook.emoji),
-                      errorWidget: (_, __, ___) => _Strip(color: color, emoji: notebook.emoji),
-                    )
-                  : _Strip(color: color, emoji: notebook.emoji),
-            ),
-            const SizedBox(width: 14),
-            // Info
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(children: [
-                      Expanded(
-                        child: Text(notebook.title,
-                          style: const TextStyle(
-                            fontFamily: 'PlayfairDisplay', fontSize: 16,
-                            fontWeight: FontWeight.bold, color: AppColors.textDark)),
-                      ),
-                      // Shared badge
-                      if (!isOwner)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.sage.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.people_outline, size: 10, color: AppColors.sage),
-                            SizedBox(width: 3),
-                            Text('Partagé', style: TextStyle(fontSize: 10, color: AppColors.sage, fontWeight: FontWeight.w600)),
-                          ]),
-                        )
-                      else if (notebook.isShared)
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: AppColors.sage.withOpacity(0.08),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Row(mainAxisSize: MainAxisSize.min, children: [
-                            const Icon(Icons.people_outline, size: 10, color: AppColors.sage),
-                            const SizedBox(width: 3),
-                            Text(
-                              '${notebook.sharedWith.length + notebook.invitedEmails.length}',
-                              style: const TextStyle(fontSize: 10, color: AppColors.sage, fontWeight: FontWeight.w600),
-                            ),
-                          ]),
-                        ),
-                    ]),
-                    const SizedBox(height: 3),
-                    Text(_typeLabel(notebook.type),
-                      style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600)),
-                    const SizedBox(height: 8),
-                    Row(children: [
-                      Icon(Icons.auto_stories_outlined, size: 13, color: AppColors.textMedium),
-                      const SizedBox(width: 4),
-                      Text('${memoryCount ?? notebook.memoriesCount} souvenir${(memoryCount ?? notebook.memoriesCount) != 1 ? 's' : ''}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.textMedium)),
-                      const SizedBox(width: 12),
-                      Icon(Icons.access_time_outlined, size: 13, color: AppColors.textMedium),
-                      const SizedBox(width: 4),
-                      Text(_lastActivity(),
-                        style: const TextStyle(fontSize: 12, color: AppColors.textMedium)),
-                    ]),
-                  ],
-                ),
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: AppColors.softGray, size: 20),
-            const SizedBox(width: 10),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _Strip extends StatelessWidget {
-  final Color color;
-  final String emoji;
-  const _Strip({required this.color, required this.emoji});
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 85, height: 95,
-    color: color.withOpacity(0.18),
-    child: Center(child: Text(emoji, style: const TextStyle(fontSize: 38))),
-  );
-}
-
-// ── Bannière commandes en cours ───────────────────────────────────────────────
+// ── Bannière commandes en cours ──────────────────────────────────────────────
 
 class _ActiveOrdersBanner extends StatelessWidget {
   final String uid;
@@ -1617,7 +986,8 @@ class _ActiveOrdersBanner extends StatelessWidget {
               decoration: BoxDecoration(
                 color: AppColors.amber.withOpacity(0.08),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: AppColors.amber.withOpacity(0.35), width: 1),
+                border:
+                    Border.all(color: AppColors.amber.withOpacity(0.35), width: 1),
               ),
               child: Row(
                 children: [
@@ -1637,13 +1007,17 @@ class _ActiveOrdersBanner extends StatelessWidget {
                         ),
                         Text(
                           active.first.statusLabel,
-                          style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+                          style: const TextStyle(
+                              fontSize: 12, color: AppColors.textMedium),
                         ),
                       ],
                     ),
                   ),
                   const Text('Voir →',
-                    style: TextStyle(color: AppColors.amber, fontWeight: FontWeight.w700, fontSize: 13)),
+                      style: TextStyle(
+                          color: AppColors.amber,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 13)),
                 ],
               ),
             ),

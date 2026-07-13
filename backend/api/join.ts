@@ -16,17 +16,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(400).send(page('Lien invalide', '<p>Token manquant.</p>'))
   }
 
-  let title = 'un carnet'
+  let title = 'un tag'
   let valid = false
+  const isLive = (d: Record<string, any>) =>
+    !d.revoked && !(typeof d.expiresAt === 'number' && Date.now() > d.expiresAt)
   try {
-    const snap = await db.collection('notebookInvites').doc(token).get()
-    if (snap.exists) {
-      const d = snap.data() as Record<string, any>
-      const expired =
-        typeof d.expiresAt === 'number' && Date.now() > d.expiresAt
-      if (!d.revoked && !expired) {
+    // Invitations à un tag (nouveau) ; repli sur les invitations à un carnet
+    // (liens émis avant la bascule vers les tags).
+    const tagSnap = await db.collection('tagInvites').doc(token).get()
+    if (tagSnap.exists) {
+      const d = tagSnap.data() as Record<string, any>
+      if (isLive(d)) {
         valid = true
-        title = String(d.notebookTitle ?? 'un carnet')
+        title = String(d.tagLabel ?? 'un tag')
+      }
+    } else {
+      const snap = await db.collection('notebookInvites').doc(token).get()
+      if (snap.exists) {
+        const d = snap.data() as Record<string, any>
+        if (isLive(d)) {
+          valid = true
+          title = String(d.notebookTitle ?? 'un carnet')
+        }
       }
     }
   } catch {
@@ -43,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const safeTitle = escapeHtml(title)
   const body = `
     <h1>Rejoindre « ${safeTitle} »</h1>
-    <p class="sub">Tu es invité·e à contribuer à ce carnet de souvenirs.</p>
+    <p class="sub">Tu es invité·e à voir et à enrichir ces souvenirs.</p>
     <a class="btn" href="${escapeHtml(appUrl)}">Ouvrir dans l’app</a>
     <p class="hint">L’app ne s’ouvre pas ? <a href="${escapeHtml(DOWNLOAD_URL)}">Télécharge Carnet</a>, puis rouvre ce lien.</p>
     <script>setTimeout(function(){ window.location.href = ${JSON.stringify(appUrl)} }, 600);</script>

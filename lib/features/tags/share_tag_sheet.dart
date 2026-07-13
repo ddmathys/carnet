@@ -6,36 +6,44 @@ import 'package:share_plus/share_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/models/notebook_model.dart';
+import '../../core/models/tag_model.dart';
 import '../../core/services/user_service.dart';
-import '../../core/services/notebook_share_service.dart';
+import '../../core/services/tag_service.dart';
 
-/// Sheet de partage simplifié : on génère un lien d'invitation et on le copie.
-/// Pas de champ email (donc pas de clavier) → un sheet stable et sans bug
-/// d'affichage.
-class ShareNotebookSheet extends StatefulWidget {
-  final NotebookModel notebook;
-
-  const ShareNotebookSheet({super.key, required this.notebook});
-
-  @override
-  State<ShareNotebookSheet> createState() => _ShareNotebookSheetState();
+/// Ouvre la feuille de partage d'un tag.
+Future<void> showShareTagSheet(BuildContext context, TagModel tag) {
+  return showModalBottomSheet<void>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: Colors.transparent,
+    builder: (_) => ShareTagSheet(tag: tag),
+  );
 }
 
-class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
+/// Partage d'un TAG : on génère un lien d'invitation et on l'envoie. Celui qui
+/// le suit voit tous les souvenirs portant ce tag (présents et à venir) et peut
+/// en ajouter — c'est le remplaçant du partage de carnet.
+class ShareTagSheet extends StatefulWidget {
+  final TagModel tag;
+
+  const ShareTagSheet({super.key, required this.tag});
+
+  @override
+  State<ShareTagSheet> createState() => _ShareTagSheetState();
+}
+
+class _ShareTagSheetState extends State<ShareTagSheet> {
   bool _creatingLink = false;
   String? _error;
   ({String url, String downloadUrl, String title})? _inviteData;
 
-  // Feedback transitoire « copié ✓ ».
   String? _copyFeedback;
   Timer? _copyFeedbackTimer;
 
-  // uid → {email, displayName}
   Map<String, _CollabInfo> _collabInfos = {};
 
   String get _shareMessage =>
-      '📖 Rejoins mon carnet « ${_inviteData!.title} » sur Carnet :\n'
+      '📖 Rejoins mes souvenirs « ${_inviteData!.title} » sur Carnet :\n'
       '${_inviteData!.url}\n\n'
       'Pas encore l\'app ? Installe-la, puis rouvre le lien ci-dessus :\n'
       '${_inviteData!.downloadUrl}';
@@ -53,7 +61,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   }
 
   Future<void> _loadCollabInfos() async {
-    final uids = widget.notebook.sharedWith;
+    final uids = widget.tag.sharedWith;
     if (uids.isEmpty) return;
     final infos = <String, _CollabInfo>{};
     await Future.wait(uids.map((uid) async {
@@ -72,8 +80,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
       _error = null;
     });
     try {
-      final invite =
-          await NotebookShareService.createInviteLink(widget.notebook.id);
+      final invite = await TagService.createInviteLink(widget.tag.id);
       if (!mounted) return;
       if (invite == null) {
         setState(() {
@@ -96,7 +103,6 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
     }
   }
 
-  // Affiche un « copié ✓ » avec retour haptique, puis l'efface après 2 s.
   void _flashCopied(String message) {
     HapticFeedback.selectionClick();
     _copyFeedbackTimer?.cancel();
@@ -121,33 +127,28 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
   Future<void> _shareLink() async {
     if (_inviteData == null) return;
     await Share.share(_shareMessage,
-        subject: 'Rejoins mon carnet « ${_inviteData!.title} »');
+        subject: 'Rejoins mes souvenirs « ${_inviteData!.title} »');
   }
 
-  Future<void> _removeCollaborator(String uid) async {
-    await FirebaseFirestore.instance
-        .collection('notebooks')
-        .doc(widget.notebook.id)
-        .update({
-      'sharedWith': FieldValue.arrayRemove([uid])
-    });
-    setState(() => _collabInfos.remove(uid));
+  Future<void> _removeCollaborator(TagModel tag, String uid) async {
+    await TagService.revoke(tag, uid: uid);
+    if (mounted) setState(() => _collabInfos.remove(uid));
   }
 
   @override
   Widget build(BuildContext context) {
     final currentUid = FirebaseAuth.instance.currentUser!.uid;
-    final isOwner = widget.notebook.isOwner(currentUid);
 
     return StreamBuilder<DocumentSnapshot>(
       stream: FirebaseFirestore.instance
-          .collection('notebooks')
-          .doc(widget.notebook.id)
+          .collection('tags')
+          .doc(widget.tag.id)
           .snapshots(),
       builder: (context, snap) {
-        final nb = snap.hasData && snap.data!.exists
-            ? NotebookModel.fromFirestore(snap.data!)
-            : widget.notebook;
+        final tag = snap.hasData && snap.data!.exists
+            ? TagModel.fromFirestore(snap.data!)
+            : widget.tag;
+        final isOwner = tag.isOwner(currentUid);
 
         return Container(
           constraints: BoxConstraints(
@@ -164,7 +165,6 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Handle
                 Center(
                   child: Container(
                     width: 36,
@@ -176,19 +176,17 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                     ),
                   ),
                 ),
-
-                // Title
                 Row(children: [
                   const Icon(Icons.people_outline,
                       color: AppColors.sageDark, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Partager « ${nb.title} »',
+                      'Partager « ${tag.label} »',
                       style: const TextStyle(
-                        fontFamily: 'PlayfairDisplay',
+                        fontFamily: 'Fraunces',
                         fontSize: 18,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w600,
                         color: AppColors.textDark,
                       ),
                     ),
@@ -197,18 +195,17 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                 const SizedBox(height: 4),
                 Text(
                   isOwner
-                      ? 'Génère un lien et envoie-le à qui tu veux pour lui '
-                          'donner accès à ce carnet.'
-                      : 'Tu as accès à ce carnet en tant que collaborateur.',
+                      ? 'Qui suit ce lien voit tous les souvenirs tagués '
+                          '« ${tag.label} » — y compris les prochains — et peut '
+                          'en ajouter.'
+                      : 'Ce tag t\'a été partagé : tu vois ses souvenirs et tu '
+                          'peux en ajouter.',
                   style: const TextStyle(
                       color: AppColors.textMedium, fontSize: 13, height: 1.4),
                 ),
                 const SizedBox(height: 18),
-
-                // ── Lien d'invitation (owner only) ──────────────────────────
                 if (isOwner) ...[
                   if (_inviteData == null) ...[
-                    // Étape 1 : générer le lien
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
@@ -229,7 +226,6 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                       ),
                     ),
                   ] else ...[
-                    // Étape 2 : le lien + bouton copier
                     Container(
                       padding: const EdgeInsets.symmetric(
                           horizontal: 12, vertical: 12),
@@ -258,7 +254,6 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                         ),
                       ),
                     ),
-                    // Confirmation « copié ✓ »
                     if (_copyFeedback != null) ...[
                       const SizedBox(height: 10),
                       Center(
@@ -278,7 +273,6 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                       ),
                     ],
                     const SizedBox(height: 10),
-                    // Partage natif (optionnel)
                     Row(
                       children: [
                         Expanded(
@@ -288,10 +282,8 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                             label: const Text('Partager'),
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.sageDark,
-                              side:
-                                  const BorderSide(color: AppColors.sageDark),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              side: const BorderSide(color: AppColors.sageDark),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
@@ -304,25 +296,13 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                             style: OutlinedButton.styleFrom(
                               foregroundColor: AppColors.textMedium,
                               side: const BorderSide(color: AppColors.border),
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 12),
+                              padding: const EdgeInsets.symmetric(vertical: 12),
                             ),
                           ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Astuce : « Message » copie un texte tout prêt avec le '
-                      'lien + le lien de téléchargement de l\'app.',
-                      style: TextStyle(
-                          color: AppColors.textMedium.withValues(alpha: 0.7),
-                          fontSize: 11,
-                          height: 1.4),
-                    ),
                   ],
-
-                  // Erreur éventuelle
                   if (_error != null) ...[
                     const SizedBox(height: 10),
                     Row(children: [
@@ -337,12 +317,10 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                   ],
                   const SizedBox(height: 18),
                 ],
-
-                // ── Accès actifs ────────────────────────────────────────────
-                if (nb.sharedWith.isNotEmpty) ...[
+                if (tag.sharedWith.isNotEmpty) ...[
                   const _SectionLabel('Accès actifs'),
                   const SizedBox(height: 8),
-                  ...nb.sharedWith.map((uid) {
+                  ...tag.sharedWith.map((uid) {
                     final info = _collabInfos[uid];
                     final email = info?.email ?? uid;
                     final name = info?.displayName ?? '';
@@ -351,7 +329,7 @@ class _ShareNotebookSheetState extends State<ShareNotebookSheet> {
                       label: name.isNotEmpty ? name : email,
                       subtitle: name.isNotEmpty ? email : null,
                       onRemove:
-                          isOwner ? () => _removeCollaborator(uid) : null,
+                          isOwner ? () => _removeCollaborator(tag, uid) : null,
                     );
                   }),
                 ],

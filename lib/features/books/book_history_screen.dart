@@ -7,9 +7,10 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/services/book_history_service.dart';
 
+/// « Mes livres » : tous les livres de l'utilisateur (PDF générés et livres
+/// commandés) — ils ne sont plus rangés par carnet.
 class BookHistoryScreen extends StatefulWidget {
-  final String notebookId;
-  const BookHistoryScreen({super.key, required this.notebookId});
+  const BookHistoryScreen({super.key});
 
   @override
   State<BookHistoryScreen> createState() => _BookHistoryScreenState();
@@ -84,20 +85,19 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
-          onPressed: () =>
-              context.go('/notebook/${widget.notebookId}/dashboard'),
+          onPressed: () => context.go('/home'),
         ),
         title: const Text(
           'Mes livres',
           style: TextStyle(
-            fontFamily: 'PlayfairDisplay',
-            fontWeight: FontWeight.bold,
+            fontFamily: 'Fraunces',
+            fontWeight: FontWeight.w600,
             color: AppColors.textDark,
           ),
         ),
       ),
       body: StreamBuilder<List<GeneratedBookModel>>(
-        stream: BookHistoryService.streamForNotebook(widget.notebookId),
+        stream: BookHistoryService.streamForUser(),
         builder: (context, snap) {
           if (snap.hasError) return _errorState();
           if (!snap.hasData) {
@@ -112,15 +112,16 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
               book: books[i],
               busy: _busyId == books[i].id,
               onShare: () => _share(books[i]),
-              onOrder: () => context
-                  .push('/notebook/${books[i].notebookId}/book?order=1'),
+              // Commander un livre déjà généré : on repasse par la sélection
+              // (les souvenirs d'origine ne sont pas mémorisés dans l'historique).
+              onOrder: () => context.push('/book/select'),
               onDelete: () => _confirmDelete(books[i]),
             ),
           );
         },
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/notebook/${widget.notebookId}/book'),
+        onPressed: () => context.push('/book/select'),
         backgroundColor: AppColors.sage,
         foregroundColor: AppColors.white,
         icon: const Icon(Icons.add),
@@ -185,8 +186,7 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
             ),
             const SizedBox(height: 20),
             ElevatedButton.icon(
-              onPressed: () =>
-                  context.push('/notebook/${widget.notebookId}/book'),
+              onPressed: () => context.push('/book/select'),
               icon: const Icon(Icons.menu_book_outlined),
               label: const Text('Créer mon livre'),
             ),

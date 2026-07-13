@@ -15,6 +15,20 @@ class BookHistoryService {
   /// Firestore (et le flux émettrait une erreur → spinner infini).
   /// Le filtrage `notebookId` et le tri `createdAt` desc se font côté client
   /// (évite aussi un index composite).
+  /// Tous les livres de l'utilisateur — l'unité d'affichage n'est plus le
+  /// carnet : « Mes livres » est global (PDF générés + livres commandés).
+  static Stream<List<GeneratedBookModel>> streamForUser() {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return Stream.value(const []);
+    return _col.where('userId', isEqualTo: uid).snapshots().map((snap) {
+      final books = snap.docs
+          .map((d) => GeneratedBookModel.fromFirestore(d))
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      return books;
+    });
+  }
+
   static Stream<List<GeneratedBookModel>> streamForNotebook(String notebookId) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return Stream.value(const []);

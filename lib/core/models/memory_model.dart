@@ -3,6 +3,14 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 class MemoryModel {
   final String id;
   final String notebookId;
+  // Propriétaire du souvenir. Les tags (organisation + partage) vivent sur le
+  // souvenir : `tagIds` fait foi, `tagLabels` est un miroir d'affichage, et
+  // `sharedWith` est la réunion des collaborateurs des tags — c'est lui que
+  // lisent les règles Firestore pour autoriser un collaborateur.
+  final String userId;
+  final List<String> tagIds;
+  final List<String> tagLabels;
+  final List<String> sharedWith;
   final String type;
   final String? subType;
   final DateTime date;
@@ -35,6 +43,10 @@ class MemoryModel {
   const MemoryModel({
     required this.id,
     required this.notebookId,
+    this.userId = '',
+    this.tagIds = const [],
+    this.tagLabels = const [],
+    this.sharedWith = const [],
     required this.type,
     this.subType,
     required this.date,
@@ -63,6 +75,10 @@ class MemoryModel {
       id: doc.id,
       // Support both new (notebookId) and legacy (childId) field names
       notebookId: d['notebookId'] ?? d['childId'] ?? '',
+      userId: d['userId'] ?? '',
+      tagIds: List<String>.from(d['tagIds'] ?? []),
+      tagLabels: List<String>.from(d['tagLabels'] ?? []),
+      sharedWith: List<String>.from(d['sharedWith'] ?? []),
       type: d['type'] ?? 'anecdote',
       subType: d['subType'],
       date: (d['date'] as Timestamp).toDate(),
@@ -109,6 +125,10 @@ class MemoryModel {
 
   Map<String, dynamic> toFirestore() => {
         'notebookId': notebookId,
+        'userId': userId,
+        'tagIds': tagIds,
+        'tagLabels': tagLabels,
+        'sharedWith': sharedWith,
         'type': type,
         'subType': subType,
         'date': Timestamp.fromDate(date),

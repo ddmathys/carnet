@@ -16,6 +16,15 @@ export async function memoryIfMember(
   if (!memSnap.exists) return null
   const mem = memSnap.data() as Record<string, unknown>
 
+  const asStringList = (v: unknown): string[] =>
+    Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === 'string') : []
+
+  // Depuis les tags, l'appartenance est portée par le souvenir lui-même :
+  // `userId` (propriétaire) et `sharedWith` (collaborateurs des tags, recopiés).
+  // Même vérité que firestore.rules → pas de lecture du carnet nécessaire.
+  if (mem.userId === uid || asStringList(mem.sharedWith).includes(uid)) return mem
+
+  // Repli pour les souvenirs d'avant les tags : appartenance via le carnet.
   const notebookId = mem.notebookId as string | undefined
   if (!notebookId) return null
 

@@ -1,13 +1,18 @@
 import 'dart:math' show min, max;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
+import '../../core/models/tag_model.dart';
 import '../../core/data/growth_data.dart';
+import '../../core/services/memory_query_service.dart';
+import '../../core/services/space_service.dart';
+import '../../core/services/tag_service.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/widgets/date_mask_field.dart';
 
@@ -16,18 +21,18 @@ const _animalAssets = {'bear', 'dino', 'fox', 'mouse', 'penguin', 'rabbit'};
 String _animalId(NotebookModel nb) =>
     _animalAssets.contains(nb.companion) ? nb.companion! : 'bear';
 
-/// Écran Croissance / Suivi, branché sur le modèle Notebook/Memory.
-/// - Carnet « enfant » : courbe OMS (taille + poids) + toise visuelle.
-/// - Autres carnets : courbe de poids simple (suivi), sans percentiles.
-/// Les mesures sont des `memories` de type `taille_poids` du carnet.
+/// Écran Croissance / Suivi, branché sur un TAG.
+/// - Tag « enfant » (il porte une date de naissance) : courbe OMS (taille +
+///   poids) + toise visuelle.
+/// - Autre tag : courbe de poids simple (suivi), sans percentiles.
+/// Les mesures sont des `memories` de type `taille_poids` portant ce tag.
 class GrowthScreen extends StatefulWidget {
-  final String notebookId;
-  /// Ouvre directement la saisie d'une mesure au chargement (depuis le menu
-  /// « + » du carnet → Nouveau poids & taille).
+  final String tagId;
+  /// Ouvre directement la saisie d'une mesure au chargement.
   final bool startAddMeasure;
   const GrowthScreen({
     super.key,
-    required this.notebookId,
+    required this.tagId,
     this.startAddMeasure = false,
   });
 
@@ -50,36 +55,31 @@ class _GrowthScreenState extends State<GrowthScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<DocumentSnapshot>(
-      future: FirebaseFirestore.instance
-          .collection('notebooks')
-          .doc(widget.notebookId)
-          .get(),
-      builder: (context, nbSnap) {
-        if (!nbSnap.hasData) {
+    return FutureBuilder<TagModel?>(
+      future: TagService.byId(widget.tagId),
+      builder: (context, tagSnap) {
+        if (!tagSnap.hasData && tagSnap.connectionState != ConnectionState.done) {
           return const Scaffold(
               body: Center(child: CircularProgressIndicator()));
         }
-        if (!nbSnap.data!.exists) {
-          return const Scaffold(
-              body: Center(child: Text('Carnet introuvable.')));
+        final tag = tagSnap.data;
+        if (tag == null) {
+          return const Scaffold(body: Center(child: Text('Tag introuvable.')));
         }
-        final notebook = NotebookModel.fromFirestore(nbSnap.data!);
-        final isChild = notebook.type == 'enfant';
-        final name = notebook.title;
+        // Les écrans de courbes sont écrits pour un carnet : le tag leur en
+        // fournit un (titre, couleur, date de naissance) sans rien persister.
+        final notebook = tag.asNotebook();
+        final isChild = tag.isChild && tag.birthdate != null;
+        final name = tag.label;
 
-        final body = StreamBuilder<QuerySnapshot>(
-          stream: FirebaseFirestore.instance
-              .collection('memories')
-              .where('notebookId', isEqualTo: widget.notebookId)
-              .where('type', isEqualTo: 'taille_poids')
-              .snapshots(),
+        final body = StreamBuilder<List<MemoryModel>>(
+          stream: MemoryQueryService.visibleWithTag(widget.tagId),
           builder: (context, snap) {
             if (!snap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final measures = snap.data!.docs
-                .map((d) => MemoryModel.fromFirestore(d))
+            final measures = snap.data!
+                .where((m) => m.type == 'taille_poids')
                 .where((m) => m.heightCm != null || m.weightKg != null)
                 .toList()
               ..sort((a, b) => a.date.compareTo(b.date));
@@ -898,8 +898,18 @@ class _MeasureSheetState extends State<_MeasureSheet> {
 
     setState(() => _saving = true);
     final col = FirebaseFirestore.instance.collection('memories');
+    // Le « carnet » reçu ici est celui synthétisé depuis le tag : son id EST
+    // l'id du tag. La mesure est donc un souvenir tagué, rattaché à l'espace.
+    final tagId = widget.notebook.id;
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final spaceId = await SpaceService.ensureSpaceId() ?? '';
+    final allTags = await TagService.visibleTags();
     final data = {
-      'notebookId': widget.notebook.id,
+      'notebookId': spaceId,
+      'userId': uid,
+      'tagIds': [tagId],
+      'tagLabels': [widget.notebook.title],
+      'sharedWith': TagService.sharedUidsFor([tagId], allTags, uid),
       'type': 'taille_poids',
       'subType': null,
       'date': Timestamp.fromDate(_date),

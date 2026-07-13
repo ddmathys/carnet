@@ -10,11 +10,13 @@ import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
-import '../../core/models/notebook_model.dart';
+import '../../core/models/tag_model.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
+import '../../core/services/space_service.dart';
+import '../../core/services/tag_service.dart';
 import '../../core/services/video_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/constants/milestone_types.dart';
@@ -25,17 +27,18 @@ import '../milestones/widgets/growth_curve_chart.dart';
 import '../milestones/widgets/flexible_date_sheet.dart';
 
 class MemoryCreateScreen extends StatefulWidget {
-  final String notebookId;
   final String? memoryId;
-  // Flux « importer des médias » depuis le dashboard : ouvre directement la
-  // galerie une fois le carnet chargé, puis l'utilisateur finalise le formulaire.
+  // Flux « importer des médias » depuis le dashboard : ouvre la galerie
+  // d'emblée, puis l'utilisateur complète le formulaire.
   final bool startImport;
+  // Souvenir créé depuis un tag (ex. depuis la page d'un tag) → tag pré-coché.
+  final String? initialTagId;
 
   const MemoryCreateScreen({
     super.key,
-    required this.notebookId,
     this.memoryId,
     this.startImport = false,
+    this.initialTagId,
   });
 
   @override
@@ -43,10 +46,35 @@ class MemoryCreateScreen extends StatefulWidget {
 }
 
 class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
-  int _step = 0;
+  int _step = 1;
   bool get _isEditing => widget.memoryId != null;
 
-  NotebookModel? _notebook;
+  bool _ready = false;
+
+  // ── Tags ───────────────────────────────────────────────────────────────────
+  // On travaille en LIBELLÉS, pas en ids : rien n'est créé en base tant que le
+  // souvenir n'est pas enregistré (TagService.ensureTag résout label → tag).
+  final Set<String> _tagLabels = {};
+  List<TagModel> _allTags = [];
+  // Tags posés d'office (année, lieu) : on garde de quoi les remplacer quand la
+  // date ou le lieu change, et de quoi ne pas les remettre si l'utilisateur les
+  // a retirés.
+  final Set<String> _autoAdded = {};
+  final Set<String> _dismissedAuto = {};
+  String? _autoLocationLabel;
+
+  // Édition : propriétaire et carnet porteur d'origine (jamais réécrits).
+  String? _editOwnerUid;
+  String? _editNotebookId;
+
+  /// Le tag « enfant » sélectionné, s'il y en a un : il porte la date de
+  /// naissance et alimente les courbes de croissance (héritage carnet enfant).
+  TagModel? get _childTag {
+    for (final t in _allTags) {
+      if (t.isChild && _tagLabels.contains(t.label)) return t;
+    }
+    return null;
+  }
 
   // Mémo vocal (audio attaché au souvenir)
   final AudioRecorder _recorder = AudioRecorder();
@@ -100,7 +128,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   @override
   void initState() {
     super.initState();
-    _isEditing ? _loadForEdit() : _loadNotebook();
+    _isEditing ? _loadForEdit() : _loadNew();
     _loadVideoDurationCap();
   }
 
@@ -124,53 +152,118 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     super.dispose();
   }
 
-  // Choix de type (étape 0) : uniquement pour la grossesse (étapes dédiées).
-  // Partout ailleurs — y compris les carnets enfant — on va directement au
-  // formulaire « souvenir » (texte libre), comme un carnet normal.
-  bool get _hasTypePicker =>
-      _notebook != null &&
-      _notebook!.type != 'enfant' &&
-      manualCategoriesForNotebook(_notebook!.type).isNotEmpty;
-
-  Future<void> _loadNotebook() async {
-    final doc = await FirebaseFirestore.instance
-        .collection('notebooks')
-        .doc(widget.notebookId)
-        .get();
-    if (mounted && doc.exists) {
-      setState(() {
-        _notebook = NotebookModel.fromFirestore(doc);
-        // Pas de choix de type pour ce carnet → formulaire direct.
-        // Le flux « importer des médias » saute aussi le choix de type.
-        if (!_hasTypePicker || widget.startImport) {
-          _selectedCategory = 'anecdote';
-          _step = 1;
+  /// Nouveau souvenir : on charge les tags existants (pour le sélecteur), on
+  /// pose les tags automatiques (année, lieu) et on ouvre la galerie si on
+  /// arrive du bouton « Importer des médias ».
+  Future<void> _loadNew() async {
+    final tags = await TagService.visibleTags();
+    if (!mounted) return;
+    setState(() {
+      _allTags = tags;
+      _selectedCategory = 'anecdote';
+      _step = 1;
+      _ready = true;
+      final initial = widget.initialTagId;
+      if (initial != null) {
+        for (final t in tags) {
+          if (t.id == initial) _tagLabels.add(t.label);
         }
-      });
-      // Flux d'import : on ouvre la galerie tout de suite après le 1er rendu.
-      if (widget.startImport && !_isEditing) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted) _pickMediaFromGallery();
-        });
       }
+      _syncAutoTags();
+    });
+
+    if (widget.startImport) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _pickMediaFromGallery();
+      });
     }
   }
 
+  /// Tags posés d'office : l'année de la date, et le lieu s'il est renseigné.
+  /// Ils suivent les champs (changer la date change le tag d'année) mais ne
+  /// reviennent pas si l'utilisateur les a retirés à la main.
+  void _syncAutoTags() {
+    final year = '${_selectedDate.year}';
+    // Remplace un tag d'année posé automatiquement et devenu caduc.
+    _tagLabels.removeWhere((l) =>
+        _autoAdded.contains(l) &&
+        l != year &&
+        RegExp(r'^\d{4}$').hasMatch(l));
+    if (!_dismissedAuto.contains(year) && !_dateNeedsConfirmation) {
+      _tagLabels.add(year);
+      _autoAdded.add(year);
+    }
+
+    final place = _locationController.text.trim();
+    if (_autoLocationLabel != null && _autoLocationLabel != place) {
+      final old = _autoLocationLabel!;
+      if (_autoAdded.contains(old)) _tagLabels.remove(old);
+      _autoLocationLabel = null;
+    }
+    if (place.isNotEmpty && !_dismissedAuto.contains(place)) {
+      _tagLabels.add(place);
+      _autoAdded.add(place);
+      _autoLocationLabel = place;
+    }
+  }
+
+  void _toggleTag(String label) {
+    setState(() {
+      if (_tagLabels.remove(label)) {
+        // Retirer un tag automatique = un choix : on ne le remet pas d'office.
+        if (_autoAdded.contains(label)) _dismissedAuto.add(label);
+      } else {
+        _tagLabels.add(label);
+        _dismissedAuto.remove(label);
+      }
+    });
+  }
+
+  Future<void> _createTagDialog() async {
+    final ctrl = TextEditingController();
+    final label = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Nouveau tag',
+            style: TextStyle(
+                fontFamily: 'Fraunces',
+                fontWeight: FontWeight.w600,
+                color: AppColors.textDark)),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Ex : Vacances, Léa, Amis…'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Ajouter')),
+        ],
+      ),
+    );
+    final clean = label?.trim() ?? '';
+    if (clean.isEmpty || !mounted) return;
+    setState(() {
+      _tagLabels.add(clean);
+      _dismissedAuto.remove(clean);
+    });
+  }
+
   Future<void> _loadForEdit() async {
-    final results = await Future.wait([
-      FirebaseFirestore.instance
-          .collection('notebooks')
-          .doc(widget.notebookId)
-          .get(),
-      FirebaseFirestore.instance
-          .collection('memories')
-          .doc(widget.memoryId)
-          .get(),
-    ]);
+    final tagsFuture = TagService.visibleTags();
+    final memDoc = await FirebaseFirestore.instance
+        .collection('memories')
+        .doc(widget.memoryId)
+        .get();
+    final tags = await tagsFuture;
     if (!mounted) return;
 
-    final notebook = NotebookModel.fromFirestore(results[0]);
-    final data = results[1].data() as Map<String, dynamic>;
+    final data = memDoc.data() as Map<String, dynamic>;
     final precision = datePrecisionFromString(data['datePrecision']);
     final date = (data['date'] as Timestamp).toDate();
     final rawContent = data['rawContent'] as String? ?? '';
@@ -204,7 +297,22 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
 
     setState(() {
-      _notebook = notebook;
+      _ready = true;
+      _allTags = tags;
+      _editOwnerUid = data['userId'] as String?;
+      _editNotebookId = data['notebookId'] as String?;
+      // Tags du souvenir : on repart des libellés (le sélecteur travaille en
+      // libellés) — d'abord ceux résolus par id, puis le miroir `tagLabels`
+      // pour les tags d'un autre propriétaire (souvenir partagé).
+      final ids = List<String>.from(data['tagIds'] ?? []);
+      final byId = {for (final t in tags) t.id: t};
+      for (final id in ids) {
+        final t = byId[id];
+        if (t != null) _tagLabels.add(t.label);
+      }
+      if (_tagLabels.isEmpty) {
+        _tagLabels.addAll(List<String>.from(data['tagLabels'] ?? []));
+      }
       _selectedCategory = data['type'];
       _selectedSubType = data['subType'];
       _titleController.text = title;
@@ -339,6 +447,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                 _selectedDate = DateTime(year, month, day);
                 _datePrecision = DatePrecision.exact;
                 _dateNeedsConfirmation = false;
+                _syncAutoTags();
               });
             }
           }
@@ -357,7 +466,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         if (lat != null && lon != null) {
           final place = await _reverseGeocode(lat, lon);
           if (place != null && mounted && _locationController.text.isEmpty) {
-            setState(() => _locationController.text = place);
+            setState(() {
+              _locationController.text = place;
+              _syncAutoTags(); // le lieu déduit de l'EXIF devient un tag
+            });
           }
         }
       }
@@ -907,7 +1019,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       : formatDateWithPrecision(_selectedDate, _datePrecision);
 
   Future<void> _openDatePicker() async {
-    final minDate = _notebook?.birthdate ?? DateTime(2000);
+    final minDate = _childTag?.birthdate ?? DateTime(2000);
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -934,6 +1046,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _selectedDate = picked;
           _datePrecision = DatePrecision.exact;
           _dateNeedsConfirmation = false;
+          _syncAutoTags();
         });
       }
     } else {
@@ -941,6 +1054,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         _selectedDate = result['date'] as DateTime;
         _datePrecision = precision;
         _dateNeedsConfirmation = false;
+        _syncAutoTags();
       });
     }
   }
@@ -1058,8 +1172,39 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
       final titleValue = _titleController.text.trim();
       final locationValue = _locationController.text.trim();
+
+      // ── Tags ───────────────────────────────────────────────────────────────
+      // Les libellés choisis deviennent des tags (créés au besoin) ; `sharedWith`
+      // est la réunion des collaborateurs de ces tags — c'est ce champ que lisent
+      // les règles Firestore pour autoriser un collaborateur à voir le souvenir.
+      final tagIds = <String>[];
+      final tagLabels = <String>[];
+      for (final label in _tagLabels) {
+        final tag = await TagService.ensureTag(label);
+        if (tag == null) continue;
+        tagIds.add(tag.id);
+        tagLabels.add(tag.label);
+      }
+      final allTags = await TagService.visibleTags();
+      final uid = FirebaseAuth.instance.currentUser!.uid;
+      // En édition, le souvenir garde son propriétaire (un collaborateur qui
+      // modifie un souvenir partagé ne se l'approprie pas) et son carnet porteur.
+      final ownerUid = _isEditing ? (_editOwnerUid ?? uid) : uid;
+      final sharedWith = TagService.sharedUidsFor(tagIds, allTags, ownerUid);
+
+      // Carnet porteur : l'espace unique de l'utilisateur (invisible dans l'UI,
+      // mais requis par les clés de stockage R2 et le contrôle d'accès média).
+      final spaceId = _isEditing
+          ? (_editNotebookId ?? await SpaceService.ensureSpaceId())
+          : await SpaceService.ensureSpaceId();
+      if (spaceId == null) throw Exception('Espace introuvable');
+
       final payload = {
-        'notebookId': widget.notebookId,
+        'notebookId': spaceId,
+        'userId': ownerUid,
+        'tagIds': tagIds,
+        'tagLabels': tagLabels,
+        'sharedWith': sharedWith,
         'type': category,
         'subType': _selectedSubType,
         'title': titleValue.isEmpty ? null : titleValue,
@@ -1102,13 +1247,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         });
       }
 
-      await FirebaseFirestore.instance
-          .collection('notebooks')
-          .doc(widget.notebookId)
-          .update({
-        'lastMemoryAt': Timestamp.fromDate(_selectedDate),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      // Trace de dernière activité sur l'espace (best-effort : un collaborateur
+      // n'a pas le droit d'écrire sur l'espace d'un autre, et ce n'est pas grave).
+      try {
+        await FirebaseFirestore.instance
+            .collection('notebooks')
+            .doc(spaceId)
+            .update({
+          'lastMemoryAt': Timestamp.fromDate(_selectedDate),
+          'updatedAt': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
 
       // Y a-t-il des médias à uploader/supprimer en arrière-plan ?
       final hasMediaWork = _localPhotos.isNotEmpty ||
@@ -1121,7 +1270,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       if (hasMediaWork) {
         MediaUploadQueue.instance.enqueue(MediaUploadJob(
           memoryId: memoryId,
-          notebookId: widget.notebookId,
+          notebookId: spaceId,
           localPhotos: List<File>.of(_localPhotos),
           existingPhotoUrls: keptLegacyUrls,
           existingPhotoKeys: keptPhotoKeys,
@@ -1140,7 +1289,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ));
       }
 
-      if (mounted) context.go('/notebook/${widget.notebookId}/memories');
+      if (mounted) context.go('/memories');
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
@@ -1189,27 +1338,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   void _showSnack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  void _goBack() {
-    // Retour vers le choix de type seulement si ce carnet en propose un et
-    // qu'on n'est pas en édition. Sinon, on quitte vers la liste.
-    if (_step == 1 && _hasTypePicker && !_isEditing) {
-      setState(() {
-        _step = 0;
-        _selectedCategory = null;
-        _selectedSubType = null;
-        _dateNeedsConfirmation = true;
-        _textController.clear();
-        _weightController.clear();
-        _heightController.clear();
-      });
-    } else {
-      context.go('/notebook/${widget.notebookId}/memories');
-    }
-  }
+  void _goBack() => context.go('/home');
 
   @override
   Widget build(BuildContext context) {
-    if (_notebook == null) {
+    if (!_ready) {
       return const Scaffold(
           backgroundColor: AppColors.background,
           body: Center(child: CircularProgressIndicator()));
@@ -1222,106 +1355,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         title: Text(
           _isEditing ? 'Modifier le souvenir' : 'Nouveau souvenir',
           style: const TextStyle(
-              fontFamily: 'PlayfairDisplay',
-              fontWeight: FontWeight.bold,
+              fontFamily: 'Fraunces',
+              fontWeight: FontWeight.w600,
               color: AppColors.textDark),
         ),
         leading: IconButton(
-          icon: Icon(
-            (_step == 0 || (!_hasTypePicker && !_isEditing))
-                ? Icons.close
-                : Icons.arrow_back,
-            color: AppColors.textDark,
-          ),
+          icon: const Icon(Icons.close, color: AppColors.textDark),
           onPressed: _goBack,
         ),
       ),
-      body: _step == 0 ? _buildTypePickerStep() : _buildDetailsStep(),
-    );
-  }
-
-  /// Étape de choix du type — affichée uniquement pour les carnets bébé /
-  /// grossesse. Les autres carnets vont directement au formulaire « souvenir ».
-  Widget _buildTypePickerStep() {
-    final manualCats = manualCategoriesForNotebook(_notebook!.type);
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'Quel souvenir veux-tu ajouter ?',
-            style: TextStyle(
-              fontFamily: 'PlayfairDisplay',
-              fontSize: 26,
-              fontWeight: FontWeight.bold,
-              color: AppColors.textDark,
-            ),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Choisis un type, ou « Autre souvenir » pour écrire librement.',
-            style: TextStyle(color: AppColors.textMedium, fontSize: 14),
-          ),
-          const SizedBox(height: 20),
-          GridView.count(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisCount: 2,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 14,
-            childAspectRatio: 1.3,
-            children: manualCats.map((cat) {
-              return GestureDetector(
-                onTap: () => setState(() {
-                  _selectedCategory = cat.id;
-                  _step = 1;
-                }),
-                child: Container(
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: AppColors.border, width: 0.5),
-                  ),
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Text(cat.emoji, style: const TextStyle(fontSize: 32)),
-                      const SizedBox(height: 6),
-                      Padding(
-                        padding:
-                            const EdgeInsets.symmetric(horizontal: 6),
-                        child: Text(
-                          cat.label,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.textDark,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 16),
-          Center(
-            child: TextButton.icon(
-              onPressed: () => setState(() {
-                _selectedCategory = 'anecdote';
-                _step = 1;
-              }),
-              icon: const Icon(Icons.edit_outlined, size: 16),
-              label: const Text('Autre souvenir'),
-              style: TextButton.styleFrom(foregroundColor: AppColors.sage),
-            ),
-          ),
-        ],
-      ),
+      body: _buildDetailsStep(),
     );
   }
 
@@ -1397,6 +1440,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
+          const SizedBox(height: 20),
+          _buildTagSection(),
           const SizedBox(height: 28),
           _SaveButton(
               enabled: _saveEnabled,
@@ -1465,6 +1510,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
+          const SizedBox(height: 20),
+          _buildTagSection(),
           const SizedBox(height: 28),
           _SaveButton(
               enabled: _saveEnabled,
@@ -1483,15 +1530,18 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         double.tryParse(_weightController.text.replaceAll(',', '.'));
     final heightVal =
         double.tryParse(_heightController.text.replaceAll(',', '.'));
-    final birthdate = _notebook?.birthdate;
-    final isEnfant = _notebook?.type == 'enfant';
-    final ageAtDate = (isEnfant && birthdate != null)
+    // Les courbes de croissance viennent du tag « enfant » du souvenir (il porte
+    // la date de naissance) — l'équivalent de l'ancien carnet enfant.
+    final child = _childTag;
+    final birthdate = child?.birthdate;
+    final isEnfant = child != null && birthdate != null;
+    final ageAtDate = isEnfant
         ? ((_selectedDate.year - birthdate.year) * 12 +
                 _selectedDate.month -
                 birthdate.month)
             .clamp(0, 24)
         : 0;
-    final gender = _notebook?.gender ?? 'boy';
+    final gender = child?.gender ?? 'boy';
     final showWeight = weightVal != null && weightVal > 0;
     final showHeight = heightVal != null && heightVal > 0;
 
@@ -1584,6 +1634,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _buildLocationField(),
           const SizedBox(height: 16),
           _buildDateSection(),
+          const SizedBox(height: 20),
+          _buildTagSection(),
           const SizedBox(height: 28),
           _SaveButton(
               enabled: _saveEnabled,
@@ -1597,22 +1649,19 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
+  /// Le formulaire du souvenir, dans l'ordre du geste : les médias qu'on vient
+  /// d'importer, ce qu'on en dit, quand et où, les tags — et le mémo vocal en
+  /// dernier, facultatif.
   Widget _buildAnecdoteForm() {
-    final cat =
-        getMilestoneCategoryById(_selectedCategory ?? 'anecdote');
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle('${cat.emoji} ${cat.label}'),
-          if (cat.description.isNotEmpty) ...[
-            const SizedBox(height: 4),
-            Text(cat.description,
-                style: const TextStyle(
-                    color: AppColors.textMedium, fontSize: 13)),
-          ],
-          const SizedBox(height: 12),
+          _buildPhotoSection(),
+          const SizedBox(height: 16),
+          _buildVideoSection(),
+          const SizedBox(height: 20),
           TextField(
             controller: _titleController,
             onChanged: (_) => setState(() {}),
@@ -1628,26 +1677,21 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           TextField(
             controller: _textController,
             maxLines: 6,
-            decoration: InputDecoration(
+            decoration: const InputDecoration(
               labelText: 'Description (facultatif)',
               hintText: 'Qu\'est-ce qui t\'a marqué pour ce souvenir ?',
               alignLabelWithHint: true,
-              // Encadré rouge tant que la description (obligatoire ici) est vide.
-              enabledBorder: _descriptionRequiredEmpty ? _errorBorder : null,
-              focusedBorder: _descriptionRequiredEmpty ? _errorBorder : null,
             ),
             onChanged: (_) => setState(() {}),
           ),
           const SizedBox(height: 16),
-          _buildPhotoSection(),
-          const SizedBox(height: 16),
-          _buildVoiceMemoSection(),
-          const SizedBox(height: 16),
-          _buildVideoSection(),
+          _buildDateSection(),
           const SizedBox(height: 16),
           _buildLocationField(),
-          const SizedBox(height: 16),
-          _buildDateSection(),
+          const SizedBox(height: 20),
+          _buildTagSection(),
+          const SizedBox(height: 20),
+          _buildVoiceMemoSection(),
           const SizedBox(height: 28),
           _SaveButton(
               enabled: _saveEnabled,
@@ -1658,6 +1702,51 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               onPressed: _save),
         ],
       ),
+    );
+  }
+
+  // ── Tags ───────────────────────────────────────────────────────────────────
+
+  /// Sélecteur de tags : ceux du souvenir (dont l'année et le lieu, posés
+  /// d'office), les tags déjà utilisés ailleurs, et un bouton pour en créer.
+  Widget _buildTagSection() {
+    final selected = _tagLabels.toList()..sort();
+    final others = [
+      for (final t in _allTags)
+        if (!_tagLabels.contains(t.label)) t.label,
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle('🏷️ Tags'),
+        const SizedBox(height: 4),
+        const Text(
+          'L\'année et le lieu sont ajoutés automatiquement. Les tags servent à '
+          'retrouver tes souvenirs, à composer un livre et à partager.',
+          style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final label in selected)
+              GestureDetector(
+                onTap: () => _toggleTag(label),
+                child: _TagChip(label: label, selected: true),
+              ),
+            for (final label in others)
+              GestureDetector(
+                onTap: () => _toggleTag(label),
+                child: _TagChip(label: label, selected: false),
+              ),
+            GestureDetector(
+              onTap: _createTagDialog,
+              child: const _TagChip(label: '+ Nouveau tag', selected: false),
+            ),
+          ],
+        ),
+      ],
     );
   }
 
@@ -1920,7 +2009,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         TextField(
           controller: _locationController,
           textCapitalization: TextCapitalization.sentences,
-          onChanged: (_) => setState(() {}),
+          // Le lieu devient un tag : on le suit à la frappe (le tag précédent
+          // est remplacé, sauf si l'utilisateur l'avait retiré à la main).
+          onChanged: (_) => setState(_syncAutoTags),
           decoration: InputDecoration(
             hintText: 'Ex : Zoo de Genève, Paris, Maison…',
             enabledBorder: _locationRequiredEmpty ? _errorBorder : null,
@@ -1932,7 +2023,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   Widget _buildDateSection() {
-    final minDate = _notebook?.birthdate ?? DateTime(2000);
+    final minDate = _childTag?.birthdate ?? DateTime(2000);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -1950,6 +2041,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                   _selectedDate = d;
                   _dateNeedsConfirmation = false;
                   _datePrecision = DatePrecision.exact;
+                  _syncAutoTags();
                 });
               }
             },
@@ -2104,6 +2196,46 @@ class _VideoThumb extends StatelessWidget {
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Puce de tag : cochée = le souvenir porte ce tag.
+class _TagChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  const _TagChip({required this.label, required this.selected});
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+      decoration: BoxDecoration(
+        color: selected ? AppColors.sageDark : AppColors.white,
+        borderRadius: BorderRadius.circular(50),
+        border: Border.all(
+          color: selected ? AppColors.sageDark : AppColors.border,
+          width: selected ? 1.5 : 0.5,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: selected ? Colors.white : AppColors.textMedium,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+          if (selected) ...[
+            const SizedBox(width: 5),
+            const Icon(Icons.close, size: 13, color: Colors.white70),
+          ],
         ],
       ),
     );

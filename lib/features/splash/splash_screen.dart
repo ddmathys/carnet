@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/services/migration_service.dart';
+import '../../core/services/tag_migration_service.dart';
 import '../../core/services/user_service.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -41,6 +42,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     final user = FirebaseAuth.instance.currentUser;
     if (user != null) {
       try { await MigrationService.runIfNeeded(); } catch (_) {}
+      // Carnets → tags (une fois par compte, avant le premier rendu du dashboard).
+      try { await TagMigrationService.runIfNeeded(); } catch (_) {}
       try { await UserService.onLogin(); } catch (_) {}
       if (!mounted) return;
       context.go('/home');
