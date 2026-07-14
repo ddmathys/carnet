@@ -114,11 +114,14 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
               tooltip: 'Croissance',
               onPressed: () => context.push('/growth/${tag.id}'),
             ),
-          if (tag != null)
+          // Un ou plusieurs tags cochés → un seul lien les partage tous.
+          if (_selectedTags.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.ios_share, color: AppColors.textDark),
-              tooltip: 'Partager ce tag',
-              onPressed: () => showShareTagSheet(context, tag),
+              tooltip: _selectedTags.length == 1
+                  ? 'Partager ce tag'
+                  : 'Partager ces ${_selectedTags.length} tags',
+              onPressed: () => showShareTagSheet(context, _selectedTags),
             ),
         ],
       ),

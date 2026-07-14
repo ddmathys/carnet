@@ -339,17 +339,21 @@ class TagService {
 
   // ── Partage ────────────────────────────────────────────────────────────────
 
-  /// Lien d'invitation partageable (deep link `carnet://join?token=…`).
+  /// Lien d'invitation partageable, pour UN ou PLUSIEURS tags.
   ///
   /// C'est la seule façon d'inviter : le backend (Admin SDK) ajoute l'arrivant
-  /// au tag ET recopie son uid sur les souvenirs déjà tagués. Une invitation par
-  /// email seule ne pourrait pas faire cette seconde écriture — l'invité n'a pas
-  /// le droit d'écrire chez le propriétaire tant qu'il n'a pas rejoint.
+  /// aux tags ET recopie son uid sur les souvenirs déjà tagués. Une invitation
+  /// par email seule ne pourrait pas faire cette seconde écriture — l'invité n'a
+  /// pas le droit d'écrire chez le propriétaire tant qu'il n'a pas rejoint.
+  ///
+  /// Un seul lien couvre tous les tags donnés : celui qui le suit les rejoint
+  /// tous d'un coup, et voit leurs souvenirs (présents et à venir).
   static Future<({String url, String downloadUrl, String title})?>
-      createInviteLink(String tagId) async {
+      createInviteLink(List<String> tagIds) async {
+    if (tagIds.isEmpty) return null;
     final data = await BackendClient.postJson(
       '/api/tag/invite',
-      {'tagId': tagId},
+      {'tagIds': tagIds},
       timeout: const Duration(seconds: 20),
     );
     final url = data?['url'] as String?;

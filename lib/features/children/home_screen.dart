@@ -17,6 +17,7 @@ import '../memories/widgets/memory_polaroid.dart';
 import '../memories/widgets/import_media_cta.dart';
 import '../memories/widgets/delete_memory.dart';
 import '../tags/tag_picker_sheet.dart';
+import '../tags/share_tag_sheet.dart';
 
 /// Dashboard : importer un média (le geste principal), les derniers souvenirs,
 /// les tags qui les organisent, les livres déjà faits — et, tout en bas, la
@@ -265,7 +266,18 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
               ),
-              if (_filterLabels.isNotEmpty)
+              if (_filterLabels.isNotEmpty) ...[
+                // Les tags cochés se partagent d'un seul lien — un pour tous.
+                IconButton(
+                  onPressed: () => showShareTagSheet(context, _selectedTags),
+                  icon: const Icon(Icons.ios_share,
+                      size: 18, color: AppColors.sageDark),
+                  tooltip: _selectedTags.length == 1
+                      ? 'Partager ce tag'
+                      : 'Partager ces ${_selectedTags.length} tags',
+                  constraints:
+                      const BoxConstraints(minWidth: 38, minHeight: 38),
+                ),
                 TextButton(
                   onPressed: () => setState(() {
                     _filterLabels.clear();
@@ -275,6 +287,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       style:
                           TextStyle(color: AppColors.textMedium, fontSize: 13)),
                 ),
+              ],
             ],
           ),
           if (selected.isNotEmpty) ...[

@@ -10,23 +10,27 @@ import '../../core/models/tag_model.dart';
 import '../../core/services/user_service.dart';
 import '../../core/services/tag_service.dart';
 
-/// Ouvre la feuille de partage d'un tag.
-Future<void> showShareTagSheet(BuildContext context, TagModel tag) {
+/// Ouvre la feuille de partage d'un ou plusieurs tags.
+Future<void> showShareTagSheet(BuildContext context, List<TagModel> tags) {
+  if (tags.isEmpty) return Future.value();
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     backgroundColor: Colors.transparent,
-    builder: (_) => ShareTagSheet(tag: tag),
+    builder: (_) => ShareTagSheet(tags: tags),
   );
 }
 
-/// Partage d'un TAG : on génère un lien d'invitation et on l'envoie. Celui qui
-/// le suit voit tous les souvenirs portant ce tag (présents et à venir) et peut
-/// en ajouter — c'est le remplaçant du partage de carnet.
+/// Partage de TAGS : on génère UN lien d'invitation qui les couvre tous. Celui
+/// qui le suit voit tous les souvenirs portant ces tags (présents et à venir) et
+/// peut en ajouter — c'est le remplaçant du partage de carnet.
+///
+/// Partager plusieurs tags d'un coup évite d'envoyer trois liens aux grands-
+/// parents : « Léa · Vacances · 2025 » part en un seul message.
 class ShareTagSheet extends StatefulWidget {
-  final TagModel tag;
+  final List<TagModel> tags;
 
-  const ShareTagSheet({super.key, required this.tag});
+  const ShareTagSheet({super.key, required this.tags});
 
   @override
   State<ShareTagSheet> createState() => _ShareTagSheetState();
@@ -41,6 +45,13 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
   Timer? _copyFeedbackTimer;
 
   Map<String, _CollabInfo> _collabInfos = {};
+
+  /// Les tags que je possède : seuls ceux-là peuvent être partagés (le backend
+  /// refuse le lien si un seul ne m'appartient pas).
+  List<TagModel> get _ownTags {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    return [for (final t in widget.tags) if (t.isOwner(uid ?? '')) t];
+  }
 
   String get _shareMessage =>
       '📖 Rejoins mes souvenirs « ${_inviteData!.title} » sur Carnet :\n'
@@ -61,7 +72,9 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
   }
 
   Future<void> _loadCollabInfos() async {
-    final uids = widget.tag.sharedWith;
+    final uids = <String>{
+      for (final t in widget.tags) ...t.sharedWith,
+    };
     if (uids.isEmpty) return;
     final infos = <String, _CollabInfo>{};
     await Future.wait(uids.map((uid) async {
@@ -80,7 +93,8 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
       _error = null;
     });
     try {
-      final invite = await TagService.createInviteLink(widget.tag.id);
+      final invite =
+          await TagService.createInviteLink([for (final t in _ownTags) t.id]);
       if (!mounted) return;
       if (invite == null) {
         setState(() {
@@ -130,25 +144,40 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
         subject: 'Rejoins mes souvenirs « ${_inviteData!.title} »');
   }
 
-  Future<void> _removeCollaborator(TagModel tag, String uid) async {
-    await TagService.revoke(tag, uid: uid);
+  /// Retire un collaborateur de TOUS les tags de la feuille où il figure : la
+  /// feuille montre un accès, on l'y retire — pas un tag sur trois.
+  Future<void> _removeCollaborator(String uid) async {
+    for (final tag in _ownTags) {
+      if (tag.sharedWith.contains(uid)) {
+        await TagService.revoke(tag, uid: uid);
+      }
+    }
     if (mounted) setState(() => _collabInfos.remove(uid));
   }
 
   @override
   Widget build(BuildContext context) {
     final currentUid = FirebaseAuth.instance.currentUser!.uid;
+    final tagIds = [for (final t in widget.tags) t.id];
 
-    return StreamBuilder<DocumentSnapshot>(
+    // On suit les tags en direct : un accès révoqué disparaît de la liste sans
+    // rouvrir la feuille.
+    return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('tags')
-          .doc(widget.tag.id)
+          .where(FieldPath.documentId, whereIn: tagIds.take(10).toList())
           .snapshots(),
       builder: (context, snap) {
-        final tag = snap.hasData && snap.data!.exists
-            ? TagModel.fromFirestore(snap.data!)
-            : widget.tag;
-        final isOwner = tag.isOwner(currentUid);
+        final live = <String, TagModel>{
+          if (snap.hasData)
+            for (final d in snap.data!.docs) d.id: TagModel.fromFirestore(d),
+        };
+        final tags = [for (final t in widget.tags) live[t.id] ?? t];
+        final owned = [for (final t in tags) if (t.isOwner(currentUid)) t];
+        final isOwner = owned.isNotEmpty;
+        final multiple = tags.length > 1;
+        // Les collaborateurs, tous tags confondus.
+        final collaborators = <String>{for (final t in tags) ...t.sharedWith};
 
         return Container(
           constraints: BoxConstraints(
@@ -182,7 +211,9 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Partager « ${tag.label} »',
+                      multiple
+                          ? 'Partager ${tags.length} tags'
+                          : 'Partager « ${tags.first.label} »',
                       style: const TextStyle(
                         fontFamily: 'Fraunces',
                         fontSize: 18,
@@ -192,14 +223,41 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
                     ),
                   ),
                 ]),
-                const SizedBox(height: 4),
+                if (multiple) ...[
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 7,
+                    runSpacing: 7,
+                    children: [
+                      for (final t in tags)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: AppColors.sageTint,
+                            borderRadius: BorderRadius.circular(50),
+                          ),
+                          child: Text(t.label,
+                              style: const TextStyle(
+                                  fontSize: 12,
+                                  color: AppColors.sageDark,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                    ],
+                  ),
+                ],
+                const SizedBox(height: 6),
                 Text(
                   isOwner
-                      ? 'Qui suit ce lien voit tous les souvenirs tagués '
-                          '« ${tag.label} » — y compris les prochains — et peut '
-                          'en ajouter.'
-                      : 'Ce tag t\'a été partagé : tu vois ses souvenirs et tu '
-                          'peux en ajouter.',
+                      ? (multiple
+                          ? 'UN SEUL lien pour ces ${tags.length} tags : qui le '
+                              'suit voit tous leurs souvenirs — y compris les '
+                              'prochains — et peut en ajouter.'
+                          : 'Qui suit ce lien voit tous les souvenirs tagués '
+                              '« ${tags.first.label} » — y compris les prochains '
+                              '— et peut en ajouter.')
+                      : 'Ces tags t\'ont été partagés : tu vois leurs souvenirs '
+                          'et tu peux en ajouter.',
                   style: const TextStyle(
                       color: AppColors.textMedium, fontSize: 13, height: 1.4),
                 ),
@@ -317,19 +375,27 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
                   ],
                   const SizedBox(height: 18),
                 ],
-                if (tag.sharedWith.isNotEmpty) ...[
+                if (collaborators.isNotEmpty) ...[
                   const _SectionLabel('Accès actifs'),
                   const SizedBox(height: 8),
-                  ...tag.sharedWith.map((uid) {
+                  ...collaborators.map((uid) {
                     final info = _collabInfos[uid];
                     final email = info?.email ?? uid;
                     final name = info?.displayName ?? '';
+                    // Sur plusieurs tags, on dit lesquels cette personne voit —
+                    // sinon « retirer » serait un geste à l'aveugle.
+                    final onTags = [
+                      for (final t in tags)
+                        if (t.sharedWith.contains(uid)) t.label,
+                    ];
                     return _CollabTile(
                       avatar: email.isNotEmpty ? email[0].toUpperCase() : '?',
                       label: name.isNotEmpty ? name : email,
-                      subtitle: name.isNotEmpty ? email : null,
+                      subtitle: multiple
+                          ? onTags.join(' · ')
+                          : (name.isNotEmpty ? email : null),
                       onRemove:
-                          isOwner ? () => _removeCollaborator(tag, uid) : null,
+                          isOwner ? () => _removeCollaborator(uid) : null,
                     );
                   }),
                 ],
