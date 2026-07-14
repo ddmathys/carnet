@@ -4,8 +4,10 @@ import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/services/media_migration_service.dart';
 import '../../core/services/migration_service.dart';
 import '../../core/services/tag_migration_service.dart';
+import '../../core/services/tag_service.dart';
 import '../../core/services/user_service.dart';
 
 class SplashScreen extends ConsumerStatefulWidget {
@@ -44,7 +46,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       try { await MigrationService.runIfNeeded(); } catch (_) {}
       // Carnets → tags (une fois par compte, avant le premier rendu du dashboard).
       try { await TagMigrationService.runIfNeeded(); } catch (_) {}
+      // Tags en double fusionnés + nature (année / lieu) rétablie.
+      try { await TagService.repairTags(); } catch (_) {}
       try { await UserService.onLogin(); } catch (_) {}
+      // Médias restés sur Firebase Storage → R2, en tâche de fond (sans bloquer
+      // le démarrage : la migration reprend là où elle s'est arrêtée).
+      MediaMigrationService.runInBackground();
       if (!mounted) return;
       context.go('/home');
     } else {

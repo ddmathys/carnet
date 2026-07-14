@@ -698,6 +698,22 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
   }
 
+  /// Photo ou vidéo ? On tranche sur le type MIME donné par le sélecteur, et
+  /// seulement à défaut sur l'extension puis sur les premiers octets du fichier.
+  ///
+  /// Se fier à l'extension seule était le bug : le sélecteur Android renvoie une
+  /// copie en cache dont le nom n'a pas toujours l'extension d'origine. La vidéo
+  /// tombait alors dans le pipeline photo, partait sur R2 étiquetée `image/jpeg`
+  /// et disparaissait du souvenir — sans la moindre erreur, pendant que les
+  /// vraies photos, elles, arrivaient bien.
+  Future<bool> _isVideoMedia(XFile x) async {
+    final mime = x.mimeType?.toLowerCase() ?? '';
+    if (mime.startsWith('video/')) return true;
+    if (mime.startsWith('image/')) return false;
+    if (_isVideoPath(x.path) || _isVideoPath(x.name)) return true;
+    return fileLooksLikeVideo(File(x.path));
+  }
+
   bool _isVideoPath(String path) {
     final p = path.toLowerCase();
     return p.endsWith('.mp4') ||
@@ -790,7 +806,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       final photoFiles = <File>[];
       final videoPaths = <String>[];
       for (final x in picked) {
-        if (_isVideoPath(x.path)) {
+        if (await _isVideoMedia(x)) {
           videoPaths.add(x.path);
         } else {
           photoFiles.add(File(x.path));
@@ -1146,7 +1162,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       final tagIds = <String>[];
       final tagLabels = <String>[];
       for (final label in _tagLabels) {
-        final tag = await TagService.ensureTag(label);
+        // Un tag qui reprend le lieu du souvenir EST un tag de lieu : c'est sa
+        // nature (`kind`) qui le rangera sous « Lieu » dans le filtre.
+        final isLocation = locationValue.isNotEmpty &&
+            label.trim().toLowerCase() == locationValue.toLowerCase();
+        final tag = await TagService.ensureTag(
+          label,
+          kind: TagService.inferKind(label, isLocation: isLocation),
+        );
         if (tag == null) continue;
         tagIds.add(tag.id);
         tagLabels.add(tag.label);

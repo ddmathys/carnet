@@ -14,6 +14,11 @@ class MemoryPolaroid extends StatelessWidget {
   final double tilt;
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
+
+  /// Suppression du souvenir. Fournie → une corbeille discrète apparaît sur la
+  /// vignette (et l'appui long la déclenche aussi). L'appelant confirme.
+  final VoidCallback? onDelete;
+
   const MemoryPolaroid({
     super.key,
     required this.memory,
@@ -21,6 +26,7 @@ class MemoryPolaroid extends StatelessWidget {
     required this.tilt,
     required this.onTap,
     this.onLongPress,
+    this.onDelete,
   });
 
   Widget _miniIcon(String e) => Container(
@@ -54,13 +60,16 @@ class MemoryPolaroid extends StatelessWidget {
     final loc = memory.location?.trim() ?? '';
     final sub = loc.isNotEmpty ? '$date · ${loc.toUpperCase()}' : date;
     final hasVideo = memory.videoKeys.isNotEmpty;
-    final hasAudio = memory.audioUrl != null && memory.audioUrl!.isNotEmpty;
+    // Le mémo vocal vit sur R2 (clé) ou, pour les anciens souvenirs, en URL
+    // Firebase — les deux comptent.
+    final hasAudio = (memory.audioKey?.isNotEmpty ?? false) ||
+        (memory.audioUrl?.isNotEmpty ?? false);
 
     return Transform.rotate(
       angle: tilt,
       child: GestureDetector(
         onTap: onTap,
-        onLongPress: onLongPress,
+        onLongPress: onLongPress ?? onDelete,
         child: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
@@ -168,6 +177,26 @@ class MemoryPolaroid extends StatelessWidget {
                                     color: Colors.white,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600)),
+                          ),
+                        ),
+                      if (onDelete != null)
+                        Positioned(
+                          bottom: 6,
+                          left: 6,
+                          child: GestureDetector(
+                            onTap: onDelete,
+                            behavior: HitTestBehavior.opaque,
+                            child: Container(
+                              width: 28,
+                              height: 28,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withOpacity(0.45),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.delete_outline,
+                                  size: 16, color: Colors.white),
+                            ),
                           ),
                         ),
                     ],

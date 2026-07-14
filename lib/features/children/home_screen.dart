@@ -15,6 +15,7 @@ import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
 import '../memories/widgets/memory_polaroid.dart';
 import '../memories/widgets/import_media_cta.dart';
+import '../memories/widgets/delete_memory.dart';
 import '../tags/tag_picker_sheet.dart';
 
 /// Dashboard : importer un média (le geste principal), les derniers souvenirs,
@@ -45,8 +46,13 @@ class _HomeScreenState extends State<HomeScreen> {
   StreamSubscription? _sharedMemSub;
 
   // Les souvenirs arrivent par deux flux (les miens, ceux qu'on m'a partagés) :
-  // on les fusionne par id avant d'afficher.
-  final Map<String, MemoryModel> _memoriesById = {};
+  // chaque flux garde SON lot, et on les fusionne à l'affichage. Garder un seul
+  // sac commun faisait qu'un souvenir supprimé restait à l'écran — le flux ne
+  // sait dire « il n'est plus là » qu'en cessant de l'énumérer.
+  Map<String, MemoryModel> _mineById = {};
+  Map<String, MemoryModel> _sharedById = {};
+
+  Map<String, MemoryModel> get _memoriesById => {..._sharedById, ..._mineById};
 
   @override
   void initState() {
@@ -75,19 +81,23 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     final memories = FirebaseFirestore.instance.collection('memories');
-    _mineSub = memories
-        .where('userId', isEqualTo: uid)
-        .snapshots()
-        .listen((snap) => _mergeMemories(snap));
+    _mineSub = memories.where('userId', isEqualTo: uid).snapshots().listen(
+        (snap) => _onMemories(snap, mine: true));
     _sharedMemSub = memories
         .where('sharedWith', arrayContains: uid)
         .snapshots()
-        .listen((snap) => _mergeMemories(snap));
+        .listen((snap) => _onMemories(snap, mine: false));
   }
 
-  void _mergeMemories(QuerySnapshot<Map<String, dynamic>> snap) {
-    for (final d in snap.docs) {
-      _memoriesById[d.id] = MemoryModel.fromFirestore(d);
+  void _onMemories(QuerySnapshot<Map<String, dynamic>> snap,
+      {required bool mine}) {
+    final lot = {
+      for (final d in snap.docs) d.id: MemoryModel.fromFirestore(d),
+    };
+    if (mine) {
+      _mineById = lot;
+    } else {
+      _sharedById = lot;
     }
     if (mounted) setState(_applyFilter);
   }
@@ -325,9 +335,26 @@ class _HomeScreenState extends State<HomeScreen> {
             cat: _safeCat(m.type),
             tilt: (i % 2 == 0) ? -0.02 : 0.02,
             onTap: () => context.push('/memory/${m.id}/edit'),
+            onDelete: () => _deleteMemory(m),
           );
         },
       ),
+    );
+  }
+
+  /// Suppression définitive (souvenir + tous ses médias), après confirmation.
+  Future<void> _deleteMemory(MemoryModel m) async {
+    final deleted = await confirmAndDeleteMemory(context, m);
+    if (!deleted || !mounted) return;
+    setState(() {
+      _mineById.remove(m.id);
+      _sharedById.remove(m.id);
+      _applyFilter();
+    });
+    _loadQuota(); // les quotas viennent de baisser
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Souvenir supprimé.')),
     );
   }
 

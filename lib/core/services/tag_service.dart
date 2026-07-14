@@ -75,8 +75,25 @@ class TagService {
 
   // ── Création ───────────────────────────────────────────────────────────────
 
+  /// Nature d'un tag déduite de son libellé (et du contexte de création).
+  ///
+  /// C'est ce `kind` qui range le tag dans une catégorie du filtre : `annee` →
+  /// Date, `lieu` → Lieu, le reste → Événement. Sans cette déduction, un tag de
+  /// lieu créé depuis le formulaire (ou une année tapée à la main) retombait en
+  /// `libre` et la catégorie « Lieu » du filtre restait désespérément vide.
+  static String inferKind(String label, {bool isLocation = false}) {
+    final clean = label.trim();
+    if (RegExp(r'^\d{4}$').hasMatch(clean)) return 'annee';
+    if (isLocation) return 'lieu';
+    return 'libre';
+  }
+
   /// Retourne le tag portant ce libellé, en le créant s'il n'existe pas encore.
   /// La comparaison ignore la casse : « Été » et « été » sont le même tag.
+  ///
+  /// Si le tag existe déjà mais sans nature (`libre`) alors qu'on en connaît
+  /// une meilleure (année, lieu, enfant), on la lui donne au passage — les tags
+  /// créés avant cette règle se rangent ainsi tout seuls dans le filtre.
   static Future<TagModel?> ensureTag(String label, {String kind = 'libre'}) async {
     final uid = _uid;
     final clean = label.trim();
@@ -84,7 +101,25 @@ class TagService {
 
     final existing = await myTags();
     for (final t in existing) {
-      if (t.label.toLowerCase() == clean.toLowerCase()) return t;
+      if (t.label.toLowerCase() != clean.toLowerCase()) continue;
+      if (t.kind == 'libre' && kind != 'libre') {
+        await _col.doc(t.id).update({'kind': kind});
+        return TagModel(
+          id: t.id,
+          userId: t.userId,
+          label: t.label,
+          kind: kind,
+          color: t.color,
+          birthdate: t.birthdate,
+          gender: t.gender,
+          companion: t.companion,
+          companionName: t.companionName,
+          sharedWith: t.sharedWith,
+          invitedEmails: t.invitedEmails,
+          createdAt: t.createdAt,
+        );
+      }
+      return t;
     }
 
     final tag = TagModel(
@@ -181,6 +216,125 @@ class TagService {
     }
     batch.delete(_col.doc(tag.id));
     await batch.commit();
+  }
+
+  // ── Réparation ─────────────────────────────────────────────────────────────
+
+  /// Remet de l'ordre dans les tags de l'utilisateur (lancée au démarrage) :
+  ///
+  ///  1. **fusionne les doublons** — deux tags « 2025 » (un créé par la migration
+  ///     des carnets, l'autre à la volée) apparaissaient deux fois dans le
+  ///     filtre. On garde le plus ancien, on lui réunit les collaborateurs des
+  ///     autres, on repointe les souvenirs, et on supprime les doublons ;
+  ///  2. **rend sa nature à chaque tag** — une année devient `annee`, un libellé
+  ///     qui est le lieu d'un souvenir devient `lieu`. C'est ce qui fait
+  ///     apparaître la catégorie « Lieu » dans le filtre, à côté de Date et
+  ///     Événement.
+  ///
+  /// N'écrit que s'il y a quelque chose à corriger.
+  static Future<void> repairTags() async {
+    final uid = _uid;
+    if (uid == null) return;
+    try {
+      final tags = await myTags();
+      if (tags.isEmpty) return;
+
+      final groups = <String, List<TagModel>>{};
+      for (final t in tags) {
+        groups.putIfAbsent(t.label.trim().toLowerCase(), () => []).add(t);
+      }
+      final hasDuplicates = groups.values.any((g) => g.length > 1);
+      final hasUnclassified = tags.any((t) => t.kind == 'libre');
+      if (!hasDuplicates && !hasUnclassified) return;
+
+      // Les lieux réellement utilisés par les souvenirs : c'est eux qui font
+      // qu'un tag est un tag de lieu.
+      final memSnap = await _db
+          .collection('memories')
+          .where('userId', isEqualTo: uid)
+          .get();
+      final locations = <String>{
+        for (final d in memSnap.docs)
+          ((d.data()['location'] as String?) ?? '').trim().toLowerCase(),
+      }..remove('');
+
+      final keptByGroup = <String, TagModel>{};
+      final replacedBy = <String, String>{}; // id du doublon → id du tag gardé
+      final tagBatch = _db.batch();
+      var tagWrites = 0;
+
+      for (final entry in groups.entries) {
+        final sorted = [...entry.value]
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        final keep = sorted.first;
+        final dups = sorted.skip(1).toList();
+        keptByGroup[entry.key] = keep;
+
+        final update = <String, dynamic>{};
+
+        final wanted =
+            inferKind(keep.label, isLocation: locations.contains(entry.key));
+        if (keep.kind == 'libre' && wanted != 'libre') {
+          update['kind'] = wanted;
+        }
+        // Un doublon peut porter des collaborateurs que le tag gardé n'a pas :
+        // les perdre reviendrait à révoquer un partage sans le dire.
+        final shared = <String>{
+          ...keep.sharedWith,
+          for (final d in dups) ...d.sharedWith,
+        };
+        final invited = <String>{
+          ...keep.invitedEmails,
+          for (final d in dups) ...d.invitedEmails,
+        };
+        if (shared.length != keep.sharedWith.length) {
+          update['sharedWith'] = shared.toList();
+        }
+        if (invited.length != keep.invitedEmails.length) {
+          update['invitedEmails'] = invited.toList();
+        }
+        if (update.isNotEmpty) {
+          tagBatch.update(_col.doc(keep.id), update);
+          tagWrites++;
+        }
+        for (final d in dups) {
+          replacedBy[d.id] = keep.id;
+          tagBatch.delete(_col.doc(d.id));
+          tagWrites++;
+        }
+      }
+
+      if (tagWrites > 0) await tagBatch.commit();
+      if (replacedBy.isEmpty) return;
+
+      // Les souvenirs pointent encore sur les doublons : on les repointe sur le
+      // tag gardé (et on re-dérive leurs libellés).
+      final kept = await myTags();
+      final labelById = {for (final t in kept) t.id: t.label};
+      final tagsById = {for (final t in kept) t.id: t};
+
+      final memBatch = _db.batch();
+      var memWrites = 0;
+      for (final doc in memSnap.docs) {
+        final ids = List<String>.from(doc.data()['tagIds'] ?? []);
+        if (!ids.any(replacedBy.containsKey)) continue;
+        final fixed = <String>{
+          for (final id in ids) replacedBy[id] ?? id,
+        }.toList();
+        memBatch.update(doc.reference, {
+          'tagIds': fixed,
+          'tagLabels': [
+            for (final id in fixed)
+              if ((labelById[id] ?? '').isNotEmpty) labelById[id]!,
+          ],
+          'sharedWith': _sharedUnion(fixed, tagsById, uid),
+        });
+        memWrites++;
+      }
+      if (memWrites > 0) await memBatch.commit();
+    } catch (_) {
+      // Réparation best-effort : un échec ne doit pas empêcher l'app de démarrer.
+    }
   }
 
   // ── Partage ────────────────────────────────────────────────────────────────

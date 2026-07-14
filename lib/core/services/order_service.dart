@@ -3,6 +3,7 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:flutter/foundation.dart';
 import '../models/order_model.dart';
 import 'backend_client.dart';
+import 'pdf_service.dart';
 
 class OrderService {
   // ── Créer une commande ─────────────────────────────────────────────────────
@@ -35,13 +36,21 @@ class OrderService {
 
   // ── Supprimer une commande (admin) ────────────────────────────────────────
 
-  /// Supprime la commande (ex. après suppression côté Gelato) : le PDF Storage
+  /// Supprime la commande (ex. après suppression côté Gelato) : le PDF
   /// (best-effort) puis le document Firestore. Réservé à l'admin par les règles.
+  ///
+  /// Le PDF vit sur R2 (URL stable `…/book-pdf?key=…`) ; les commandes d'avant
+  /// la bascule ont encore une URL Firebase.
   static Future<void> deleteOrder(OrderModel order) async {
     final url = order.pdfUrl;
     if (url != null && url.isNotEmpty) {
       try {
-        await FirebaseStorage.instance.refFromURL(url).delete();
+        final r2Key = PdfService.keyFromUrl(url);
+        if (r2Key != null) {
+          await PdfService.deleteBookPdf(r2Key);
+        } else {
+          await FirebaseStorage.instance.refFromURL(url).delete();
+        }
       } catch (e) {
         debugPrint('[orders] PDF non supprimé (${order.id}): $e');
       }

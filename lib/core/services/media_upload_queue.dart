@@ -64,12 +64,17 @@ class MediaUploadQueue extends ChangeNotifier {
 
   int _pending = 0;
   final List<MediaUploadJob> _failed = [];
+  String? _lastError;
 
   /// Nombre d'uploads encore en cours.
   int get pending => _pending;
 
   /// Travaux qui ont échoué (réseau coupé, etc.) et qu'on peut relancer.
   List<MediaUploadJob> get failed => List.unmodifiable(_failed);
+
+  /// Cause du dernier échec, à montrer dans la bannière — un média qui ne part
+  /// pas doit le dire, jamais disparaître en silence.
+  String? get lastError => _lastError;
 
   void enqueue(MediaUploadJob job) {
     _pending++;
@@ -81,6 +86,7 @@ class MediaUploadQueue extends ChangeNotifier {
   void retryFailed() {
     final jobs = List<MediaUploadJob>.of(_failed);
     _failed.clear();
+    _lastError = null;
     notifyListeners();
     for (final j in jobs) {
       enqueue(j);
@@ -140,6 +146,7 @@ class MediaUploadQueue extends ChangeNotifier {
           // Upload échoué → on garde le chemin pour un réessai (sans doublon).
           failedVideoPaths.add(job.localVideoPaths[i]);
           failedVideoDurations.add(localDur);
+          _lastError = VideoService.lastFailureReason ?? 'Échec de l\'envoi';
           continue;
         }
         videoKeys.add(r.key);
@@ -183,6 +190,11 @@ class MediaUploadQueue extends ChangeNotifier {
             videoDurationsMs.isNotEmpty ? videoDurationsMs.first : null,
       });
 
+      // Les URLs signées du souvenir ont changé (photos/mémo ajoutés ou retirés)
+      // → on jette le cache, sinon l'écran continuerait d'afficher l'ancien lot.
+      PhotoService.invalidateSignedCache(job.memoryId);
+      AudioService.invalidateSignedCache(job.memoryId);
+
       // Échec partiel d'upload vidéo → on signale (bannière « Réessayer ») en
       // remettant en file UNIQUEMENT les clips manquants. Les médias déjà
       // sauvegardés (photos, audio, vidéos réussies) sont préservés tels quels.
@@ -208,6 +220,7 @@ class MediaUploadQueue extends ChangeNotifier {
       }
     } catch (e) {
       debugPrint('MediaUploadQueue: échec upload souvenir ${job.memoryId} — $e');
+      _lastError = VideoService.lastFailureReason ?? 'Envoi interrompu';
       _failed.add(job);
     } finally {
       _pending--;

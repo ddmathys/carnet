@@ -2,6 +2,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../models/generated_book_model.dart';
+import 'pdf_service.dart';
 
 /// Historique des livres générés (PDF). Collection Firestore `generatedBooks`.
 class BookHistoryService {
@@ -76,16 +77,23 @@ class BookHistoryService {
     }
   }
 
-  /// Supprime l'entrée d'historique + le fichier PDF du Storage.
+  /// Supprime l'entrée d'historique + le PDF.
   /// (Pour un imprimé, la commande Firestore reste intacte.)
+  ///
+  /// `storagePath` porte désormais une clé R2 (`books/{uid}/…`). Les livres
+  /// d'avant la bascule ont encore un chemin Firebase : on les supprime là où
+  /// ils sont, tant que la migration ne les a pas repris.
   static Future<void> deleteBook(GeneratedBookModel book) async {
     await _col.doc(book.id).delete();
-    if (book.storagePath.isNotEmpty) {
-      try {
-        await FirebaseStorage.instance.ref(book.storagePath).delete();
-      } catch (_) {
-        // déjà supprimé / chemin invalide — on ignore
-      }
+    if (book.storagePath.isEmpty) return;
+    if (book.storagePath.startsWith('books/')) {
+      await PdfService.deleteBookPdf(book.storagePath);
+      return;
+    }
+    try {
+      await FirebaseStorage.instance.ref(book.storagePath).delete();
+    } catch (_) {
+      // déjà supprimé / chemin invalide — on ignore
     }
   }
 }

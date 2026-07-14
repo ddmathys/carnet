@@ -14,6 +14,47 @@ class VideoUploadResult {
   const VideoUploadResult({required this.key, this.durationMs});
 }
 
+/// Le fichier commence-t-il par une signature de conteneur vidéo ?
+/// Dernier recours quand ni le type MIME ni l'extension ne tranchent : le
+/// sélecteur Android renvoie parfois un fichier de cache au nom neutre, et une
+/// vidéo prise pour une photo partirait en JPEG sur R2 — donc perdue.
+Future<bool> fileLooksLikeVideo(File file) async {
+  try {
+    final head = await file.openRead(0, 12).fold<List<int>>(
+      <int>[],
+      (acc, chunk) => acc..addAll(chunk),
+    );
+    if (head.length < 12) return false;
+    // ISO-BMFF (mp4, mov, 3gp, m4v) : « ftyp » en octets 4-7.
+    if (head[4] == 0x66 &&
+        head[5] == 0x74 &&
+        head[6] == 0x79 &&
+        head[7] == 0x70) {
+      return true;
+    }
+    // Matroska / WebM : 1A 45 DF A3.
+    if (head[0] == 0x1A &&
+        head[1] == 0x45 &&
+        head[2] == 0xDF &&
+        head[3] == 0xA3) {
+      return true;
+    }
+    // AVI : « RIFF » … « AVI  ».
+    if (head[0] == 0x52 &&
+        head[1] == 0x49 &&
+        head[2] == 0x46 &&
+        head[3] == 0x46 &&
+        head[8] == 0x41 &&
+        head[9] == 0x56 &&
+        head[10] == 0x49) {
+      return true;
+    }
+    return false;
+  } catch (_) {
+    return false;
+  }
+}
+
 /// Upload de vidéos souvenir vers Cloudflare R2 (egress gratuit).
 ///
 /// Flux (la clé secrète R2 reste sur le backend) :
@@ -71,12 +112,43 @@ class VideoService {
     }
   }
 
+  /// Raison du dernier échec d'upload (affichée dans la bannière « Réessayer »).
+  /// Sans elle, un clip qui ne part pas disparaît sans un mot.
+  static String? lastFailureReason;
+
+  /// PUT en FLUX vers R2 : le fichier est lu par morceaux depuis le disque. Une
+  /// vidéo de plusieurs centaines de Mo chargée d'un bloc en mémoire faisait
+  /// tomber l'app sur les téléphones modestes — et le clip était perdu sans
+  /// message.
+  static Future<int> _putFile(Uri url, File file, String contentType) async {
+    final client = http.Client();
+    try {
+      final req = http.StreamedRequest('PUT', url)
+        ..headers['Content-Type'] = contentType
+        ..contentLength = await file.length();
+      file.openRead().listen(
+            req.sink.add,
+            onError: req.sink.addError,
+            onDone: req.sink.close,
+            cancelOnError: true,
+          );
+      final res = await client.send(req).timeout(const Duration(minutes: 15));
+      await res.stream.drain<void>();
+      return res.statusCode;
+    } finally {
+      client.close();
+    }
+  }
+
   static Future<VideoUploadResult?> uploadMemoryVideo({
     required File video,
     required String notebookId,
   }) async {
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
-    if (token == null) return null;
+    if (token == null) {
+      lastFailureReason = 'Session expirée';
+      return null;
+    }
 
     // 1. Compression 720p. En cas d'échec, on uploade le fichier original.
     File toUpload = video;
@@ -97,37 +169,47 @@ class VideoService {
     }
 
     // 2. URL d'upload signée par le backend.
-    final signRes = await http.post(
-      Uri.parse('${AppConfig.backendUrl}/api/video/upload-url'),
-      headers: {
-        'Authorization': 'Bearer $token',
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({'notebookId': notebookId}),
-    );
-    if (signRes.statusCode != 200) {
-      debugPrint('VideoService: upload-url ${signRes.statusCode} ${signRes.body}');
+    try {
+      final signRes = await http
+          .post(
+            Uri.parse('${AppConfig.backendUrl}/api/video/upload-url'),
+            headers: {
+              'Authorization': 'Bearer $token',
+              'Content-Type': 'application/json',
+            },
+            body: jsonEncode({'notebookId': notebookId}),
+          )
+          .timeout(const Duration(seconds: 30));
+      if (signRes.statusCode != 200) {
+        debugPrint(
+            'VideoService: upload-url ${signRes.statusCode} ${signRes.body}');
+        lastFailureReason = 'Serveur indisponible (${signRes.statusCode})';
+        return null;
+      }
+      final data = jsonDecode(signRes.body) as Map<String, dynamic>;
+      final uploadUrl = data['uploadUrl'] as String?;
+      final key = data['key'] as String?;
+      final contentType = (data['contentType'] as String?) ?? 'video/mp4';
+      if (uploadUrl == null || key == null) {
+        lastFailureReason = 'Réponse du serveur incomplète';
+        return null;
+      }
+
+      // 3. PUT direct vers R2. Le Content-Type doit correspondre à la signature.
+      final status = await _putFile(Uri.parse(uploadUrl), toUpload, contentType);
+      if (status != 200 && status != 201) {
+        debugPrint('VideoService: PUT R2 $status');
+        lastFailureReason = 'Envoi refusé par le stockage ($status)';
+        return null;
+      }
+
+      lastFailureReason = null;
+      return VideoUploadResult(key: key, durationMs: durationMs);
+    } catch (e) {
+      debugPrint('VideoService: upload error — $e');
+      lastFailureReason = 'Connexion interrompue';
       return null;
     }
-    final data = jsonDecode(signRes.body) as Map<String, dynamic>;
-    final uploadUrl = data['uploadUrl'] as String?;
-    final key = data['key'] as String?;
-    final contentType = (data['contentType'] as String?) ?? 'video/mp4';
-    if (uploadUrl == null || key == null) return null;
-
-    // 3. PUT direct vers R2. Le Content-Type doit correspondre à la signature.
-    final bytes = await toUpload.readAsBytes();
-    final putRes = await http.put(
-      Uri.parse(uploadUrl),
-      headers: {'Content-Type': contentType},
-      body: bytes,
-    );
-    if (putRes.statusCode != 200 && putRes.statusCode != 201) {
-      debugPrint('VideoService: PUT R2 ${putRes.statusCode}');
-      return null;
-    }
-
-    return VideoUploadResult(key: key, durationMs: durationMs);
   }
 
   /// Supprime plusieurs vidéos R2 (en parallèle). Ignore les erreurs.

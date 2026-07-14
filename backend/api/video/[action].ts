@@ -1,13 +1,34 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomUUID } from 'crypto'
 import { requireAuth } from '../../lib/verify'
-import { presignPut, presignGet, deleteObject, r2PublicHost } from '../../lib/r2'
+import {
+  presignPut,
+  presignGet,
+  deleteObject,
+  signKey,
+  verifyKeySignature,
+  r2PublicHost,
+} from '../../lib/r2'
 import {
   memoryIfMember,
   videoKeysOf,
   photoKeysOf,
   audioKeyOf,
 } from '../../lib/access'
+import { migrateLegacyMedia } from '../../lib/migrate'
+
+// La migration des médias travaille par lots : on lui laisse le temps d'un lot.
+export const config = { maxDuration: 60 }
+
+/** URL backend permanente d'un PDF (voir lib/r2.ts) : elle redirige vers une
+ *  URL R2 signée fraîche à chaque accès — c'est ce qu'on donne à l'imprimeur. */
+function stablePdfUrl(req: VercelRequest, key: string): string {
+  const host = req.headers['x-forwarded-host'] ?? req.headers.host ?? ''
+  const proto = (req.headers['x-forwarded-proto'] as string) ?? 'https'
+  return `${proto}://${host}/api/video/book-pdf?key=${encodeURIComponent(
+    key
+  )}&sig=${signKey(key)}`
+}
 
 // Route dynamique regroupant les endpoints vidéo + la config publique en UNE
 // seule fonction serverless (le plan Hobby de Vercel plafonne à 12 fonctions).
@@ -23,6 +44,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // les URLs de lecture depuis les CLÉS stockées en base. Réponse cacheable.
     res.setHeader('Cache-Control', 'public, max-age=3600')
     return res.status(200).json({ r2PublicHost })
+  }
+
+  if (action === 'book-pdf') {
+    // PUBLIC par construction : c'est l'URL qu'on donne à l'imprimeur (Gelato),
+    // qui n'a évidemment pas de compte carnet. Elle n'ouvre RIEN d'autre que le
+    // PDF dont la clé est signée — sans le HMAC, la clé ne vaut rien, et une
+    // clé signée ne permet pas d'en deviner une autre.
+    const key = (req.query.key ?? '') as string
+    const sig = (req.query.sig ?? '') as string
+    if (!key.startsWith('books/') || !verifyKeySignature(key, sig)) {
+      return res.status(403).send('Lien invalide')
+    }
+    try {
+      const url = await presignGet(key, 3600)
+      res.setHeader('Cache-Control', 'no-store')
+      return res.redirect(302, url)
+    } catch {
+      return res.status(404).send('PDF introuvable')
+    }
   }
 
   if (req.method !== 'POST') {
@@ -167,6 +207,55 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true })
     } catch {
       return res.status(500).json({ error: 'Suppression impossible' })
+    }
+  }
+
+  // ── PDF des livres (aperçu + commandes imprimées) ────────────────────────
+  if (action === 'book-upload-url') {
+    // Le PDF part sur R2 comme le reste. On renvoie AUSSI l'URL stable : c'est
+    // elle qu'on enregistre dans la commande, et que l'imprimeur suivra.
+    const key = `books/${user.uid}/${randomUUID()}.pdf`
+    try {
+      const uploadUrl = await presignPut(key, 'application/pdf')
+      return res.status(200).json({
+        uploadUrl,
+        key,
+        contentType: 'application/pdf',
+        url: stablePdfUrl(req, key),
+      })
+    } catch {
+      return res.status(500).json({ error: 'Signature impossible' })
+    }
+  }
+
+  if (action === 'book-delete') {
+    const key = (body.key ?? '') as string
+    if (!key || !key.startsWith(`books/${user.uid}/`)) {
+      return res.status(403).json({ error: 'Clé invalide' })
+    }
+    try {
+      await deleteObject(key)
+      return res.status(200).json({ ok: true })
+    } catch {
+      return res.status(500).json({ error: 'Suppression impossible' })
+    }
+  }
+
+  // ── Reprise des médias restés sur Firebase Storage ───────────────────────
+  if (action === 'migrate') {
+    // Chaque utilisateur migre SES médias, par lots, jusqu'à `remaining == 0`.
+    // Le travail vit ici parce que les clés R2 et l'accès Firebase Storage sont
+    // au serveur — ni l'app ni un poste de dev ne les ont.
+    const limit = Math.min(Math.max(Number(body.limit ?? 5), 1), 20)
+    try {
+      const report = await migrateLegacyMedia(user.uid, limit, (key) =>
+        stablePdfUrl(req, key)
+      )
+      return res.status(200).json(report)
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ error: 'Migration impossible', detail: String(e) })
     }
   }
 

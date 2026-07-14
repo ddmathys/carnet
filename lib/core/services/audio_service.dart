@@ -3,28 +3,13 @@ import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:uuid/uuid.dart';
 import '../config/app_config.dart';
 
 class AudioService {
   static final _storage = FirebaseStorage.instance;
-  static const _uuid = Uuid();
 
-  /// Upload a single voice memo, return its download URL.
-  /// Stored at audio/{uid}/{notebookId}/{uuid}.m4a — mirrors PhotoService.
-  static Future<String?> uploadMemoryAudio({
-    required File audio,
-    required String notebookId,
-  }) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return null;
-    final ref = _storage.ref('audio/$uid/$notebookId/${_uuid.v4()}.m4a');
-    final task = await ref.putFile(
-      audio,
-      SettableMetadata(contentType: 'audio/mp4'),
-    );
-    return await task.ref.getDownloadURL();
-  }
+  // Plus d'upload vers Firebase Storage : les mémos vocaux partent sur R2.
+  // Ne reste que la suppression des anciens, le temps que la migration passe.
 
   /// Delete a voice memo by its download URL. Silently ignores errors.
   static Future<void> deleteAudioByUrl(String? url) async {

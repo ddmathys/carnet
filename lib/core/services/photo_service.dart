@@ -6,7 +6,6 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
-import 'package:uuid/uuid.dart';
 import '../config/app_config.dart';
 import '../models/memory_model.dart';
 import 'audio_service.dart';
@@ -15,7 +14,6 @@ import 'video_service.dart';
 class PhotoService {
   static final _storage = FirebaseStorage.instance;
   static final _firestore = FirebaseFirestore.instance;
-  static const _uuid = Uuid();
 
   // Compression cible : ~2048 px sur le grand côté, qualité 85. Une photo de
   // téléphone (4000 px, ~5 Mo) tombe à ~2048 px / ~400–700 Ko — assez pour une
@@ -23,22 +21,9 @@ class PhotoService {
   static const int _maxDimension = 2048;
   static const int _jpegQuality = 85;
 
-  /// Upload a single photo, return download URL. The image is JPEG-compressed
-  /// before upload; on compression failure the original file is sent instead.
-  static Future<String?> uploadMemoryPhoto({
-    required File photo,
-    required String notebookId,
-  }) async {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return null;
-    final ref = _storage.ref('photos/$uid/$notebookId/${_uuid.v4()}.jpg');
-    final metadata = SettableMetadata(contentType: 'image/jpeg');
-    final bytes = await _compress(photo);
-    final task = bytes != null
-        ? await ref.putData(bytes, metadata)
-        : await ref.putFile(photo, metadata);
-    return await task.ref.getDownloadURL();
-  }
+  // Plus AUCUN upload vers Firebase Storage : tout part sur R2 (bucket privé,
+  // URLs signées courtes). Firebase Storage n'est plus lu que le temps que la
+  // migration ait fini de rapatrier les anciens médias, et supprimé derrière.
 
   /// Compress to JPEG. Returns null on failure so the caller can fall back to
   /// uploading the original untouched.
@@ -54,17 +39,6 @@ class PhotoService {
     } catch (_) {
       return null;
     }
-  }
-
-  /// Upload multiple photos in parallel, return list of download URLs.
-  static Future<List<String>> uploadMultiplePhotos({
-    required List<File> photos,
-    required String notebookId,
-  }) async {
-    final results = await Future.wait(
-      photos.map((f) => uploadMemoryPhoto(photo: f, notebookId: notebookId)),
-    );
-    return results.whereType<String>().toList();
   }
 
   // ── R2 : bucket privé + URLs signées temporaires (comme les vidéos) ──────

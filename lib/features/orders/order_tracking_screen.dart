@@ -1,7 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
@@ -564,20 +562,9 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
     final router = GoRouter.of(context);
     setState(() => _deleting = true);
     try {
-      // 1. Supprimer le PDF de Storage si présent
-      if (widget.order.pdfUrl != null) {
-        try {
-          await FirebaseStorage.instance
-              .refFromURL(widget.order.pdfUrl!)
-              .delete();
-        } catch (_) {} // Silencieux si déjà supprimé ou introuvable
-      }
-      // 2. Supprimer la commande de Firestore
-      await FirebaseFirestore.instance
-          .collection('orders')
-          .doc(widget.order.id)
-          .delete();
-
+      // PDF (sur R2, ou Firebase pour les commandes d'avant la bascule) puis le
+      // document Firestore — une seule vérité, dans OrderService.
+      await OrderService.deleteOrder(widget.order);
       router.go('/orders');
     } catch (e) {
       if (mounted) {

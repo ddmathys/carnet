@@ -104,13 +104,20 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     final map = <TagCategory, List<String>>{
       for (final c in TagCategory.values) c: [],
     };
+    // La feuille travaille en LIBELLÉS, pas en documents : deux tags de même nom
+    // (un souvenir partagé, un doublon en base) ne doivent donner qu'une puce —
+    // sinon « 2025 » s'affiche deux fois. Cocher ce libellé sélectionne bien
+    // tous les tags qui le portent, côté écran appelant.
+    final seen = <String>{};
     for (final t in widget.tags) {
-      map[categoryOf(t)]!.add(t.label);
+      final label = t.label.trim();
+      if (label.isEmpty || !seen.add(label.toLowerCase())) continue;
+      map[categoryOf(t)]!.add(label);
     }
     // Les tags créés à l'instant sont des événements tant qu'ils n'ont pas de
     // kind — c'est le cas courant (« Vacances », « Amis »).
     for (final label in _created) {
-      if (!map[TagCategory.evenement]!.contains(label)) {
+      if (seen.add(label.toLowerCase())) {
         map[TagCategory.evenement]!.add(label);
       }
     }

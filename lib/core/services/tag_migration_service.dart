@@ -60,7 +60,18 @@ class TagMigrationService {
       }
 
       // 2) Tags d'année, créés à la demande pendant le parcours des souvenirs.
-      final yearTagIds = <int, String>{};
+      // On REPREND un tag existant de même libellé s'il y en a un (l'app a pu en
+      // créer un avant que la migration ne tourne) — sans quoi on se retrouve
+      // avec deux « 2025 » dans le filtre.
+      final existingTags =
+          await _db.collection('tags').where('userId', isEqualTo: uid).get();
+      final yearTagIds = <int, String>{
+        for (final d in existingTags.docs)
+          if (int.tryParse(
+                  ((d.data()['label'] ?? '') as String).trim()) !=
+              null)
+            int.parse(((d.data()['label'] ?? '') as String).trim()): d.id,
+      };
       Future<String> yearTag(int year) async {
         final cached = yearTagIds[year];
         if (cached != null) return cached;

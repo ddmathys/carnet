@@ -1,6 +1,7 @@
 import { initializeApp, getApps, cert, applicationDefault } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
+import { getStorage } from 'firebase-admin/storage'
 
 // FIREBASE_SERVICE_ACCOUNT = JSON complet du compte de service (Console Firebase
 // → Paramètres → Comptes de service → Générer une nouvelle clé privée).
@@ -28,3 +29,8 @@ export const db = getFirestore(app)
 
 export const projectId =
   resolvedProjectId || (app.options.projectId as string | undefined) || ''
+
+/** Bucket Firebase Storage historique. Ne sert plus qu'à VIDER : les médias
+ *  partent sur R2 et les fichiers d'origine sont supprimés derrière. */
+export const legacyBucket = () =>
+  getStorage(app).bucket(`${projectId}.firebasestorage.app`)

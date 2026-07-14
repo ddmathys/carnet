@@ -5,6 +5,7 @@ import {
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
+import { createHmac, timingSafeEqual } from 'crypto'
 
 // Cloudflare R2 est compatible S3. Le backend détient les clés (jamais l'app)
 // et signe des URLs d'upload temporaires ; les fichiers transitent en direct
@@ -68,4 +69,42 @@ export async function presignGet(
 
 export async function deleteObject(key: string): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+}
+
+/** Écrit un objet sur R2 depuis le backend (migration des médias Firebase). */
+export async function putObject(
+  key: string,
+  body: Buffer | Uint8Array,
+  contentType: string
+): Promise<void> {
+  await s3.send(
+    new PutObjectCommand({
+      Bucket: bucket,
+      Key: key,
+      Body: body,
+      ContentType: contentType,
+    })
+  )
+}
+
+// ── URL stable d'un PDF (imprimeur) ─────────────────────────────────────────
+//
+// Gelato exige une URL qui marche encore le jour de l'impression : une URL R2
+// signée expire (7 jours au plus), et le bucket est privé. On publie donc une
+// URL BACKEND permanente, signée d'un HMAC, qui redirige à chaque appel vers une
+// URL R2 fraîchement signée. Rien à changer si le bucket ou le domaine bouge.
+//
+// La clé secrète R2 sert de secret HMAC : elle ne quitte jamais le serveur, et
+// évite une variable d'environnement de plus.
+const hmacSecret = process.env.R2_SECRET_ACCESS_KEY ?? ''
+
+export function signKey(key: string): string {
+  return createHmac('sha256', hmacSecret).update(key).digest('hex').slice(0, 32)
+}
+
+export function verifyKeySignature(key: string, sig: string): boolean {
+  const expected = Buffer.from(signKey(key))
+  const given = Buffer.from(sig ?? '')
+  if (expected.length !== given.length) return false
+  return timingSafeEqual(expected, given)
 }

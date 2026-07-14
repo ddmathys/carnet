@@ -3,7 +3,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_storage/firebase_storage.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
@@ -14,6 +13,7 @@ import '../../core/models/order_model.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/book_pricing.dart';
+import '../../core/services/pdf_service.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
@@ -383,47 +383,23 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
-      final safeTitle = _safeFilename(bookTitle);
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      // digital_{timestamp} pour différencier des commandes print
-      final storageRef = FirebaseStorage.instance
-          .ref('pdfs/${user.uid}/digital_${ts}_$safeTitle.pdf');
-      await storageRef.putData(
-        Uint8List.fromList(pdfBytes),
-        SettableMetadata(
-          contentType: 'application/pdf',
-          customMetadata: {
-            'coverType': coverType,
-            'notebookId': notebookId,
-            'bookTitle': bookTitle,
-            'type': 'digital',
-          },
-        ),
-      );
-      final url = await storageRef.getDownloadURL();
+      final uploaded =
+          await PdfService.uploadBookPdf(Uint8List.fromList(pdfBytes));
+      if (uploaded == null) return;
       await BookHistoryService.recordBook(
         notebookId: notebookId,
         title: bookTitle,
         subtitle: subtitle,
         format: 'digital',
         coverType: coverType,
-        pdfUrl: url,
-        storagePath: storageRef.fullPath,
+        pdfUrl: uploaded.url,
+        storagePath: uploaded.key,
         memoriesCount: memoriesCount,
       );
     } catch (_) {
       // Silencieux — le partage a déjà eu lieu
     }
   }
-
-  static String _safeFilename(String title) => title
-      .replaceAll(RegExp(r'[àáâãäå]'), 'a')
-      .replaceAll(RegExp(r'[èéêë]'), 'e')
-      .replaceAll(RegExp(r'[ìíîï]'), 'i')
-      .replaceAll(RegExp(r'[òóôõö]'), 'o')
-      .replaceAll(RegExp(r'[ùúûü]'), 'u')
-      .replaceAll('ç', 'c')
-      .replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
 
   Future<void> _placeOrder() async {
     if (!(_addressKey.currentState?.validate() ?? false)) return;
@@ -459,19 +435,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       if (!mounted) return;
       setState(() => _orderMessage = 'Envoi du PDF…');
 
-      // 2. Uploader le PDF (chemin temporaire avec userId + timestamp)
-      final ts = DateTime.now().millisecondsSinceEpoch;
-      final safeTitle = _safeFilename(bookTitle);
-      final storageRef = FirebaseStorage.instance
-          .ref('orders/${user.uid}/${ts}_$safeTitle.pdf');
-      await storageRef.putData(
-        pdfBytes,
-        SettableMetadata(
-          contentType: 'application/pdf',
-          customMetadata: {'bookTitle': bookTitle, 'coverType': _coverType},
-        ),
-      );
-      final pdfUrl = await storageRef.getDownloadURL();
+      // 2. Uploader le PDF sur R2. L'URL renvoyée est STABLE (backend → R2
+      // signé) : c'est celle que suivra l'imprimeur, même des semaines plus tard.
+      final uploaded = await PdfService.uploadBookPdf(pdfBytes);
+      if (uploaded == null) {
+        throw Exception('Envoi du PDF impossible — réessaie dans un instant.');
+      }
+      final pdfUrl = uploaded.url;
 
       if (!mounted) return;
       setState(() => _orderMessage = 'Création de la commande…');
@@ -507,7 +477,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         format: 'printed',
         coverType: _coverType,
         pdfUrl: pdfUrl,
-        storagePath: storageRef.fullPath,
+        storagePath: uploaded.key,
         memoriesCount: _selectedMemories.length,
         orderId: orderId,
       );

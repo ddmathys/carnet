@@ -8,7 +8,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/constants/milestone_types.dart';
-import '../../core/services/photo_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
@@ -16,6 +15,7 @@ import '../../core/services/video_service.dart';
 import '../tags/share_tag_sheet.dart';
 import '../tags/tag_picker_sheet.dart';
 import 'widgets/memory_polaroid.dart';
+import 'widgets/delete_memory.dart';
 
 /// Tous les souvenirs visibles, filtrables par tag. Remplace le « journal »
 /// d'un carnet : il n'y a plus qu'une seule collection de souvenirs, et les
@@ -188,7 +188,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                             cat: _safeCat(m.type),
                             tilt: (i % 2 == 0) ? -0.02 : 0.02,
                             onTap: () => context.push('/memory/${m.id}/edit'),
-                            onLongPress: () => _confirmDeleteMemory(context, m),
+                            onDelete: () => confirmAndDeleteMemory(context, m),
                           );
                         },
                       ),
@@ -345,40 +345,6 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
     }
   }
 
-  Future<void> _deleteMemory(MemoryModel memory) async {
-    await PhotoService.deleteMemory(memory.id, memory.photoUrl, memory.mediaUrls,
-        audioUrl: memory.audioUrl,
-        audioKey: memory.audioKey,
-        videoKeys: memory.videoKeys,
-        mediaKeys: memory.mediaKeys);
-  }
-
-  Future<void> _confirmDeleteMemory(
-      BuildContext context, MemoryModel m) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Supprimer ce souvenir ?',
-            style: TextStyle(
-                fontFamily: 'PlayfairDisplay',
-                fontWeight: FontWeight.bold,
-                color: AppColors.textDark)),
-        content: const Text('Cette action est définitive.',
-            style: TextStyle(color: AppColors.textMedium, height: 1.5)),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Annuler')),
-          ElevatedButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
-              child: const Text('Supprimer')),
-        ],
-      ),
-    );
-    if (ok == true) await _deleteMemory(m);
-  }
 }
 
 /// Bannière discrète reflétant la file d'upload en arrière-plan :
@@ -422,6 +388,7 @@ class _UploadStatusBanner extends StatelessWidget {
         }
         if (q.failed.isNotEmpty) {
           final n = q.failed.length;
+          final reason = q.lastError;
           return _strip(
             color: AppColors.error.withOpacity(0.10),
             child: Row(
@@ -431,9 +398,10 @@ class _UploadStatusBanner extends StatelessWidget {
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
-                    n == 1
-                        ? 'Échec de l\'envoi des médias'
-                        : 'Échec de l\'envoi de $n souvenirs',
+                    (n == 1
+                            ? 'Échec de l\'envoi des médias'
+                            : 'Échec de l\'envoi de $n souvenirs') +
+                        (reason != null ? ' — $reason' : ''),
                     style: const TextStyle(
                         fontSize: 12.5, color: AppColors.error),
                   ),
