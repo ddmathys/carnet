@@ -4,6 +4,84 @@ Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
 ---
 
+## ⚡ REPRISE — 14.07.2026 : vidéo réparée, tout sur R2, partage multi-tags
+
+Commits `be77009` + `da0a344` sur `master`, **APK compilé ✅** (GitHub Actions,
+dans `C:\Users\karin\Downloads\carnet-apk\app-release.apk`).
+
+> **⚠️ À FAIRE AVANT DE TESTER L'APK : `cd backend && vercel --prod`.**
+> Trois endpoints sont nouveaux (`/api/video/migrate`, `book-upload-url`,
+> `book-pdf`) et l'invitation multi-tags a changé. Sans déploiement : la
+> migration R2 ne démarre pas, la commande d'un livre échoue à l'envoi du PDF,
+> et le lien de partage multi-tags n'est pas créé.
+
+### 1. La vidéo perdue à l'édition (cause trouvée)
+
+À l'import galerie, le média était rangé photo/vidéo **d'après l'extension du
+chemin**. Le sélecteur Android renvoie une copie en cache dont le nom perd
+parfois l'extension : le clip partait alors dans le pipeline **photo**, était
+uploadé sur R2 étiqueté `image/jpeg`, et **disparaissait sans la moindre
+erreur** — pendant que les vraies photos, elles, arrivaient bien.
+
+- On tranche désormais sur le **type MIME**, puis l'extension, puis les **octets
+  d'en-tête** du fichier (`fileLooksLikeVideo`, signatures ftyp/matroska/avi).
+- Upload vidéo **en flux** (le fichier n'est plus chargé entier en mémoire —
+  un gros clip pouvait faire tomber l'app) + timeout.
+- Un échec d'envoi **dit enfin pourquoi** dans la bannière (`MediaUploadQueue.lastError`).
+
+### 2. Suppression d'un souvenir
+
+Corbeille sur le polaroïd (dashboard + liste) et appui long → **popup** qui nomme
+ce qu'on perd (« 3 photos, 1 vidéo, le mémo vocal »), puis suppression du
+document **et de tous les médias** (`confirmAndDeleteMemory`). Le dashboard
+retire enfin les souvenirs supprimés (ses deux flux mélangeaient leurs lots dans
+un même sac, donc rien n'en sortait jamais).
+
+### 3. Tags : doublons et catégorie « Lieu »
+
+- Le sélecteur affichait **une puce par document** → deux « 2025 ». Dédoublonné
+  par libellé, et les doublons sont **fusionnés en base** au démarrage
+  (`TagService.repairTags` : garde le plus ancien, réunit les collaborateurs,
+  repointe les souvenirs).
+- Les tags créés depuis le formulaire tombaient tous en `kind: libre` → la
+  catégorie **Lieu** du filtre restait vide. Le `kind` est maintenant déduit
+  (`inferKind` : année / lieu / libre), et `repairTags` rétablit celui des tags
+  existants.
+
+### 4. Tout sur R2 (plus rien sur Firebase Storage)
+
+- **`/api/video/migrate`** (POST, authentifié, par lots) : le backend rapatrie
+  photos, mémos vocaux et PDF restés sur Firebase Storage vers R2, repointe le
+  document, **et supprime l'original**. L'app le réveille en tâche de fond au
+  démarrage (`MediaMigrationService`) jusqu'à `remaining == 0`. C'est le serveur
+  qui travaille : lui seul a les clés R2 et l'accès Storage (le blocage
+  `vercel env pull` n'a plus d'importance).
+- **PDF des livres → R2** avec une **URL backend STABLE** signée en HMAC
+  (`/api/video/book-pdf?key=…&sig=…`) qui redirige vers une URL R2 fraîche à
+  chaque accès : Gelato peut imprimer des semaines après la commande, ce
+  qu'une URL signée (7 j max) n'aurait pas permis.
+- Plus **aucune écriture** vers Firebase Storage dans l'app (uploads morts
+  supprimés). Il n'en reste que la lecture/suppression des anciens médias, le
+  temps que la migration ait fini de passer.
+
+### 5. Partage multi-tags
+
+`/api/tag/invite` accepte `tagIds` (compat `tagId`) : **un seul lien pour
+plusieurs tags**, l'invité les rejoint tous d'un coup. Le bouton de partage
+apparaît dès qu'**au moins un** tag est coché (liste des souvenirs ET
+dashboard) ; la feuille montre, pour chaque collaborateur, quels tags il voit.
+
+### Reste à faire / à vérifier sur device
+
+- Déployer le backend (voir ci-dessus), puis **retester l'ajout d'une vidéo à un
+  souvenir existant** — c'est le scénario qui échouait.
+- Vérifier que la migration R2 se termine (elle tourne au démarrage, en silence)
+  puis que Firebase Storage est bien vide côté photos/audio/pdfs.
+- Les règles Storage pourront être verrouillées en écriture une fois la
+  migration passée partout.
+
+---
+
 ## ⚡ REPRISE — 13.07.2026 (soir) : les carnets sont devenus des tags
 
 **Tout est en prod** (`master`, dernier commit `fefa4da`) : APK compilé par
