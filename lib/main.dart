@@ -18,6 +18,7 @@ import 'features/growth/growth_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/memories/memories_list_screen.dart';
 import 'features/memories/memory_create_screen.dart';
+import 'features/memories/memory_detail_screen.dart';
 import 'features/books/book_generate_screen.dart';
 import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
@@ -75,6 +76,13 @@ final _router = GoRouter(
       path: '/memory/:memoryId/edit',
       builder: (_, state) =>
           MemoryCreateScreen(memoryId: state.pathParameters['memoryId']!),
+    ),
+    // Vue LECTURE d'un souvenir (taper un polaroïd). « /edit » ouvre le
+    // formulaire. Placée APRÈS /new et /:id/edit pour ne pas les capter.
+    GoRoute(
+      path: '/memory/:memoryId',
+      builder: (_, state) =>
+          MemoryDetailScreen(memoryId: state.pathParameters['memoryId']!),
     ),
 
     // ── Livres ──

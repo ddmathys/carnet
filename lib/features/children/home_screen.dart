@@ -347,7 +347,7 @@ class _HomeScreenState extends State<HomeScreen> {
             memory: m,
             cat: _safeCat(m.type),
             tilt: (i % 2 == 0) ? -0.02 : 0.02,
-            onTap: () => context.push('/memory/${m.id}/edit'),
+            onTap: () => context.push('/memory/${m.id}'),
             onDelete: () => _deleteMemory(m),
           );
         },

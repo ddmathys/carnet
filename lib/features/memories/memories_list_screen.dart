@@ -190,7 +190,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                             memory: m,
                             cat: _safeCat(m.type),
                             tilt: (i % 2 == 0) ? -0.02 : 0.02,
-                            onTap: () => context.push('/memory/${m.id}/edit'),
+                            onTap: () => context.push('/memory/${m.id}'),
                             onDelete: () => confirmAndDeleteMemory(context, m),
                           );
                         },
