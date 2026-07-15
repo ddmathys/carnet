@@ -14,6 +14,7 @@ import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/pdf_service.dart';
+import 'pdf_viewer_screen.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
@@ -358,16 +359,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       memoriesCount: _selectedMemories.length,
     );
 
-    // 3. Partage — hors spinner. Si la feuille de partage ne s'ouvre pas, on
-    //    le signale au lieu de tourner dans le vide.
-    try {
-      await Printing.sharePdf(
-        bytes: pdfBytes,
-        filename: '${bookTitle.replaceAll(' ', '_')}.pdf',
-      );
-    } catch (e) {
-      if (mounted) _showSnack('Partage impossible : $e');
-    }
+    // 3. On OUVRE le PDF dans l'app (visualiseur plein écran) : on le lit tout
+    //    de suite, sans passer par la feuille de partage. Le partage et
+    //    l'impression restent accessibles depuis la barre du visualiseur.
+    if (!mounted) return;
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PdfViewerScreen(title: bookTitle, bytes: pdfBytes!),
+    ));
   }
 
   // Upload silencieux dans Storage (l'admin peut récupérer tous les PDFs) +
@@ -642,6 +640,73 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   : _titleCtrl.text.trim(),
             ),
           ),
+          const SizedBox(height: 20),
+
+          // ── Souvenirs inclus + action, EN HAUT (pas besoin de scroller) ──
+          GestureDetector(
+            onTap: _openMemorySelection,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border, width: 0.5),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.checklist_outlined, size: 18, color: AppColors.sage),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _selectedMemoryIds.length == _memories.length
+                          ? 'Tous les souvenirs inclus (${_memories.length})'
+                          : '${_selectedMemoryIds.length} souvenir${_selectedMemoryIds.length != 1 ? 's' : ''} sur ${_memories.length} inclus',
+                      style: const TextStyle(color: AppColors.textDark, fontSize: 13),
+                    ),
+                  ),
+                  const Text('Modifier', style: TextStyle(color: AppColors.sage, fontSize: 13, fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right, color: AppColors.sage, size: 18),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+
+          // Action principale : génère l'aperçu du livre (d'où le nom).
+          if (_generating) ...[
+            _ProgressBar(progress: _progress),
+            const SizedBox(height: 12),
+            Text(
+              _loadingMessages[_msgIndex],
+              style: const TextStyle(
+                  color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic),
+              textAlign: TextAlign.center,
+            ),
+          ] else ...[
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _selectedMemories.isEmpty ? null : _generate,
+                icon: const Icon(Icons.menu_book_outlined),
+                label: const Text('Aperçu du livre'),
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                  disabledBackgroundColor: AppColors.background,
+                  disabledForegroundColor: AppColors.softGray,
+                ),
+              ),
+            ),
+            if (_selectedMemories.isEmpty) ...[
+              const SizedBox(height: 10),
+              const Text(
+                'Sélectionne au moins un souvenir.',
+                style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+
           const SizedBox(height: 24),
 
           // ── Personnalise ton livre (titre éditable) ────────────────────
@@ -673,80 +738,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 12),
-          Text(
-            _selectedMemoryIds.length == _memories.length
-                ? '${_memories.length} souvenir${_memories.length != 1 ? 's' : ''} · ${DateTime.now().year}'
-                : '${_selectedMemoryIds.length}/${_memories.length} souvenirs sélectionnés',
-            style: const TextStyle(color: AppColors.textMedium, fontSize: 12),
-            textAlign: TextAlign.center,
-          ),
-
-          // ── Memory selection ───────────────────────────────────────────
-          const SizedBox(height: 16),
-          GestureDetector(
-            onTap: _openMemorySelection,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: AppColors.white,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.border, width: 0.5),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.checklist_outlined, size: 18, color: AppColors.sage),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      _selectedMemoryIds.length == _memories.length
-                          ? 'Tous les souvenirs inclus'
-                          : '${_selectedMemoryIds.length} souvenir${_selectedMemoryIds.length != 1 ? 's' : ''} sur ${_memories.length} inclus',
-                      style: const TextStyle(color: AppColors.textDark, fontSize: 13),
-                    ),
-                  ),
-                  const Text('Modifier', style: TextStyle(color: AppColors.sage, fontSize: 13, fontWeight: FontWeight.w500)),
-                  const SizedBox(width: 4),
-                  const Icon(Icons.chevron_right, color: AppColors.sage, size: 18),
-                ],
-              ),
-            ),
-          ),
 
           // ── Photo preview ──────────────────────────────────────────────
           _buildPhotoPreview(),
-
-          const SizedBox(height: 24),
-
-          // Create book / loading indicator
-          if (_generating) ...[
-            _ProgressBar(progress: _progress),
-            const SizedBox(height: 12),
-            Text(
-              _loadingMessages[_msgIndex],
-              style: const TextStyle(
-                  color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic),
-              textAlign: TextAlign.center,
-            ),
-          ] else ...[
-            ElevatedButton.icon(
-              onPressed: _selectedMemories.isEmpty ? null : _generate,
-              icon: const Icon(Icons.menu_book_outlined),
-              label: const Text('Créer le livre'),
-              style: ElevatedButton.styleFrom(
-                disabledBackgroundColor: AppColors.background,
-                disabledForegroundColor: AppColors.softGray,
-              ),
-            ),
-            if (_selectedMemories.isEmpty) ...[
-              const SizedBox(height: 10),
-              const Text(
-                'Sélectionne au moins un souvenir.',
-                style: TextStyle(color: AppColors.textMedium, fontSize: 12),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ],
         ],
       ),
     );

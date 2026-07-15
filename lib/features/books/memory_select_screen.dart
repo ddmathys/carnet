@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -6,6 +7,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
+import '../../core/services/photo_service.dart';
 import '../../core/services/tag_service.dart';
 import '../tags/tag_picker_sheet.dart';
 
@@ -290,6 +292,80 @@ class _Chip extends StatelessWidget {
   }
 }
 
+/// Vignette carrée d'un souvenir (photo R2/Firebase résolue à la demande, avec
+/// un compteur si plusieurs médias). Repli sur l'emoji si pas de photo.
+class _Thumb extends StatelessWidget {
+  final MemoryModel memory;
+  const _Thumb({required this.memory});
+
+  int get _count => memory.mediaKeys.isNotEmpty
+      ? memory.mediaKeys.length
+      : (memory.mediaUrls.isNotEmpty
+          ? memory.mediaUrls.length
+          : (memory.videoKeys.length));
+
+  @override
+  Widget build(BuildContext context) {
+    final hasPhoto =
+        memory.mediaKeys.isNotEmpty || memory.mediaUrls.isNotEmpty ||
+            (memory.photoUrl?.isNotEmpty ?? false);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(12),
+      child: SizedBox(
+        width: 64,
+        height: 64,
+        child: hasPhoto
+            ? FutureBuilder<List<String>>(
+                future: PhotoService.resolvePhotoUrls(memory),
+                builder: (_, snap) {
+                  final url = (snap.data?.isNotEmpty ?? false)
+                      ? snap.data!.first
+                      : null;
+                  if (url == null) return Container(color: AppColors.sageTint);
+                  return Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CachedNetworkImage(
+                        imageUrl: url,
+                        fit: BoxFit.cover,
+                        placeholder: (_, __) =>
+                            Container(color: AppColors.sageTint),
+                        errorWidget: (_, __, ___) =>
+                            Container(color: AppColors.sageTint),
+                      ),
+                      if (_count > 1)
+                        Positioned(
+                          right: 3,
+                          bottom: 3,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 5, vertical: 1),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withOpacity(0.6),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Text('$_count',
+                                style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.w700)),
+                          ),
+                        ),
+                    ],
+                  );
+                },
+              )
+            : Container(
+                color: AppColors.sageTint,
+                alignment: Alignment.center,
+                child: Text(memory.videoKeys.isNotEmpty ? '🎬' : '📝',
+                    style: const TextStyle(fontSize: 24)),
+              ),
+      ),
+    );
+  }
+}
+
 class _MemoryRow extends StatelessWidget {
   final MemoryModel memory;
   final bool selected;
@@ -330,6 +406,9 @@ class _MemoryRow extends StatelessWidget {
               color: selected ? AppColors.sageDark : AppColors.softGray,
               size: 22,
             ),
+            const SizedBox(width: 12),
+            // Vignette du souvenir : voir d'un coup d'œil ce qu'on inclut.
+            _Thumb(memory: memory),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

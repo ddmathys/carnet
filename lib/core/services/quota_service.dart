@@ -69,9 +69,13 @@ class QuotaService {
 
         for (final doc in memoriesSnap.docs) {
           final data = doc.data();
-          final mediaUrls = List<String>.from(data['mediaUrls'] ?? []);
-          if (mediaUrls.isNotEmpty) {
-            count += mediaUrls.length;
+          // Photos R2 (mediaKeys) + anciennes photos Firebase (mediaUrls) — les
+          // deux comptent. Sans mediaKeys, le compteur affichait 0 depuis la
+          // bascule R2 (les photos ne sont plus dans mediaUrls).
+          final keys = List<String>.from(data['mediaKeys'] ?? []);
+          final urls = List<String>.from(data['mediaUrls'] ?? []);
+          if (keys.isNotEmpty || urls.isNotEmpty) {
+            count += keys.length + urls.length;
           } else if ((data['photoUrl'] as String?)?.isNotEmpty == true) {
             count++;
           }
@@ -195,7 +199,13 @@ class QuotaService {
             .where('notebookId', whereIn: batch)
             .get();
         for (final doc in memoriesSnap.docs) {
-          if ((doc.data()['audioUrl'] as String?)?.isNotEmpty == true) count++;
+          final data = doc.data();
+          // Mémo vocal R2 (audioKey) OU ancien Firebase (audioUrl). Sans la clé,
+          // le compteur restait à 0 depuis la bascule R2.
+          if ((data['audioKey'] as String?)?.isNotEmpty == true ||
+              (data['audioUrl'] as String?)?.isNotEmpty == true) {
+            count++;
+          }
         }
       }
       return count;

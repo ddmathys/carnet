@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/services/book_history_service.dart';
+import 'pdf_viewer_screen.dart';
 
 /// « Mes livres » : tous les livres de l'utilisateur (PDF générés et livres
 /// commandés) — ils ne sont plus rangés par carnet.
@@ -18,6 +19,14 @@ class BookHistoryScreen extends StatefulWidget {
 
 class _BookHistoryScreenState extends State<BookHistoryScreen> {
   String? _busyId; // livre en cours de partage
+
+  /// Ouvre le PDF DANS l'app (visualiseur plein écran). C'est l'action par
+  /// défaut au tap : on lit le livre sans passer par la feuille de partage.
+  void _open(GeneratedBookModel book) {
+    Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => PdfViewerScreen(title: book.title, url: book.pdfUrl),
+    ));
+  }
 
   Future<void> _share(GeneratedBookModel book) async {
     if (_busyId != null) return;
@@ -111,6 +120,7 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
             itemBuilder: (_, i) => _BookTile(
               book: books[i],
               busy: _busyId == books[i].id,
+              onOpen: () => _open(books[i]),
               onShare: () => _share(books[i]),
               // Commander un livre déjà généré : on repasse par la sélection
               // (les souvenirs d'origine ne sont pas mémorisés dans l'historique).
@@ -200,6 +210,7 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
 class _BookTile extends StatelessWidget {
   final GeneratedBookModel book;
   final bool busy;
+  final VoidCallback onOpen;
   final VoidCallback onShare;
   final VoidCallback onOrder;
   final VoidCallback onDelete;
@@ -207,6 +218,7 @@ class _BookTile extends StatelessWidget {
   const _BookTile({
     required this.book,
     required this.busy,
+    required this.onOpen,
     required this.onShare,
     required this.onOrder,
     required this.onDelete,
@@ -233,7 +245,7 @@ class _BookTile extends StatelessWidget {
         return false; // la suppression réelle passe par le stream
       },
       child: GestureDetector(
-        onTap: busy ? null : onShare,
+        onTap: busy ? null : onOpen,
         child: Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: const EdgeInsets.all(14),
@@ -302,11 +314,21 @@ class _BookTile extends StatelessWidget {
                       icon: const Icon(Icons.more_vert,
                           color: AppColors.textMedium),
                       onSelected: (v) {
+                        if (v == 'open') onOpen();
                         if (v == 'share') onShare();
                         if (v == 'order') onOrder();
                         if (v == 'delete') onDelete();
                       },
                       itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          value: 'open',
+                          child: Row(children: [
+                            Icon(Icons.menu_book_outlined,
+                                size: 18, color: AppColors.sage),
+                            SizedBox(width: 10),
+                            Text('Ouvrir le PDF'),
+                          ]),
+                        ),
                         PopupMenuItem(
                           value: 'share',
                           child: Row(children: [

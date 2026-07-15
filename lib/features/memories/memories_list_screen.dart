@@ -131,15 +131,6 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           Expanded(child: _buildMemoriesStream()),
         ],
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context
-            .push('/memory/new${tag != null ? '?tag=${tag.id}' : ''}'),
-        backgroundColor: AppColors.sage,
-        foregroundColor: AppColors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Ajouter'),
-        shape: const StadiumBorder(),
-      ),
     );
   }
 
