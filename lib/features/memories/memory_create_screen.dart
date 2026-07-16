@@ -103,6 +103,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // Durée max par clip selon le palier (gratuit 2 min / premium 10 min).
   // Chargée en async au démarrage ; défaut prudent = palier gratuit.
   int _videoDurationCapSec = QuotaService.freeVideoDurationSec;
+  // Nombre max de vidéos par souvenir (défaut prudent = palier gratuit ; le
+  // premium n'a pas de limite propre, chargé en async au démarrage).
+  int _maxVideosPerMemory = QuotaService.freeMaxVideosPerMemory;
 
   // Step 1: form
   String? _selectedCategory;
@@ -133,12 +136,19 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     _loadVideoDurationCap();
   }
 
-  // Récupère la durée max autorisée par clip selon le palier de l'utilisateur.
+  // Récupère la durée max par clip ET le nombre max de vidéos par souvenir
+  // selon le palier (premium : pas de limite propre par souvenir).
   Future<void> _loadVideoDurationCap() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final cap = await QuotaService.getVideoDurationLimitSec(uid);
-    if (mounted) setState(() => _videoDurationCapSec = cap);
+    final maxPerMemory = await QuotaService.getMaxVideosPerMemory(uid);
+    if (mounted) {
+      setState(() {
+        _videoDurationCapSec = cap;
+        _maxVideosPerMemory = maxPerMemory;
+      });
+    }
   }
 
   @override
@@ -634,7 +644,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   int get _videoCount => _existingVideoKeys.length + _localVideoPaths.length;
   bool get _hasVideo => _videoCount > 0;
-  bool get _canAddVideo => _videoCount < QuotaService.maxVideosPerMemory;
+  bool get _canAddVideo => _videoCount < _maxVideosPerMemory;
 
   // Durée max par clip en texte lisible (ex. « 10 min », « 2 min », « 90 s »).
   String get _videoDurationLabel => _videoDurationCapSec % 60 == 0
@@ -642,10 +652,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       : '$_videoDurationCapSec s';
 
   Future<void> _pickVideo(ImageSource source) async {
-    // Limite par souvenir (max 3) — au-delà, on informe et on bloque.
+    // Limite par souvenir (gratuit) — au-delà, on informe et on bloque.
     if (!_canAddVideo) {
-      _showSnack(
-          'Maximum ${QuotaService.maxVideosPerMemory} vidéos par souvenir.');
+      _showSnack('Maximum $_maxVideosPerMemory vidéos par souvenir.');
       return;
     }
     // Quota global (30 gratuit / 150 premium), en comptant les vidéos déjà
@@ -731,10 +740,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// sans bloquer le reste. Utilisé par l'import unifié galerie.
   Future<void> _ingestVideoPaths(List<String> paths) async {
     if (paths.isEmpty) return;
-    final remaining = QuotaService.maxVideosPerMemory - _videoCount;
+    final remaining = _maxVideosPerMemory - _videoCount;
     if (remaining <= 0) {
-      _showSnack(
-          'Maximum ${QuotaService.maxVideosPerMemory} vidéos par souvenir.');
+      _showSnack('Maximum $_maxVideosPerMemory vidéos par souvenir.');
       return;
     }
     // Vidéos au-delà du plafond du souvenir → ignorées.
@@ -785,7 +793,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
     if (ignoredForLimit > 0) {
       notes.add('$ignoredForLimit au-delà de '
-          '${QuotaService.maxVideosPerMemory} vidéos');
+          '$_maxVideosPerMemory vidéos');
     }
     if (notes.isNotEmpty) _showSnack('Ignoré : ${notes.join(' · ')}.');
   }
@@ -1953,8 +1961,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle(
-            '🎬 Vidéos (optionnel · ${QuotaService.maxVideosPerMemory} max)'),
+        _SectionTitle(_maxVideosPerMemory <= QuotaService.freeMaxVideosPerMemory
+            ? '🎬 Vidéos (optionnel · $_maxVideosPerMemory max)'
+            : '🎬 Vidéos (optionnel)'),
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -1997,9 +2006,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Jusqu\'à ${QuotaService.maxVideosPerMemory} vidéos de '
-          '$_videoDurationLabel. Un QR code dans le livre '
-          'mène à toutes les vidéos du souvenir.',
+          (_maxVideosPerMemory <= QuotaService.freeMaxVideosPerMemory
+                  ? 'Jusqu\'à $_maxVideosPerMemory vidéos de $_videoDurationLabel. '
+                  : 'Vidéos de $_videoDurationLabel. ') +
+              'Un QR code dans le livre mène à toutes les vidéos du souvenir.',
           style: const TextStyle(color: AppColors.softGray, fontSize: 12),
         ),
       ],

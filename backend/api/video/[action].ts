@@ -97,7 +97,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const contentType = 'video/mp4'
     const key = `videos/${user.uid}/${notebookId}/${randomUUID()}.mp4`
     try {
-      const uploadUrl = await presignPut(key, contentType)
+      // 1 h de validité : une vidéo de plusieurs centaines de Mo sur un réseau
+      // mobile peut dépasser les 10 min par défaut, et l'URL expirerait en plein
+      // envoi (R2 rejetterait alors le PUT).
+      const uploadUrl = await presignPut(key, contentType, 3600)
       return res.status(200).json({ uploadUrl, key, contentType })
     } catch {
       return res.status(500).json({ error: 'Signature impossible' })

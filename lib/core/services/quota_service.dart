@@ -21,9 +21,20 @@ class QuotaService {
   static const int premiumVideoDurationSec = 600; // 10 min
   // Conservé pour compat/affichage par défaut (= palier gratuit).
   static const int maxVideoDurationSec = freeVideoDurationSec;
-  // Nombre max de vidéos attachées à UN même souvenir (en plus du quota global
-  // ci-dessus). Garde la page du livre lisible et maîtrise le coût de stockage.
-  static const int maxVideosPerMemory = 10;
+  // Nombre max de vidéos attachées à UN même souvenir. Le GRATUIT reste plafonné
+  // (page de livre lisible, coût de stockage) ; le PREMIUM n'a PAS de limite par
+  // souvenir — il n'est borné que par son quota global (premiumVideoLimit).
+  static const int freeMaxVideosPerMemory = 10;
+  // Conservé pour compat (valeur par défaut = palier gratuit).
+  static const int maxVideosPerMemory = freeMaxVideosPerMemory;
+
+  /// Nombre max de vidéos par souvenir selon le palier : gratuit 10, premium
+  /// sans limite propre (borné par le quota global de 150).
+  static Future<int> getMaxVideosPerMemory(String userId) async {
+    return await isPremium(userId)
+        ? premiumVideoLimit
+        : freeMaxVideosPerMemory;
+  }
 
   // Mémos vocaux (un par souvenir). Même logique de palier gratuit/premium.
   static const int freeAudioLimit = 15;

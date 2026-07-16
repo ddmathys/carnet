@@ -123,16 +123,23 @@ class VideoService {
   static Future<int> _putFile(Uri url, File file, String contentType) async {
     final client = http.Client();
     try {
+      final length = await file.length();
       final req = http.StreamedRequest('PUT', url)
         ..headers['Content-Type'] = contentType
-        ..contentLength = await file.length();
+        ..contentLength = length;
       file.openRead().listen(
             req.sink.add,
             onError: req.sink.addError,
             onDone: req.sink.close,
             cancelOnError: true,
           );
-      final res = await client.send(req).timeout(const Duration(minutes: 15));
+      // Timeout proportionnel à la taille : une vidéo de 800 Mo sur un réseau
+      // mobile lent prend bien plus que 15 min. On laisse ~1 min par 15 Mo,
+      // planché à 15 min et plafonné à 45 min pour ne pas pendre indéfiniment.
+      final mb = length / (1024 * 1024);
+      final minutes = (mb / 15).ceil().clamp(15, 45);
+      final res =
+          await client.send(req).timeout(Duration(minutes: minutes));
       await res.stream.drain<void>();
       return res.statusCode;
     } finally {
@@ -150,22 +157,36 @@ class VideoService {
       return null;
     }
 
-    // 1. Compression 720p. En cas d'échec, on uploade le fichier original.
+    // 1. Compression 720p — MAIS pas au-dessus d'un certain poids. Le compresseur
+    // natif (video_compress) charge/décode la vidéo et fait planter l'app sur les
+    // très gros fichiers (une vidéo de 800 Mo saturait la mémoire → crash). Au
+    // delà du seuil, on saute la compression et on envoie l'original tel quel :
+    // l'upload est en flux (mémoire bornée), donc l'envoi, lui, ne plante pas.
+    const int skipCompressionAbove = 180 * 1024 * 1024; // 180 Mo
     File toUpload = video;
     int? durationMs;
+    int sizeBytes = 0;
     try {
-      final info = await VideoCompress.compressVideo(
-        video.path,
-        quality: VideoQuality.Res1280x720Quality,
-        deleteOrigin: false,
-        includeAudio: true,
-      );
-      if (info != null && info.path != null) {
-        toUpload = File(info.path!);
-        durationMs = info.duration?.round();
+      sizeBytes = await video.length();
+    } catch (_) {}
+    if (sizeBytes > 0 && sizeBytes <= skipCompressionAbove) {
+      try {
+        final info = await VideoCompress.compressVideo(
+          video.path,
+          quality: VideoQuality.Res1280x720Quality,
+          deleteOrigin: false,
+          includeAudio: true,
+        );
+        if (info != null && info.path != null) {
+          toUpload = File(info.path!);
+          durationMs = info.duration?.round();
+        }
+      } catch (e) {
+        debugPrint('VideoService: compression échouée, upload original — $e');
       }
-    } catch (e) {
-      debugPrint('VideoService: compression échouée, upload original — $e');
+    } else {
+      debugPrint(
+          'VideoService: vidéo volumineuse (${(sizeBytes / (1024 * 1024)).round()} Mo) → envoi sans compression');
     }
 
     // 2. URL d'upload signée par le backend.
