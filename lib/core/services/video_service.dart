@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -121,8 +122,12 @@ class VideoService {
   /// tomber l'app sur les téléphones modestes — et le clip était perdu sans
   /// message.
   static Future<int> _putFile(Uri url, File file, String contentType,
-      {void Function(int sent, int total)? onProgress}) async {
+      {void Function(int sent, int total)? onProgress,
+      Duration idleTimeout = const Duration(seconds: 90)}) async {
     final client = http.Client();
+    Timer? watchdog;
+    var lastActivity = DateTime.now();
+    var timedOut = false;
     try {
       final length = await file.length();
       final req = http.StreamedRequest('PUT', url)
@@ -135,6 +140,7 @@ class VideoService {
       var sent = 0;
       final body = file.openRead().map((chunk) {
         sent += chunk.length;
+        lastActivity = DateTime.now();
         onProgress?.call(sent, length);
         return chunk;
       });
@@ -145,16 +151,30 @@ class VideoService {
         req.sink.addError(e);
         req.sink.close();
       });
-      // Timeout proportionnel à la taille : une vidéo de 800 Mo sur un réseau
-      // mobile lent prend bien plus que 15 min. On laisse ~1 min par 15 Mo,
-      // planché à 15 min et plafonné à 45 min pour ne pas pendre indéfiniment.
-      final mb = length / (1024 * 1024);
-      final minutes = (mb / 15).ceil().clamp(15, 45);
-      final res =
-          await client.send(req).timeout(Duration(minutes: minutes));
+      // Chien de garde d'INACTIVITÉ (et non délai total) : on n'abandonne que si
+      // PLUS AUCUN octet ne bouge pendant `idleTimeout`. Un réseau lent mais qui
+      // avance n'est jamais coupé — contrairement à l'ancien délai total qui
+      // tranchait un gros envoi en pleine route (l'arrêt reproductible vers
+      // 60 %). Dès que ça patine, on ferme le client : `send()` lève aussitôt.
+      watchdog = Timer.periodic(const Duration(seconds: 5), (t) {
+        if (DateTime.now().difference(lastActivity) > idleTimeout) {
+          timedOut = true;
+          t.cancel();
+          client.close();
+        }
+      });
+      final res = await client.send(req);
       await res.stream.drain<void>();
       return res.statusCode;
+    } catch (_) {
+      // Coupure provoquée par le chien de garde → on la nomme explicitement pour
+      // que l'appelant distingue « trop lent » d'une vraie coupure réseau.
+      if (timedOut) {
+        throw TimeoutException('Envoi au point mort', idleTimeout);
+      }
+      rethrow;
     } finally {
+      watchdog?.cancel();
       client.close();
     }
   }
@@ -202,49 +222,82 @@ class VideoService {
           'VideoService: vidéo volumineuse (${(sizeBytes / (1024 * 1024)).round()} Mo) → envoi sans compression');
     }
 
-    // 2. URL d'upload signée par le backend.
-    try {
-      final signRes = await http
-          .post(
-            Uri.parse('${AppConfig.backendUrl}/api/video/upload-url'),
-            headers: {
-              'Authorization': 'Bearer $token',
-              'Content-Type': 'application/json',
-            },
-            body: jsonEncode({'notebookId': notebookId}),
-          )
-          .timeout(const Duration(seconds: 30));
-      if (signRes.statusCode != 200) {
-        debugPrint(
-            'VideoService: upload-url ${signRes.statusCode} ${signRes.body}');
-        lastFailureReason = 'Serveur indisponible (${signRes.statusCode})';
-        return null;
-      }
-      final data = jsonDecode(signRes.body) as Map<String, dynamic>;
-      final uploadUrl = data['uploadUrl'] as String?;
-      final key = data['key'] as String?;
-      final contentType = (data['contentType'] as String?) ?? 'video/mp4';
-      if (uploadUrl == null || key == null) {
-        lastFailureReason = 'Réponse du serveur incomplète';
-        return null;
-      }
+    // 2 + 3. On (re)signe une URL puis on PUT vers R2, avec REPRISE auto. Un
+    // envoi mobile peut échouer en route (réseau qui lâche, ou trop lent) ; au
+    // lieu d'abandonner le clip, on retente quelques fois — en resignant une URL
+    // FRAÎCHE à chaque essai (une URL déjà tentée peut être inexploitable). La
+    // progression repart de 0 à chaque essai : la bannière le montre honnêtement.
+    const maxAttempts = 3;
+    for (var attempt = 1; attempt <= maxAttempts; attempt++) {
+      final hasRetryLeft = attempt < maxAttempts;
+      try {
+        // 2. URL d'upload signée par le backend.
+        final signRes = await http
+            .post(
+              Uri.parse('${AppConfig.backendUrl}/api/video/upload-url'),
+              headers: {
+                'Authorization': 'Bearer $token',
+                'Content-Type': 'application/json',
+              },
+              body: jsonEncode({'notebookId': notebookId}),
+            )
+            .timeout(const Duration(seconds: 30));
+        if (signRes.statusCode != 200) {
+          debugPrint(
+              'VideoService: upload-url ${signRes.statusCode} ${signRes.body} (essai $attempt)');
+          lastFailureReason = 'Serveur indisponible (${signRes.statusCode})';
+          if (hasRetryLeft) {
+            await Future<void>.delayed(Duration(seconds: 2 * attempt));
+            continue;
+          }
+          return null;
+        }
+        final data = jsonDecode(signRes.body) as Map<String, dynamic>;
+        final uploadUrl = data['uploadUrl'] as String?;
+        final key = data['key'] as String?;
+        final contentType = (data['contentType'] as String?) ?? 'video/mp4';
+        if (uploadUrl == null || key == null) {
+          // Réponse malformée : réessayer ne changerait rien.
+          lastFailureReason = 'Réponse du serveur incomplète';
+          return null;
+        }
 
-      // 3. PUT direct vers R2. Le Content-Type doit correspondre à la signature.
-      final status = await _putFile(Uri.parse(uploadUrl), toUpload, contentType,
-          onProgress: onProgress);
-      if (status != 200 && status != 201) {
-        debugPrint('VideoService: PUT R2 $status');
+        // 3. PUT direct vers R2. Le Content-Type doit correspondre à la signature.
+        final status = await _putFile(
+            Uri.parse(uploadUrl), toUpload, contentType,
+            onProgress: onProgress);
+        if (status == 200 || status == 201) {
+          lastFailureReason = null;
+          return VideoUploadResult(key: key, durationMs: durationMs);
+        }
+        debugPrint('VideoService: PUT R2 $status (essai $attempt)');
         lastFailureReason = 'Envoi refusé par le stockage ($status)';
+        if (hasRetryLeft) {
+          await Future<void>.delayed(Duration(seconds: 2 * attempt));
+          continue;
+        }
+        return null;
+      } on TimeoutException {
+        // Chien de garde d'inactivité : plus aucun octet ne bougeait.
+        debugPrint('VideoService: envoi au point mort (essai $attempt)');
+        lastFailureReason =
+            'Envoi trop lent — réessaie sur une meilleure connexion';
+        if (hasRetryLeft) {
+          await Future<void>.delayed(Duration(seconds: 2 * attempt));
+          continue;
+        }
+        return null;
+      } catch (e) {
+        debugPrint('VideoService: upload error (essai $attempt) — $e');
+        lastFailureReason = 'Connexion interrompue';
+        if (hasRetryLeft) {
+          await Future<void>.delayed(Duration(seconds: 2 * attempt));
+          continue;
+        }
         return null;
       }
-
-      lastFailureReason = null;
-      return VideoUploadResult(key: key, durationMs: durationMs);
-    } catch (e) {
-      debugPrint('VideoService: upload error — $e');
-      lastFailureReason = 'Connexion interrompue';
-      return null;
     }
+    return null;
   }
 
   /// Supprime plusieurs vidéos R2 (en parallèle). Ignore les erreurs.
