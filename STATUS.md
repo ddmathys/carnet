@@ -4,6 +4,63 @@ Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
 ---
 
+## ⚡ REPRISE — 16.07.2026 : lecture/édition éditoriales, livre in-app, gros uploads
+
+Commits `65a2225` → `b714985` sur `master`, **poussés** (arbre propre).
+**Backend redéployé en prod le 16.07** (`vercel --prod`, deploy
+`dpl_DG1gBRZXzKFbT1H7Ya1qCNhFVTrD`, alias `bloom-backend-gray.vercel.app`) —
+il embarque le passage de l'URL d'upload signée de 10 min → **1 h** (gros clips).
+`npx tsc --noEmit` du backend : **OK**.
+
+> **APK à recompiler** (GitHub Actions) pour tester tout ce qui suit sur device :
+> `git push origin ci-build-apk:master` puis `gh run watch`.
+
+### 1. Souvenir : voir avant de modifier
+Taper un souvenir ouvrait **direct** le formulaire d'édition — impossible de juste
+le regarder. Nouvel écran **`MemoryDetailScreen`** (`/memory/:id`, fidèle à la
+maquette `carnet-detail-souvenir`) : méta compacte en haut, médias dominants en
+bas (héro + grille, plein écran), mémo vocal jouable. Bouton **Modifier** →
+`/memory/:id/edit`, corbeille → suppression avec popup. Les polaroïds du dashboard
+et de la liste pointent vers le détail.
+
+### 2. Édition au même visuel que la lecture
+« Modifier » ouvrait un wizard en étapes très différent. Nouveau rendu éditorial
+(branché seulement en édition, `memory_create_screen.dart`) : même mise en page
+que le détail — titre inline, date/lieu en pills, description facultative, tags
+±, **médias en grand** (tuile + / x), mémo vocal. Réutilise tous les handlers
+existants. **Le wizard reste pour la CRÉATION.**
+
+### 3. Livre : PDF in-app, sélection visuelle, sous-titre, couverture R2
+- **PDF visible DANS l'app** : nouvel écran `PdfViewerScreen` (package `printing`).
+  Après génération il s'ouvre en plein écran ; dans « Mes livres », taper un livre
+  l'ouvre in-app. Partage/impression restent dispo.
+- Bouton renommé **« Aperçu du livre »**, remonté **en haut** avec le résumé.
+- Écran **« choisir les souvenirs »** : vignette photo par souvenir, et taper la
+  vignette ouvre ses médias en plein écran avant de cocher.
+- Champ **sous-titre** (facultatif) propagé couverture/aperçu/PDF/historique.
+- **Couverture R2** : le sélecteur ne lisait que les URLs Firebase → vide pour les
+  souvenirs migrés. Il résout désormais les photos R2 (URLs signées) + Firebase.
+- « Mon espace » : compteurs photos/audio comptent `mediaKeys`/`audioKey` (R2), plus
+  seulement les vieilles URLs. FAB « Ajouter » retiré de la liste.
+
+### 4. Grosses vidéos : plus de crash, vraie barre de progression
+- **Crash ~800 Mo réglé** : on saute la compression native au-delà de 180 Mo et on
+  envoie l'original **en flux** (mémoire bornée). Timeout client proportionnel
+  (15–45 min). Backend : URL d'upload signée **1 h** (déployée, cf. ci-dessus).
+- **Barre de progression réelle** : `VideoService._putFile` passe en `addStream`
+  (contre-pression) et remonte `sent/total` ; la bannière de la liste affiche une
+  `LinearProgressIndicator` + « Envoi de la vidéo X/Y N% » et « garde l'app ouverte ».
+- **Premium** : plus de limite de 10 vidéos par souvenir (borné par le quota global
+  150). Le gratuit reste à 10.
+
+### Reste à faire / à vérifier sur device
+- **Recompiler l'APK** et tester : ouverture détail vs édition, PDF in-app,
+  ajout d'une grosse vidéo (progression + pas de crash), couverture d'un souvenir
+  migré R2.
+- Vérifier que la migration R2 (tâche de fond) est bien terminée (`remaining == 0`).
+
+---
+
 ## ⚡ REPRISE — 14.07.2026 : vidéo réparée, tout sur R2, partage multi-tags
 
 Commits `be77009` + `da0a344` sur `master`, **APK compilé ✅** (GitHub Actions,
