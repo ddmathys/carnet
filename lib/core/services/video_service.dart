@@ -120,19 +120,31 @@ class VideoService {
   /// vidéo de plusieurs centaines de Mo chargée d'un bloc en mémoire faisait
   /// tomber l'app sur les téléphones modestes — et le clip était perdu sans
   /// message.
-  static Future<int> _putFile(Uri url, File file, String contentType) async {
+  static Future<int> _putFile(Uri url, File file, String contentType,
+      {void Function(int sent, int total)? onProgress}) async {
     final client = http.Client();
     try {
       final length = await file.length();
       final req = http.StreamedRequest('PUT', url)
         ..headers['Content-Type'] = contentType
         ..contentLength = length;
-      file.openRead().listen(
-            req.sink.add,
-            onError: req.sink.addError,
-            onDone: req.sink.close,
-            cancelOnError: true,
-          );
+      // Corps = lecture disque comptée octet par octet. `addStream` applique la
+      // contre-pression : on ne lit pas plus vite que le réseau n'envoie → la
+      // mémoire reste bornée (même pour 800 Mo) et `onProgress` suit le rythme
+      // réel de l'envoi.
+      var sent = 0;
+      final body = file.openRead().map((chunk) {
+        sent += chunk.length;
+        onProgress?.call(sent, length);
+        return chunk;
+      });
+      // Fire-and-forget : `send()` ci-dessous consomme ce flux.
+      // ignore: unawaited_futures
+      req.sink.addStream(body).then((_) => req.sink.close(),
+          onError: (Object e) {
+        req.sink.addError(e);
+        req.sink.close();
+      });
       // Timeout proportionnel à la taille : une vidéo de 800 Mo sur un réseau
       // mobile lent prend bien plus que 15 min. On laisse ~1 min par 15 Mo,
       // planché à 15 min et plafonné à 45 min pour ne pas pendre indéfiniment.
@@ -150,6 +162,7 @@ class VideoService {
   static Future<VideoUploadResult?> uploadMemoryVideo({
     required File video,
     required String notebookId,
+    void Function(int sent, int total)? onProgress,
   }) async {
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (token == null) {
@@ -217,7 +230,8 @@ class VideoService {
       }
 
       // 3. PUT direct vers R2. Le Content-Type doit correspondre à la signature.
-      final status = await _putFile(Uri.parse(uploadUrl), toUpload, contentType);
+      final status = await _putFile(Uri.parse(uploadUrl), toUpload, contentType,
+          onProgress: onProgress);
       if (status != 200 && status != 201) {
         debugPrint('VideoService: PUT R2 $status');
         lastFailureReason = 'Envoi refusé par le stockage ($status)';

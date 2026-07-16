@@ -356,25 +356,51 @@ class _UploadStatusBanner extends StatelessWidget {
         final q = MediaUploadQueue.instance;
         if (q.pending > 0) {
           final n = q.pending;
+          final vp = q.videoProgress; // null si aucune vidéo en cours
+          final pct = vp != null ? (vp * 100).round() : null;
+          final title = q.videoTotal > 1
+              ? 'Envoi de la vidéo ${q.videoIndex}/${q.videoTotal}…'
+              : (vp != null
+                  ? 'Envoi de la vidéo…'
+                  : (n == 1
+                      ? 'Envoi du souvenir en cours…'
+                      : 'Envoi de $n souvenirs en cours…'));
           return _strip(
             color: AppColors.sage.withOpacity(0.12),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const SizedBox(
-                  width: 14,
-                  height: 14,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: AppColors.sage),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        pct != null ? '$title $pct %' : title,
+                        style: const TextStyle(
+                            fontSize: 12.5,
+                            color: AppColors.textDark,
+                            fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    n == 1
-                        ? 'Envoi du souvenir en cours…'
-                        : 'Envoi de $n souvenirs en cours…',
-                    style: const TextStyle(
-                        fontSize: 12.5, color: AppColors.textMedium),
+                const SizedBox(height: 6),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(99),
+                  child: LinearProgressIndicator(
+                    // Déterminée pendant l'envoi d'une vidéo, indéterminée sinon
+                    // (photos/mémo, dont on ne suit pas le détail).
+                    value: vp,
+                    minHeight: 6,
+                    backgroundColor: AppColors.sage.withOpacity(0.18),
+                    valueColor:
+                        const AlwaysStoppedAnimation(AppColors.sageDark),
                   ),
+                ),
+                const SizedBox(height: 5),
+                const Text(
+                  'Tu peux quitter cette page — garde juste l\'application '
+                  'ouverte le temps de l\'envoi.',
+                  style: TextStyle(fontSize: 11, color: AppColors.textMedium),
                 ),
               ],
             ),

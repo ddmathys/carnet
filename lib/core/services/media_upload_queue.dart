@@ -66,8 +66,23 @@ class MediaUploadQueue extends ChangeNotifier {
   final List<MediaUploadJob> _failed = [];
   String? _lastError;
 
+  // Progression du clip vidéo en cours d'envoi (le plus lourd des médias) :
+  // fraction 0..1, index du clip et nombre total à envoyer. Alimente la barre
+  // de progression de la bannière.
+  double _videoProgress = 0;
+  int _videoIndex = 0;
+  int _videoTotal = 0;
+  int _lastNotifiedPct = -1;
+
   /// Nombre d'uploads encore en cours.
   int get pending => _pending;
+
+  /// Fraction envoyée du clip vidéo en cours (0..1), ou null si aucun clip.
+  double? get videoProgress => _videoTotal > 0 ? _videoProgress : null;
+
+  /// Clip vidéo en cours (1-based) et nombre total à envoyer dans le lot.
+  int get videoIndex => _videoIndex;
+  int get videoTotal => _videoTotal;
 
   /// Travaux qui ont échoué (réseau coupé, etc.) et qu'on peut relancer.
   List<MediaUploadJob> get failed => List.unmodifiable(_failed);
@@ -135,10 +150,28 @@ class MediaUploadQueue extends ChangeNotifier {
       final videoDurationsMs = <int>[...job.existingVideoDurations];
       final failedVideoPaths = <String>[];
       final failedVideoDurations = <int?>[];
+      if (job.localVideoPaths.isNotEmpty) {
+        _videoTotal = job.localVideoPaths.length;
+      }
       for (var i = 0; i < job.localVideoPaths.length; i++) {
+        _videoIndex = i + 1;
+        _videoProgress = 0;
+        _lastNotifiedPct = -1;
+        notifyListeners();
         final r = await VideoService.uploadMemoryVideo(
           video: File(job.localVideoPaths[i]),
           notebookId: job.notebookId,
+          onProgress: (sent, total) {
+            if (total <= 0) return;
+            _videoProgress = sent / total;
+            // On ne rafraîchit qu'au changement de pourcent entier : sinon des
+            // milliers de notifications pour un gros fichier.
+            final pct = (_videoProgress * 100).floor();
+            if (pct != _lastNotifiedPct) {
+              _lastNotifiedPct = pct;
+              notifyListeners();
+            }
+          },
         );
         final localDur =
             i < job.localVideoDurations.length ? job.localVideoDurations[i] : null;
@@ -153,6 +186,12 @@ class MediaUploadQueue extends ChangeNotifier {
         final dur = r.durationMs ?? localDur;
         if (dur != null) videoDurationsMs.add(dur);
       }
+      // Fin des vidéos de ce lot → on efface la progression (la bannière repasse
+      // en indéterminé le temps de finir photos/mémo/écriture).
+      _videoTotal = 0;
+      _videoIndex = 0;
+      _videoProgress = 0;
+      notifyListeners();
 
       final newKeys = await photoFuture;
       final uploadedAudioKey = await audioFuture;
