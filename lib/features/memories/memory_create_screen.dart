@@ -1344,14 +1344,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           backgroundColor: AppColors.background,
           body: Center(child: CircularProgressIndicator()));
     }
+    // En ÉDITION : même mise en page que la vue lecture (titre, date·lieu,
+    // description, tags, puis les médias en grand), mais tout est modifiable.
+    if (_isEditing) return _buildEditorialScaffold();
     return Scaffold(
       backgroundColor: AppColors.background,
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
-        title: Text(
-          _isEditing ? 'Modifier le souvenir' : 'Nouveau souvenir',
-          style: const TextStyle(
+        title: const Text(
+          'Nouveau souvenir',
+          style: TextStyle(
               fontFamily: 'Fraunces',
               fontWeight: FontWeight.w600,
               color: AppColors.textDark),
@@ -1362,6 +1365,486 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
       ),
       body: _buildDetailsStep(),
+    );
+  }
+
+  // ══ ÉDITION ÉDITORIALE ════════════════════════════════════════════════════
+  // Le même visuel que la vue lecture d'un souvenir, rendu modifiable : champs
+  // éditables + médias qu'on ajoute/retire. Réutilise tous les handlers de
+  // l'écran (dates, tags, photos, vidéos, mémo vocal, enregistrement).
+
+  Widget _buildEditorialScaffold() {
+    return Scaffold(
+      backgroundColor: AppColors.background,
+      appBar: AppBar(
+        backgroundColor: AppColors.background,
+        elevation: 0,
+        centerTitle: true,
+        leadingWidth: 92,
+        leading: TextButton(
+          onPressed: _loading
+              ? null
+              : () {
+                  if (context.canPop()) {
+                    context.pop();
+                  } else {
+                    _goBack();
+                  }
+                },
+          child: const Text('Annuler',
+              style: TextStyle(
+                  fontFamily: 'Outfit',
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textMedium)),
+        ),
+        title: const Text('MODIFICATION',
+            style: TextStyle(
+                fontFamily: 'Outfit',
+                fontSize: 12,
+                letterSpacing: 1.4,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textMedium)),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12),
+            child: _loading
+                ? const Center(
+                    child: SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2)))
+                : TextButton(
+                    onPressed: _saveEnabled ? _save : null,
+                    style: TextButton.styleFrom(
+                      backgroundColor: _saveEnabled
+                          ? AppColors.sageDark
+                          : AppColors.softGray.withOpacity(0.3),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text('Enregistrer',
+                        style: TextStyle(
+                            fontFamily: 'Outfit', fontWeight: FontWeight.w700)),
+                  ),
+          ),
+        ],
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(22, 6, 22, 44),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: const [
+                Icon(Icons.edit_outlined, size: 13, color: AppColors.sage),
+                SizedBox(width: 5),
+                Text('TOUCHE POUR MODIFIER',
+                    style: TextStyle(
+                        fontFamily: 'Outfit',
+                        fontSize: 10,
+                        letterSpacing: 1.1,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.sage)),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _editTitleField(),
+            const SizedBox(height: 16),
+            _editDatePill(),
+            const SizedBox(height: 8),
+            _editLocationPill(),
+            const SizedBox(height: 16),
+            _editDescriptionField(),
+            if (_selectedCategory == 'taille_poids') ...[
+              const SizedBox(height: 14),
+              _editMeasurements(),
+            ],
+            const SizedBox(height: 20),
+            _buildTagSection(),
+            const SizedBox(height: 22),
+            const Divider(height: 1, color: AppColors.border),
+            const SizedBox(height: 20),
+            _editMediaSection(),
+            const SizedBox(height: 22),
+            _buildVoiceMemoSection(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _editTitleField() {
+    return TextField(
+      controller: _titleController,
+      onChanged: (_) => setState(() {}),
+      textCapitalization: TextCapitalization.sentences,
+      style: const TextStyle(
+        fontFamily: 'Fraunces',
+        fontSize: 28,
+        fontWeight: FontWeight.w500,
+        height: 1.1,
+        color: AppColors.textDark,
+      ),
+      decoration: InputDecoration(
+        isDense: true,
+        hintText: 'Titre du souvenir',
+        hintStyle: const TextStyle(color: AppColors.softGray),
+        contentPadding: const EdgeInsets.only(bottom: 6),
+        enabledBorder: UnderlineInputBorder(
+          borderSide: BorderSide(
+              color: _titleRequiredEmpty ? AppColors.error : AppColors.sage,
+              width: 2),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.sage, width: 2),
+        ),
+      ),
+    );
+  }
+
+  Widget _editDatePill() {
+    return GestureDetector(
+      onTap: _openDatePicker,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: AppColors.white,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: _dateNeedsConfirmation ? AppColors.error : AppColors.border,
+            width: _dateNeedsConfirmation ? 1.2 : 0.5,
+          ),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('🗓️', style: TextStyle(fontSize: 13)),
+            const SizedBox(width: 8),
+            Text(_dateLabel,
+                style: const TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppColors.textDark)),
+            const SizedBox(width: 8),
+            const Text('modifier',
+                style: TextStyle(
+                    fontFamily: 'Outfit', fontSize: 12, color: AppColors.sage)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _editLocationPill() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: _locationRequiredEmpty ? AppColors.error : AppColors.border,
+          width: _locationRequiredEmpty ? 1.2 : 0.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          const Text('📍', style: TextStyle(fontSize: 13)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: TextField(
+              controller: _locationController,
+              textCapitalization: TextCapitalization.sentences,
+              onChanged: (_) => setState(_syncAutoTags),
+              style: const TextStyle(
+                  fontFamily: 'Outfit',
+                  fontWeight: FontWeight.w600,
+                  fontSize: 13,
+                  color: AppColors.textDark),
+              decoration: const InputDecoration(
+                isDense: true,
+                border: InputBorder.none,
+                hintText: 'Lieu',
+                hintStyle: TextStyle(color: AppColors.softGray),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _editDescriptionField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          decoration: BoxDecoration(
+            color: AppColors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.border, width: 0.5),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+          child: TextField(
+            controller: _textController,
+            minLines: 3,
+            maxLines: null,
+            textCapitalization: TextCapitalization.sentences,
+            style: const TextStyle(
+                fontSize: 14.5, height: 1.5, color: Color(0xFF5B534C)),
+            decoration: const InputDecoration(
+              border: InputBorder.none,
+              hintText: 'Décris ce souvenir…',
+              hintStyle: TextStyle(color: AppColors.softGray),
+            ),
+          ),
+        ),
+        const Padding(
+          padding: EdgeInsets.only(top: 6, left: 4),
+          child: Text('Description · facultatif',
+              style: TextStyle(fontSize: 11.5, color: AppColors.textMedium)),
+        ),
+      ],
+    );
+  }
+
+  Widget _editMeasurements() {
+    Widget field(TextEditingController c, String label, String suffix) =>
+        Expanded(
+          child: TextField(
+            controller: c,
+            keyboardType:
+                const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: label,
+              suffixText: suffix,
+              filled: true,
+              fillColor: AppColors.white,
+              isDense: true,
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide:
+                      const BorderSide(color: AppColors.border, width: 0.5)),
+            ),
+          ),
+        );
+    return Row(
+      children: [
+        field(_weightController, 'Poids', 'kg'),
+        const SizedBox(width: 12),
+        field(_heightController, 'Taille', 'cm'),
+      ],
+    );
+  }
+
+  Widget _editMediaSection() {
+    final specs = <_MediaSpec>[];
+    for (var i = 0; i < _existingPhotoUrls.length; i++) {
+      final url = _existingPhotoUrls[i];
+      specs.add(_MediaSpec(
+        thumb: Image.network(url,
+            fit: BoxFit.cover,
+            loadingBuilder: (_, child, p) => p == null
+                ? child
+                : Container(color: AppColors.sageTint),
+            errorBuilder: (_, __, ___) => Container(color: AppColors.sageTint)),
+        isVideo: false,
+        duration: '',
+        onTap: () => _openPhotoViewer(i),
+        onRemove: () => _removeExistingPhoto(url),
+      ));
+    }
+    for (var j = 0; j < _localPhotos.length; j++) {
+      specs.add(_MediaSpec(
+        thumb: Image.file(_localPhotos[j], fit: BoxFit.cover),
+        isVideo: false,
+        duration: '',
+        onTap: () => _openPhotoViewer(_existingPhotoUrls.length + j),
+        onRemove: () => _removeLocalPhoto(j),
+      ));
+    }
+    for (var i = 0; i < _existingVideoKeys.length; i++) {
+      specs.add(_MediaSpec(
+        thumb: Container(color: const Color(0xFF2C2521)),
+        isVideo: true,
+        duration: i < _existingVideoDurations.length
+            ? _formatAudioDuration(_existingVideoDurations[i])
+            : '',
+        onTap: () => _openVideoViewer(i),
+        onRemove: () => _removeExistingVideo(i),
+      ));
+    }
+    for (var j = 0; j < _localVideoPaths.length; j++) {
+      specs.add(_MediaSpec(
+        thumb: Container(color: const Color(0xFF2C2521)),
+        isVideo: true,
+        duration: _formatAudioDuration(_localVideoDurations[j]),
+        onTap: () => _openVideoViewer(_existingVideoKeys.length + j),
+        onRemove: () => _removeLocalVideo(j),
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Text('📸  Photos & vidéos',
+                style: TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    color: AppColors.textDark)),
+            const SizedBox(width: 8),
+            Text('· ${specs.length}',
+                style: const TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: AppColors.textMedium)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        const Text('Touche ＋ pour ajouter, ✕ pour retirer.',
+            style: TextStyle(fontSize: 11.5, color: AppColors.textMedium)),
+        const SizedBox(height: 14),
+        if (specs.isEmpty)
+          GestureDetector(
+            onTap: _showMediaSourceSheet,
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 22),
+              decoration: BoxDecoration(
+                color: AppColors.white,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: AppColors.sageLight, width: 1.5),
+              ),
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.add_photo_alternate_outlined,
+                      color: AppColors.sage, size: 28),
+                  SizedBox(height: 6),
+                  Text('Ajouter photos & vidéos',
+                      style: TextStyle(
+                          color: AppColors.sage,
+                          fontWeight: FontWeight.w700,
+                          fontFamily: 'Outfit')),
+                ],
+              ),
+            ),
+          )
+        else ...[
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: _editTile(specs.first, radius: 20),
+          ),
+          const SizedBox(height: 10),
+          GridView.count(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            crossAxisCount: 2,
+            mainAxisSpacing: 10,
+            crossAxisSpacing: 10,
+            childAspectRatio: 1,
+            children: [
+              for (final s in specs.skip(1)) _editTile(s, radius: 16),
+              _editAddTile(),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _editTile(_MediaSpec s, {required double radius}) {
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(radius),
+          child: GestureDetector(onTap: s.onTap, child: s.thumb),
+        ),
+        if (s.isVideo)
+          IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(radius),
+                color: Colors.black.withOpacity(0.22),
+              ),
+              child: const Center(
+                child: Icon(Icons.play_arrow, color: Colors.white, size: 30),
+              ),
+            ),
+          ),
+        if (s.isVideo && s.duration.isNotEmpty)
+          Positioned(
+            bottom: 8,
+            left: 8,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.55),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Text(s.duration,
+                  style: const TextStyle(
+                      fontFamily: 'Outfit',
+                      fontWeight: FontWeight.w700,
+                      fontSize: 11,
+                      color: Colors.white)),
+            ),
+          ),
+        Positioned(
+          top: 6,
+          right: 6,
+          child: GestureDetector(
+            onTap: s.onRemove,
+            child: Container(
+              width: 26,
+              height: 26,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.black.withOpacity(0.5),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.close, color: Colors.white, size: 15),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _editAddTile() {
+    return GestureDetector(
+      onTap: _showMediaSourceSheet,
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.sageLight, width: 1.5),
+        ),
+        child: const Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('＋',
+                style: TextStyle(
+                    fontSize: 26,
+                    color: AppColors.sage,
+                    fontWeight: FontWeight.w400)),
+            SizedBox(height: 2),
+            Text('Ajouter',
+                style: TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 12,
+                    color: AppColors.sage)),
+          ],
+        ),
+      ),
     );
   }
 
@@ -2109,6 +2592,23 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       ],
     );
   }
+}
+
+/// Un média de la grille éditoriale (photo ou vidéo) : sa vignette, sa durée
+/// (vidéo), et les gestes voir / retirer. Sert l'écran de modification.
+class _MediaSpec {
+  final Widget thumb;
+  final bool isVideo;
+  final String duration;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+  const _MediaSpec({
+    required this.thumb,
+    required this.isVideo,
+    required this.duration,
+    required this.onTap,
+    required this.onRemove,
+  });
 }
 
 // ── Shared widgets ───────────────────────────────────────────────────────────
