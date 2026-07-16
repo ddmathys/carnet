@@ -9,6 +9,8 @@ import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/tag_service.dart';
+import '../../core/services/video_service.dart';
+import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../tags/tag_picker_sheet.dart';
 
 /// Choix des souvenirs qui composeront le livre.
@@ -178,6 +180,7 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
                               onTap: () => setState(() {
                                 if (!_selected.remove(m.id)) _selected.add(m.id);
                               }),
+                              onViewMedia: () => _openMemoryMedia(m),
                             );
                           },
                         ),
@@ -200,6 +203,27 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
         ),
       ),
     );
+  }
+
+  /// Ouvre les médias d'un souvenir en plein écran (photos + vidéos), pour voir
+  /// ce qu'on inclut avant de cocher.
+  Future<void> _openMemoryMedia(MemoryModel m) async {
+    final photos = await PhotoService.resolvePhotoUrls(m);
+    final Map<String, String> videoUrls = m.videoKeys.isNotEmpty
+        ? await VideoService.playbackUrls(m.id)
+        : const {};
+    if (!mounted) return;
+    final items = <FullscreenMedia>[
+      for (final u in photos) FullscreenMedia.photoUrl(u),
+      for (final k in m.videoKeys) FullscreenMedia.videoUrl(videoUrls[k]),
+    ];
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Aucun média dans ce souvenir.')),
+      );
+      return;
+    }
+    MediaFullscreenViewer.open(context, items: items);
   }
 
   void _continue() {
@@ -370,8 +394,12 @@ class _MemoryRow extends StatelessWidget {
   final MemoryModel memory;
   final bool selected;
   final VoidCallback onTap;
+  final VoidCallback onViewMedia;
   const _MemoryRow(
-      {required this.memory, required this.selected, required this.onTap});
+      {required this.memory,
+      required this.selected,
+      required this.onTap,
+      required this.onViewMedia});
 
   @override
   Widget build(BuildContext context) {
@@ -407,8 +435,27 @@ class _MemoryRow extends StatelessWidget {
               size: 22,
             ),
             const SizedBox(width: 12),
-            // Vignette du souvenir : voir d'un coup d'œil ce qu'on inclut.
-            _Thumb(memory: memory),
+            // Vignette du souvenir : tape dessus pour voir ses médias en grand
+            // (le reste de la ligne coche/décoche le souvenir).
+            GestureDetector(
+              onTap: onViewMedia,
+              child: Stack(
+                alignment: Alignment.topRight,
+                children: [
+                  _Thumb(memory: memory),
+                  Container(
+                    margin: const EdgeInsets.all(3),
+                    padding: const EdgeInsets.all(2),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.55),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Icon(Icons.zoom_in,
+                        color: Colors.white, size: 13),
+                  ),
+                ],
+              ),
+            ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(

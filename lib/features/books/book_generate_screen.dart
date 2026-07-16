@@ -12,6 +12,7 @@ import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
+import '../../core/services/photo_service.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/pdf_service.dart';
 import 'pdf_viewer_screen.dart';
@@ -66,6 +67,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   String? _coverPhotoUrl;
   // Si vrai, la photo de couverture n'est pas répétée dans les pages du livre.
   bool _excludeCoverPhotoFromBook = false;
+  // URLs de photos résolues par souvenir (R2 signé + Firebase). Sans ça, le
+  // sélecteur de couverture était vide pour les souvenirs passés sur R2 (il ne
+  // lisait que les URLs Firebase).
+  final Map<String, List<String>> _photoUrlsByMemory = {};
 
   // Aperçu WYSIWYG : on génère les MÊMES octets PDF que le téléchargement et on
   // affiche chaque page rastérisée → aucune différence possible avec le rendu
@@ -74,6 +79,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   int _previewPageCount = 0;
 
   late final TextEditingController _titleCtrl;
+  late final TextEditingController _subtitleCtrl;
+
+  /// Sous-titre du livre (facultatif), imprimé sous le titre en couverture.
+  String? get _bookSubtitle =>
+      _subtitleCtrl.text.trim().isNotEmpty ? _subtitleCtrl.text.trim() : null;
 
   // ── Adresse livraison ──────────────────────────────────────────────────────
   final _addressKey = GlobalKey<FormState>();
@@ -138,6 +148,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   void initState() {
     super.initState();
     _titleCtrl = TextEditingController();
+    _subtitleCtrl = TextEditingController();
     _firstNameCtrl = TextEditingController();
     _lastNameCtrl = TextEditingController();
     _streetCtrl = TextEditingController();
@@ -158,6 +169,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   @override
   void dispose() {
     _titleCtrl.dispose();
+    _subtitleCtrl.dispose();
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _streetCtrl.dispose();
@@ -238,6 +250,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // défaut sur la couverture (ex. « Léa & Nala »), pour que le champ soit
       // cohérent avec l'aperçu et directement modifiable.
       _titleCtrl.text = _defaultCoverTitle(nb);
+      // Résout les URLs de photos (R2 signé + Firebase) pour peupler le
+      // sélecteur de couverture, y compris pour les souvenirs sur R2.
+      _resolvePhotos(allMemories);
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
       // infini, sans message — la cause des « le spinner tourne ».
@@ -264,7 +279,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
-      customSubtitle: null,
+      customSubtitle: _bookSubtitle,
       backendUrl: AppConfig.backendUrl,
     ).timeout(const Duration(seconds: 180));
   }
@@ -334,7 +349,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         coverPhotoUrl: _coverPhotoUrl,
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
-        customSubtitle: null,
+        customSubtitle: _bookSubtitle,
         backendUrl: AppConfig.backendUrl,
       ).timeout(const Duration(seconds: 180));
       pdfBytes = gen.bytes;
@@ -353,7 +368,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     _uploadPdfToStorage(
       pdfBytes: pdfBytes,
       bookTitle: bookTitle,
-      subtitle: null,
+      subtitle: _bookSubtitle,
       coverType: _coverType,
       notebookId: widget.tagId ?? '',
       memoriesCount: _selectedMemories.length,
@@ -423,7 +438,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         coverPhotoUrl: _coverPhotoUrl,
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
-        customSubtitle: null,
+        customSubtitle: _bookSubtitle,
         backendUrl: AppConfig.backendUrl,
         padForPrint: true, // pages valides Gelato (pair, ≥28)
       );
@@ -471,7 +486,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       await BookHistoryService.recordBook(
         notebookId: widget.tagId ?? '',
         title: bookTitle,
-        subtitle: null,
+        subtitle: _bookSubtitle,
         format: 'printed',
         coverType: _coverType,
         pdfUrl: pdfUrl,
@@ -738,6 +753,24 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
             onChanged: (_) => setState(() {}),
           ),
+          const SizedBox(height: 10),
+          TextField(
+            controller: _subtitleCtrl,
+            textAlign: TextAlign.center,
+            textCapitalization: TextCapitalization.sentences,
+            style: const TextStyle(
+              fontFamily: 'PlayfairDisplay',
+              fontSize: 14,
+              fontStyle: FontStyle.italic,
+              color: AppColors.textMedium,
+            ),
+            decoration: _bookFieldDecoration(
+              label: 'Sous-titre (facultatif)',
+              hint: 'Ex : Été 2026, nos aventures',
+              icon: Icons.subtitles_outlined,
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
 
           // ── Photo preview ──────────────────────────────────────────────
           _buildPhotoPreview(),
@@ -748,11 +781,31 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Step 1: Format selection ───────────────────────────────────────────────
 
-  // Collect all photo URLs from selected memories (mediaUrls first, fallback to photoUrl)
+  /// Résout les photos de chaque souvenir (R2 signé + Firebase) pour le
+  /// sélecteur de couverture. Une fois prêt, on choisit une couverture par
+  /// défaut si l'utilisateur n'en a pas déjà une.
+  Future<void> _resolvePhotos(List<MemoryModel> memories) async {
+    for (final m in memories) {
+      try {
+        final urls = await PhotoService.resolvePhotoUrls(m);
+        if (urls.isNotEmpty) _photoUrlsByMemory[m.id] = urls;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    setState(() {
+      _coverPhotoUrl ??= _allPhotoUrls.isNotEmpty ? _allPhotoUrls.first : null;
+    });
+  }
+
+  // Toutes les URLs de photos des souvenirs sélectionnés (couverture au choix).
+  // Utilise les URLs résolues (R2/Firebase) ; repli sync sur mediaUrls/photoUrl.
   List<String> get _allPhotoUrls {
     final urls = <String>[];
     for (final m in _selectedMemories) {
-      if (m.mediaUrls.isNotEmpty) {
+      final resolved = _photoUrlsByMemory[m.id];
+      if (resolved != null && resolved.isNotEmpty) {
+        urls.addAll(resolved);
+      } else if (m.mediaUrls.isNotEmpty) {
         urls.addAll(m.mediaUrls);
       } else if (m.photoUrl != null && m.photoUrl!.isNotEmpty) {
         urls.add(m.photoUrl!);
