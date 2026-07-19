@@ -78,13 +78,17 @@ class BookHistoryService {
   }
 
   /// Supprime l'entrée d'historique + le PDF.
-  /// (Pour un imprimé, la commande Firestore reste intacte.)
+  ///
+  /// ⚠️ Pour un livre lié à une commande imprimée, le FICHIER est conservé :
+  /// `orders.pdfUrl` pointe sur la même clé R2, et Gelato peut venir chercher
+  /// le PDF des semaines après la commande. Seule l'entrée d'historique part.
   ///
   /// `storagePath` porte désormais une clé R2 (`books/{uid}/…`). Les livres
   /// d'avant la bascule ont encore un chemin Firebase : on les supprime là où
   /// ils sont, tant que la migration ne les a pas repris.
   static Future<void> deleteBook(GeneratedBookModel book) async {
     await _col.doc(book.id).delete();
+    if (book.orderId != null && book.orderId!.isNotEmpty) return;
     if (book.storagePath.isEmpty) return;
     if (book.storagePath.startsWith('books/')) {
       await PdfService.deleteBookPdf(book.storagePath);

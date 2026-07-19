@@ -21,10 +21,14 @@ class BookPdfService {
   // pas d'A4 en livre photo ; 21×28 est le portrait le plus proche) + 4 mm de
   // fond perdu (bleed) sur chaque côté → document 218×288 mm. Les images
   // remplissent tout le document ; texte / QR / numéro de page sont rentrés
-  // d'au moins _bleed pour rester dans la zone de sécurité après coupe.
+  // de _safe pour rester dans la zone de sécurité après coupe.
   static const _bleed = 0.4 * PdfPageFormat.cm; // 4 mm
   static const _a4W = 21.0 * PdfPageFormat.cm + 2 * _bleed; // 218 mm (doc)
   static const _a4H = 28.0 * PdfPageFormat.cm + 2 * _bleed; // 288 mm (doc)
+  // Zone de sécurité : le trait de coupe passe à _bleed du bord du document ;
+  // avec la tolérance du massicot (~1-2 mm), un élément posé À _bleed peut être
+  // rogné. Le contenu est donc rentré de 5 mm supplémentaires (9 mm du bord).
+  static const _safe = _bleed + 0.5 * PdfPageFormat.cm;
 
   // Mise en page album : images BORD À BORD (full-bleed), sans marge ni
   // espacement blanc entre photos. (Mettre une valeur > 0 réintroduirait un
@@ -176,14 +180,31 @@ class BookPdfService {
       ...photoEntries.map((e) => e.url),
       if (coverPhotoUrl != null) coverPhotoUrl,
     }.toList();
-    await Future.wait(urlsToFetch.map((url) async {
-      try {
-        final response = await http
-            .get(Uri.parse(url))
-            .timeout(const Duration(seconds: 20));
-        if (response.statusCode == 200) bytesByUrl[url] = response.bodyBytes;
-      } catch (_) {}
-    }));
+    Future<void> fetchAll(Iterable<String> urls) =>
+        Future.wait(urls.map((url) async {
+          try {
+            final response = await http
+                .get(Uri.parse(url))
+                .timeout(const Duration(seconds: 20));
+            if (response.statusCode == 200) bytesByUrl[url] = response.bodyBytes;
+          } catch (_) {}
+        }));
+    await fetchAll(urlsToFetch);
+    // Les échecs de téléchargement sont tolérés pour l'aperçu (la photo est
+    // simplement omise, et ça se voit). Pour l'IMPRESSION, un livre incomplet
+    // partirait chez l'imprimeur sans que personne ne le voie : on retente une
+    // fois les manquants, puis on échoue franchement s'il en reste.
+    var missing =
+        urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
+    if (padForPrint && missing.isNotEmpty) {
+      await fetchAll(missing);
+      missing = urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
+      if (missing.isNotEmpty) {
+        throw Exception(
+            '${missing.length} photo(s) n\'ont pas pu être téléchargées — '
+            'vérifie ta connexion et réessaie.');
+      }
+    }
 
     final coverPhotoBytes = coverPhotoUrl != null ? bytesByUrl[coverPhotoUrl] : null;
     // Photos affichées dans le livre. Option : exclure la photo de couverture
@@ -698,16 +719,16 @@ class BookPdfService {
             child: pw.Container(color: _cream))),
         // Photos du template
         ...photos,
-        // Légende — 1ʳᵉ page du souvenir, encadrée en haut-gauche (rentrée du
-        // fond perdu pour ne pas être rognée).
+        // Légende — 1ʳᵉ page du souvenir, encadrée en haut-gauche (dans la
+        // zone de sécurité pour ne pas être rognée).
         if (hasCaption)
-          pw.Positioned(top: _bleed, left: _bleed, right: _a4W * 0.42,
+          pw.Positioned(top: _safe, left: _safe, right: _a4W * 0.42,
               child: captionBox(entries[0], maxChars: 150)),
         // QR média — DERNIÈRE page du souvenir, bas-gauche.
         if (qrEntry != null)
-          pw.Positioned(bottom: _bleed, left: _bleed, child: mediaBadges(qrEntry)),
+          pw.Positioned(bottom: _safe, left: _safe, child: mediaBadges(qrEntry)),
         // Numéro de page
-        pw.Positioned(bottom: _bleed, right: _bleed, child: pageBadge),
+        pw.Positioned(bottom: _safe, right: _safe, child: pageBadge),
       ],
     );
   }
