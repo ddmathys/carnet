@@ -391,12 +391,12 @@ class BookPdfService {
     // gauche du gabarit chez l'imprimeur (le reste part blanc). On ne va
     // chercher la largeur exacte (dépend du nombre de pages) que pour le PDF
     // envoyé à Gelato ; l'aperçu / partage garde la couverture simple.
-    final double? coverSpreadPt = padForPrint
-        ? await _fetchCoverSpreadWidthPt(
+    final coverSpread = padForPrint
+        ? await _fetchCoverSpreadSizePt(
             coverType: coverType, pageCount: finalPageCount)
         : null;
-    final coverFmt = coverSpreadPt != null
-        ? PdfPageFormat(coverSpreadPt, _a4H, marginAll: 0)
+    final coverFmt = coverSpread != null
+        ? PdfPageFormat(coverSpread.width, coverSpread.height, marginAll: 0)
         : fmt;
 
     Future<Uint8List> buildAndSave(String? svg) async {
@@ -405,9 +405,10 @@ class BookPdfService {
       // 1. Cover
       doc.addPage(pw.Page(
         pageFormat: coverFmt,
-        build: (_) => coverSpreadPt != null
+        build: (_) => coverSpread != null
             ? _coverSpreadNotebook(
-                spreadWidth: coverSpreadPt,
+                spreadWidth: coverSpread.width,
+                spreadHeight: coverSpread.height,
                 notebook: notebook,
                 svgString: svg,
                 cover: pdfCover,
@@ -522,14 +523,21 @@ class BookPdfService {
     return v;
   }
 
-  // Largeur totale (en points) du gabarit de couverture « wraparound » (dos +
+  // Taille totale (en points) du gabarit de couverture « wraparound » (dos +
   // tranche + face) chez Gelato, pour un type de couverture + un nombre de
   // pages donnés — la tranche s'épaissit avec le nombre de pages. On
   // interroge le backend (qui détient la clé Gelato et calcule via l'API
   // officielle `cover-dimensions`) ; en cas d'échec (hors-ligne, config
   // manquante…) on retombe sur une formule standard d'imprimerie plutôt que
   // d'échouer la génération du PDF.
-  static Future<double> _fetchCoverSpreadWidthPt({
+  //
+  // IMPORTANT : on utilise la HAUTEUR renvoyée par Gelato, pas `_a4H` — une
+  // command test (36 pages, 2026-07-21) a été rejetée par Gelato après coup
+  // (« problème avec le fichier de conception ») alors que la largeur venait
+  // bien de leur API ; la hauteur, elle, était supposée égale à `_a4H` sans
+  // jamais être vérifiée. Tant que la vraie cause n'est pas confirmée, on ne
+  // prend plus ce raccourci.
+  static Future<({double width, double height})> _fetchCoverSpreadSizePt({
     required String coverType,
     required int pageCount,
   }) async {
@@ -542,7 +550,14 @@ class BookPdfService {
       final edge = data?['wraparoundEdgeSize'];
       final widthMm =
           edge is Map ? (edge['width'] as num?)?.toDouble() : null;
-      if (widthMm != null && widthMm > 0) return widthMm * PdfPageFormat.mm;
+      final heightMm =
+          edge is Map ? (edge['height'] as num?)?.toDouble() : null;
+      if (widthMm != null && widthMm > 0 && heightMm != null && heightMm > 0) {
+        return (
+          width: widthMm * PdfPageFormat.mm,
+          height: heightMm * PdfPageFormat.mm,
+        );
+      }
     } catch (_) {
       // Repli formule ci-dessous.
     }
@@ -551,7 +566,7 @@ class BookPdfService {
     // un échec pur et simple si l'appel réseau rate.
     final spineMm =
         max(pageCount * 0.1, coverType == 'hard' ? 10.0 : 4.0);
-    return 2 * _a4W + spineMm * PdfPageFormat.mm;
+    return (width: 2 * _a4W + spineMm * PdfPageFormat.mm, height: _a4H);
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -805,6 +820,7 @@ class BookPdfService {
   // est assez large pour rester lisible.
   static pw.Widget _coverSpreadNotebook({
     required double spreadWidth,
+    required double spreadHeight,
     required NotebookModel notebook,
     required String? svgString,
     required PdfColor cover,
@@ -827,19 +843,19 @@ class BookPdfService {
 
     return pw.SizedBox(
       width: spreadWidth,
-      height: _a4H,
+      height: spreadHeight,
       child: pw.Stack(
         children: [
           // Fond dos + tranche en couleur unie sur toute la largeur (la face,
           // opaque, est posée par-dessus sa portion à droite).
-          pw.Container(width: spreadWidth, height: _a4H, color: cover),
+          pw.Container(width: spreadWidth, height: spreadHeight, color: cover),
           if (showSpineTitle)
             pw.Positioned(
               left: _a4W,
               top: 0,
               child: pw.SizedBox(
                 width: spineWidth,
-                height: _a4H,
+                height: spreadHeight,
                 child: pw.Center(
                   child: pw.Transform.rotateBox(
                     angle: pi / 2,
@@ -864,7 +880,7 @@ class BookPdfService {
             top: 0,
             child: pw.SizedBox(
               width: _a4W,
-              height: _a4H,
+              height: spreadHeight,
               child: _coverPageNotebook(
                 notebook: notebook,
                 svgString: svgString,
