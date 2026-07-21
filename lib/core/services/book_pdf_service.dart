@@ -488,7 +488,7 @@ class BookPdfService {
       }
 
       // 4. Pages blanches de bourrage pour atteindre un nombre de pages valide
-      //    chez Gelato (pair, 28–200). Uniquement pour l'impression.
+      //    chez Gelato (pair, 30–200). Uniquement pour l'impression.
       if (padForPrint) {
         for (int p = totalPages; p < _gelatoValidPageCount(totalPages); p++) {
           doc.addPage(pw.Page(
@@ -515,9 +515,9 @@ class BookPdfService {
   }
 
   // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
-  // pair, minimum 28, maximum 200.
+  // pair, minimum 30 (le vrai plancher Gelato — 28 était refusé), maximum 200.
   static int _gelatoValidPageCount(int n) {
-    var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
+    var v = n < 30 ? 30 : (n.isOdd ? n + 1 : n);
     if (v > 200) v = 200;
     return v;
   }

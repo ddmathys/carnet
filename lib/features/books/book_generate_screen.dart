@@ -111,7 +111,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
   // avant l'étape format) ; sinon estimation. Pour l'imprimé, le prix se base
-  // sur les pages réellement imprimées (bourrage Gelato pair / ≥28).
+  // sur les pages réellement imprimées (bourrage Gelato pair / ≥30).
   int get _pages => _previewPageCount > 0
       ? _previewPageCount
       : BookPricing.estimatePages(_selectedMemories);
@@ -440,7 +440,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customTitle: customTitle,
         customSubtitle: _bookSubtitle,
         backendUrl: AppConfig.backendUrl,
-        padForPrint: true, // pages valides Gelato (pair, ≥28)
+        padForPrint: true, // pages valides Gelato (pair, ≥30)
         coverType: _coverType, // largeur exacte de couverture wraparound
       );
       final pdfBytes = gen.bytes;
@@ -1037,7 +1037,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Les livres imprimés font 28 pages minimum. Si ton livre est '
+                      'Les livres imprimés font 30 pages minimum. Si ton livre est '
                       'plus court, des pages blanches sont ajoutées à la fin.',
                       style: TextStyle(fontSize: 12, color: AppColors.textMedium),
                     ),
@@ -1233,7 +1233,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Future<void> _showPricingTable() async {
     // Exemples de paliers (pages imprimées) — le prix de TON livre est mis en
     // évidence si son nombre de pages tombe dans la liste.
-    const samples = [28, 40, 60, 80, 100, 150, 200];
+    const samples = [30, 40, 60, 80, 100, 150, 200];
     final mine = _printedPages;
     final rows = {...samples, mine}.toList()..sort();
 
@@ -1273,7 +1273,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               const Text(
                 'Prix tout compris : impression + livraison en Suisse + TVA. '
                 'Il dépend de la couverture (souple / rigide) et du nombre de '
-                'pages. Les livres imprimés font 28 pages minimum.',
+                'pages. Les livres imprimés font 30 pages minimum.',
                 style: TextStyle(color: AppColors.textMedium, fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 16),

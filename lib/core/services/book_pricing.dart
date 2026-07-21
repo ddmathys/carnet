@@ -65,10 +65,11 @@ class BookPricing {
     return 1 + pages; // + couverture
   }
 
-  /// Nombre de pages réellement imprimé : contrainte Gelato (pair, min 28, max
-  /// 200). C'est sur CETTE base qu'est facturé un livre imprimé.
+  /// Nombre de pages réellement imprimé : contrainte Gelato (pair, min 30, max
+  /// 200 — 28 était refusé par Gelato, le vrai plancher est 30). C'est sur
+  /// CETTE base qu'est facturé un livre imprimé.
   static int printablePages(int rawPages) {
-    var v = rawPages < 28 ? 28 : (rawPages.isOdd ? rawPages + 1 : rawPages);
+    var v = rawPages < 30 ? 30 : (rawPages.isOdd ? rawPages + 1 : rawPages);
     if (v > 200) v = 200;
     return v;
   }

@@ -277,7 +277,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Tableau de transparence des coûts d'impression (souple / rigide × pages).
   // Affiche tes prix réels, sans comparaison concurrents.
   void _showPricingSheet(BuildContext context) {
-    const samples = [28, 40, 60, 80, 100, 150, 200];
+    const samples = [30, 40, 60, 80, 100, 150, 200];
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
