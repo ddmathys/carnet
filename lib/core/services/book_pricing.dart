@@ -1,8 +1,8 @@
 import '../models/memory_model.dart';
 
 /// Tarification du livre imprimé = **coût Gelato tout compris** (impression +
-/// livraison + TVA) **+ une marge nette fixe**. Objectif : rester compétitif
-/// tout en couvrant l'intégralité du coût.
+/// livraison + TVA) **+ une marge**. Objectif : rester compétitif tout en
+/// couvrant l'intégralité du coût.
 ///
 /// Calibré sur une commande réelle Gelato (Photo Book 8×11", juin 2026 :
 /// 68 pages rigide → impression 23.72 + livraison 9.35 + TVA 8% = 35.75 CHF).
@@ -15,8 +15,14 @@ class BookPricing {
   static const double shipping = 9.35;        // livraison Suisse (Swiss Post Eco)
   static const double taxRate = 0.08;         // TVA Gelato (~8%)
 
-  // ── Marge nette visée ───────────────────────────────────────────────────────
-  static const double margin = 10.0;
+  // ── Marge visée ──────────────────────────────────────────────────────────
+  // 20% du coût, avec un PLANCHER absolu de 8 CHF : sur un petit livre (peu
+  // de pages), 20% ne représenterait que quelques francs — insuffisant pour
+  // couvrir la validation manuelle de la commande (dashboard Gelato) et les
+  // frais annexes. Le plancher protège ces petites commandes ; au-delà, c'est
+  // le pourcentage qui prend le relais (gros livres = marge plus élevée).
+  static const double marginRate = 0.20;
+  static const double marginFloor = 8.0;
 
   /// Coût Gelato estimé (impression + livraison + TVA) pour une couverture et
   /// un nombre de pages donnés.
@@ -26,10 +32,16 @@ class BookPricing {
     return (printCost + shipping) * (1 + taxRate);
   }
 
+  /// Marge appliquée sur un coût donné : max(20% du coût, plancher 8 CHF).
+  static double marginFor(double cost) => cost * marginRate < marginFloor
+      ? marginFloor
+      : cost * marginRate;
+
   /// Prix client = coût Gelato + marge, arrondi au 0.50 supérieur (le coût reste
   /// toujours couvert).
   static double price({required String coverType, required int pages}) {
-    final raw = gelatoCost(coverType: coverType, pages: pages) + margin;
+    final cost = gelatoCost(coverType: coverType, pages: pages);
+    final raw = cost + marginFor(cost);
     return (raw * 2).ceilToDouble() / 2;
   }
 

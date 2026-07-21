@@ -441,6 +441,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customSubtitle: _bookSubtitle,
         backendUrl: AppConfig.backendUrl,
         padForPrint: true, // pages valides Gelato (pair, ≥28)
+        coverType: _coverType, // largeur exacte de couverture wraparound
       );
       final pdfBytes = gen.bytes;
       final pageCount = gen.pageCount;

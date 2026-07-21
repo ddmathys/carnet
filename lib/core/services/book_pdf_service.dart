@@ -1,4 +1,4 @@
-import 'dart:math' show min, max;
+import 'dart:math' show min, max, pi;
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -10,6 +10,7 @@ import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
 import 'photo_service.dart';
+import 'backend_client.dart';
 import '../utils/date_precision.dart';
 
 class BookPdfService {
@@ -145,6 +146,9 @@ class BookPdfService {
     String backendUrl = '',
     bool padForPrint = false,
     bool excludeCoverPhotoFromBook = false,
+    // 'soft' | 'hard' — détermine le produit Gelato interrogé pour la largeur
+    // exacte de couverture wraparound. Non requis si padForPrint == false.
+    String coverType = 'soft',
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -376,27 +380,57 @@ class BookPdfService {
         photoPages.length +
         textOnlyMemories.length +
         (hasGrowth ? 1 : 0);
+    final finalPageCount =
+        padForPrint ? _gelatoValidPageCount(totalPages) : totalPages;
     // A4 full-bleed — margins handled inside each widget
     final fmt = PdfPageFormat(_a4W, _a4H, marginAll: 0);
+
+    // Couverture d'IMPRESSION uniquement : Gelato attend un visuel de
+    // couverture au format « wraparound » (dos + tranche + face), bien plus
+    // large qu'une simple page — sans ça l'image ne remplit qu'une fraction
+    // gauche du gabarit chez l'imprimeur (le reste part blanc). On ne va
+    // chercher la largeur exacte (dépend du nombre de pages) que pour le PDF
+    // envoyé à Gelato ; l'aperçu / partage garde la couverture simple.
+    final double? coverSpreadPt = padForPrint
+        ? await _fetchCoverSpreadWidthPt(
+            coverType: coverType, pageCount: finalPageCount)
+        : null;
+    final coverFmt = coverSpreadPt != null
+        ? PdfPageFormat(coverSpreadPt, _a4H, marginAll: 0)
+        : fmt;
 
     Future<Uint8List> buildAndSave(String? svg) async {
       final doc = pw.Document(title: notebook.title, author: 'Folio');
 
       // 1. Cover
       doc.addPage(pw.Page(
-        pageFormat: fmt,
-        build: (_) => _coverPageNotebook(
-          notebook: notebook,
-          svgString: svg,
-          cover: pdfCover,
-          pR: playfairR,
-          pB: playfairB,
-          coverPhotoBytes: coverPhotoBytes,
-          yearRange: yearRange,
-          highlights: highlights,
-          customTitle: customTitle,
-          customSubtitle: customSubtitle,
-        ),
+        pageFormat: coverFmt,
+        build: (_) => coverSpreadPt != null
+            ? _coverSpreadNotebook(
+                spreadWidth: coverSpreadPt,
+                notebook: notebook,
+                svgString: svg,
+                cover: pdfCover,
+                pR: playfairR,
+                pB: playfairB,
+                coverPhotoBytes: coverPhotoBytes,
+                yearRange: yearRange,
+                highlights: highlights,
+                customTitle: customTitle,
+                customSubtitle: customSubtitle,
+              )
+            : _coverPageNotebook(
+                notebook: notebook,
+                svgString: svg,
+                cover: pdfCover,
+                pR: playfairR,
+                pB: playfairB,
+                coverPhotoBytes: coverPhotoBytes,
+                yearRange: yearRange,
+                highlights: highlights,
+                customTitle: customTitle,
+                customSubtitle: customSubtitle,
+              ),
       ));
 
       // 2. Photo pages (templates V4/V3/V2/V1 verticales, H2/H1 horizontales)
@@ -467,8 +501,6 @@ class BookPdfService {
       return doc.save();
     }
 
-    final finalPageCount =
-        padForPrint ? _gelatoValidPageCount(totalPages) : totalPages;
     Uint8List bytes;
     if (svgString != null) {
       try {
@@ -488,6 +520,38 @@ class BookPdfService {
     var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
     if (v > 200) v = 200;
     return v;
+  }
+
+  // Largeur totale (en points) du gabarit de couverture « wraparound » (dos +
+  // tranche + face) chez Gelato, pour un type de couverture + un nombre de
+  // pages donnés — la tranche s'épaissit avec le nombre de pages. On
+  // interroge le backend (qui détient la clé Gelato et calcule via l'API
+  // officielle `cover-dimensions`) ; en cas d'échec (hors-ligne, config
+  // manquante…) on retombe sur une formule standard d'imprimerie plutôt que
+  // d'échouer la génération du PDF.
+  static Future<double> _fetchCoverSpreadWidthPt({
+    required String coverType,
+    required int pageCount,
+  }) async {
+    try {
+      final data = await BackendClient.postJson(
+        '/api/gelato/cover-dimensions',
+        {'coverType': coverType, 'pageCount': pageCount},
+        timeout: const Duration(seconds: 20),
+      );
+      final edge = data?['wraparoundEdgeSize'];
+      final widthMm =
+          edge is Map ? (edge['width'] as num?)?.toDouble() : null;
+      if (widthMm != null && widthMm > 0) return widthMm * PdfPageFormat.mm;
+    } catch (_) {
+      // Repli formule ci-dessous.
+    }
+    // Épaisseur de tranche ≈ 0.1 mm / page (papier ~150g courant photobook),
+    // avec un minimum selon le type de couverture. Approximatif mais évite
+    // un échec pur et simple si l'appel réseau rate.
+    final spineMm =
+        max(pageCount * 0.1, coverType == 'hard' ? 10.0 : 4.0);
+    return 2 * _a4W + spineMm * PdfPageFormat.mm;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -730,6 +794,93 @@ class BookPdfService {
         // Numéro de page
         pw.Positioned(bottom: _safe, right: _safe, child: pageBadge),
       ],
+    );
+  }
+
+  // Couverture d'impression : gabarit « wraparound » complet (dos + tranche +
+  // face) à la largeur exacte fournie par Gelato (`spreadWidth`, en points).
+  // Face = même visuel que `_coverPageNotebook` (photo ou couleur unie),
+  // posée à droite ; dos et tranche en couleur unie — le dos n'affiche rien
+  // (reliure classique), la tranche porte le titre à la verticale si elle
+  // est assez large pour rester lisible.
+  static pw.Widget _coverSpreadNotebook({
+    required double spreadWidth,
+    required NotebookModel notebook,
+    required String? svgString,
+    required PdfColor cover,
+    required pw.Font pR,
+    required pw.Font pB,
+    Uint8List? coverPhotoBytes,
+    required String yearRange,
+    List<String> highlights = const [],
+    String? customTitle,
+    String? customSubtitle,
+  }) {
+    final spineWidth = (spreadWidth - 2 * _a4W).clamp(0.0, spreadWidth);
+    final displayTitle = customTitle?.isNotEmpty == true
+        ? customTitle!
+        : (notebook.type == 'enfant' && notebook.companionName != null
+            ? '${notebook.title} & ${notebook.companionName}'
+            : notebook.title);
+    // Sous ~12 mm, le texte tourné serait tronqué/illisible : tranche unie.
+    final showSpineTitle = spineWidth >= 12 * PdfPageFormat.mm;
+
+    return pw.SizedBox(
+      width: spreadWidth,
+      height: _a4H,
+      child: pw.Stack(
+        children: [
+          // Fond dos + tranche en couleur unie sur toute la largeur (la face,
+          // opaque, est posée par-dessus sa portion à droite).
+          pw.Container(width: spreadWidth, height: _a4H, color: cover),
+          if (showSpineTitle)
+            pw.Positioned(
+              left: _a4W,
+              top: 0,
+              child: pw.SizedBox(
+                width: spineWidth,
+                height: _a4H,
+                child: pw.Center(
+                  child: pw.Transform.rotateBox(
+                    angle: pi / 2,
+                    child: pw.Text(
+                      displayTitle,
+                      maxLines: 1,
+                      overflow: pw.TextOverflow.clip,
+                      style: pw.TextStyle(
+                        font: pB,
+                        fontSize: 11,
+                        color: PdfColors.white,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          // Face (1ère de couverture) — identique à l'aperçu, posée à droite.
+          pw.Positioned(
+            left: _a4W + spineWidth,
+            top: 0,
+            child: pw.SizedBox(
+              width: _a4W,
+              height: _a4H,
+              child: _coverPageNotebook(
+                notebook: notebook,
+                svgString: svgString,
+                cover: cover,
+                pR: pR,
+                pB: pB,
+                coverPhotoBytes: coverPhotoBytes,
+                yearRange: yearRange,
+                highlights: highlights,
+                customTitle: customTitle,
+                customSubtitle: customSubtitle,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
