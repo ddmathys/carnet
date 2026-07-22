@@ -9,11 +9,11 @@ import '../models/memory_model.dart';
 /// Les constantes ci-dessous sont les seuls leviers à ajuster.
 class BookPricing {
   // ── Coût Gelato estimé (leviers) ──────────────────────────────────────────
-  static const double perPage = 0.24;        // CHF / page (impression)
-  static const double printBaseHard = 8.50;  // surcoût couverture rigide
-  static const double printBaseSoft = 4.50;  // surcoût couverture souple
-  static const double shipping = 9.35;        // livraison Suisse (Swiss Post Eco)
-  static const double taxRate = 0.08;         // TVA Gelato (~8%)
+  static const double perPage = 0.24; // CHF / page (impression)
+  static const double printBaseHard = 8.50; // surcoût couverture rigide
+  static const double printBaseSoft = 4.50; // surcoût couverture souple
+  static const double shipping = 9.35; // livraison Suisse (Swiss Post Eco)
+  static const double taxRate = 0.08; // TVA Gelato (~8%)
 
   // ── Marge visée ──────────────────────────────────────────────────────────
   // 20% du coût, avec un PLANCHER absolu de 8 CHF : sur un petit livre (peu
@@ -33,9 +33,8 @@ class BookPricing {
   }
 
   /// Marge appliquée sur un coût donné : max(20% du coût, plancher 8 CHF).
-  static double marginFor(double cost) => cost * marginRate < marginFloor
-      ? marginFloor
-      : cost * marginRate;
+  static double marginFor(double cost) =>
+      cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
 
   /// Prix client = coût Gelato + marge, arrondi au 0.50 supérieur (le coût reste
   /// toujours couvert).
@@ -65,12 +64,15 @@ class BookPricing {
     return 1 + pages; // + couverture
   }
 
-  /// Nombre de pages réellement imprimé : contrainte Gelato (pair, min 30, max
-  /// 200 — 28 était refusé par Gelato, le vrai plancher est 30). C'est sur
-  /// CETTE base qu'est facturé un livre imprimé.
+  /// Nombre de pages réellement imprimé : contrainte Gelato réelle n ≡ 1
+  /// (mod 4), confirmée par deux rejets de commande (34 et 36 pages refusés,
+  /// tous deux exigeant "exactement 37" — cf. BookPdfService._gelatoValidPageCount).
+  /// C'est sur CETTE base qu'est facturé un livre imprimé.
   static int printablePages(int rawPages) {
-    var v = rawPages < 30 ? 30 : (rawPages.isOdd ? rawPages + 1 : rawPages);
-    if (v > 200) v = 200;
+    var v = rawPages < 25 ? 25 : rawPages;
+    final rem = v % 4;
+    if (rem != 1) v += (1 - rem + 4) % 4;
+    if (v > 197) v = 197;
     return v;
   }
 

@@ -204,12 +204,6 @@ async function handleCoverDimensions(req: VercelRequest, res: VercelResponse) {
         .json({ error: 'Gelato a refusé la requête cover-dimensions', detail })
     }
 
-    // Diagnostic temporaire (commande test rejetée par Gelato le 21.07 après
-    // acceptation — cause exacte pas encore confirmée) : on log la réponse
-    // brute pour vérifier une bonne fois le format exact des champs utilisés
-    // côté app (wraparoundEdgeSize.width/height). À retirer une fois confirmé.
-    console.log('[gelato/cover-dimensions] productUid=%s pageCount=%s → %s', productUid, pageCount, raw.slice(0, 1000))
-
     return res.status(200).json(data)
   } catch (e) {
     return res.status(502).json({ error: `Appel Gelato échoué : ${e}` })

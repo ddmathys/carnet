@@ -118,14 +118,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   int get _printedPages => BookPricing.printablePages(_pages);
   double _priceFor(String coverType) =>
       BookPricing.price(coverType: coverType, pages: _printedPages);
-  String _priceLabel(String coverType) => BookPricing.format(_priceFor(coverType));
+  String _priceLabel(String coverType) =>
+      BookPricing.format(_priceFor(coverType));
 
-  // Gelato refuse au-delà de 200 pages. Contrairement au minimum (30, comblé
-  // par des pages blanches), on ne peut pas combler silencieusement un
-  // dépassement sans tronquer du contenu réel — d'où le blocage plutôt qu'un
-  // simple avertissement (cf. rejets de commande passés : le nombre de pages
-  // annoncé à Gelato ne correspondait plus au PDF réellement envoyé).
-  bool get _exceedsGelatoLimit => _pages > 200;
+  // Gelato refuse au-delà de 197 pages (plafond de BookPdfService._gelatoValidPageCount).
+  // Contrairement au minimum (comblé par des pages blanches), on ne peut pas
+  // combler silencieusement un dépassement sans tronquer du contenu réel —
+  // d'où le blocage plutôt qu'un simple avertissement (cf. rejets de commande
+  // passés : le nombre de pages annoncé à Gelato ne correspondait plus au PDF
+  // réellement envoyé).
+  bool get _exceedsGelatoLimit => _pages > 197;
   // Pages blanches ajoutées en fin de livre pour atteindre le minimum
   // imprimeur (30, pair) — 0 si le livre dépasse déjà ce minimum, ou s'il
   // dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
@@ -148,7 +150,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       if (t != null && t.isNotEmpty) {
         result.add(t);
       } else {
-        final words = m.rawContent.trim().split(RegExp(r'\s+')).take(4).join(' ');
+        final words =
+            m.rawContent.trim().split(RegExp(r'\s+')).take(4).join(' ');
         if (words.isNotEmpty) result.add(words);
       }
       if (result.length >= 15) break;
@@ -269,7 +272,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
       // infini, sans message — la cause des « le spinner tourne ».
       if (!mounted) return;
-      setState(() => _loadError = 'Chargement impossible. Vérifie ta connexion.');
+      setState(
+          () => _loadError = 'Chargement impossible. Vérifie ta connexion.');
     }
   }
 
@@ -279,8 +283,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // de pages blanches), pour un aperçu strictement identique au rendu final.
   Future<({Uint8List bytes, int pageCount})> _buildPreviewPdf() {
     final coverColor = _notebook!.coverColor.isNotEmpty
-        ? Color(int.parse(
-            'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16))
+        ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
+            radix: 16))
         : AppColors.sage;
     return BookPdfService.generateForNotebook(
       notebook: _notebook!,
@@ -303,7 +307,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     }
     if (_notebook == null) return;
 
-    setState(() { _generating = true; _progress = 0.0; _msgIndex = 0; });
+    setState(() {
+      _generating = true;
+      _progress = 0.0;
+      _msgIndex = 0;
+    });
     _progressTimer = Timer.periodic(const Duration(milliseconds: 700), (_) {
       if (!mounted) return;
       setState(() {
@@ -340,7 +348,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     if (_notebook == null) return;
     setState(() => _exporting = true);
 
-    final customTitle = _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
+    final customTitle =
+        _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
     final bookTitle = customTitle ?? _notebook!.title;
 
     // 1. Génération des octets du PDF (étape lourde mais bornée). Le spinner
@@ -348,8 +357,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     Uint8List? pdfBytes;
     try {
       final coverColor = _notebook!.coverColor.isNotEmpty
-          ? Color(int.parse(
-              'FF${_notebook!.coverColor.replaceAll('#', '')}',
+          ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
               radix: 16))
           : AppColors.sage;
 
@@ -428,29 +436,34 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   Future<void> _placeOrder() async {
     // Garde-fou : au cas où l'étape précédente serait contournée, on bloque
-    // ici aussi — un livre >200 pages envoyé à Gelato avec un pageCount
+    // ici aussi — un livre trop long envoyé à Gelato avec un pageCount
     // tronqué a déjà causé des rejets de commande (nombre de pages annoncé ≠
     // PDF réellement généré).
     if (_exceedsGelatoLimit) {
       _showSnack(
-          'Ce livre dépasse 200 pages — retire des souvenirs avant de commander.');
+          'Ce livre dépasse 197 pages — retire des souvenirs avant de commander.');
       return;
     }
     if (!(_addressKey.currentState?.validate() ?? false)) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _notebook == null) return;
 
-    setState(() { _ordering = true; _orderMessage = 'Génération du livre…'; });
+    setState(() {
+      _ordering = true;
+      _orderMessage = 'Génération du livre…';
+    });
     try {
       final price = _priceFor(_coverType);
       final bookTitle = _titleCtrl.text.trim().isNotEmpty
           ? _titleCtrl.text.trim()
           : _notebook!.title;
-      final customTitle = _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
+      final customTitle =
+          _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
 
       // 1. Générer le PDF en premier
       final coverColor = Color(int.parse(
-          'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
+          'FF${_notebook!.coverColor.replaceAll('#', '')}',
+          radix: 16));
       final gen = await BookPdfService.generateForNotebook(
         notebook: _notebook!,
         coverColor: coverColor,
@@ -521,7 +534,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       context.go('/order-confirmation/$orderId');
     } catch (e) {
       _showSnack('Erreur : $e');
-      if (mounted) setState(() { _ordering = false; _orderMessage = ''; });
+      if (mounted)
+        setState(() {
+          _ordering = false;
+          _orderMessage = '';
+        });
     }
   }
 
@@ -540,8 +557,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           elevation: 0,
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
-            onPressed: () =>
-                context.go('/home'),
+            onPressed: () => context.go('/home'),
           ),
         ),
         body: Center(
@@ -578,7 +594,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         if (_showPreview) {
-          setState(() { _showPreview = false; _step = 0; });
+          setState(() {
+            _showPreview = false;
+            _step = 0;
+          });
         } else if (_step > 0) {
           setState(() => _step--);
         }
@@ -600,7 +619,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
             onPressed: () {
               if (_showPreview) {
-                setState(() { _showPreview = false; _step = 0; });
+                setState(() {
+                  _showPreview = false;
+                  _step = 0;
+                });
               } else if (_step > 0) {
                 setState(() => _step--);
               } else {
@@ -643,9 +665,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       hintText: hint,
       filled: true,
       fillColor: AppColors.white,
-      prefixIcon: icon != null
-          ? Icon(icon, size: 18, color: AppColors.sage)
-          : null,
+      prefixIcon:
+          icon != null ? Icon(icon, size: 18, color: AppColors.sage) : null,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       border: border(AppColors.border, 0.5),
@@ -655,8 +676,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   }
 
   Widget _buildPreviewStep() {
-    final coverColor = Color(int.parse(
-        'FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
+    final coverColor = Color(
+        int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(28),
@@ -691,19 +712,26 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.checklist_outlined, size: 18, color: AppColors.sage),
+                  const Icon(Icons.checklist_outlined,
+                      size: 18, color: AppColors.sage),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       _selectedMemoryIds.length == _memories.length
                           ? 'Tous les souvenirs inclus (${_memories.length})'
                           : '${_selectedMemoryIds.length} souvenir${_selectedMemoryIds.length != 1 ? 's' : ''} sur ${_memories.length} inclus',
-                      style: const TextStyle(color: AppColors.textDark, fontSize: 13),
+                      style: const TextStyle(
+                          color: AppColors.textDark, fontSize: 13),
                     ),
                   ),
-                  const Text('Modifier', style: TextStyle(color: AppColors.sage, fontSize: 13, fontWeight: FontWeight.w500)),
+                  const Text('Modifier',
+                      style: TextStyle(
+                          color: AppColors.sage,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
                   const SizedBox(width: 4),
-                  const Icon(Icons.chevron_right, color: AppColors.sage, size: 18),
+                  const Icon(Icons.chevron_right,
+                      color: AppColors.sage, size: 18),
                 ],
               ),
             ),
@@ -717,7 +745,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             Text(
               _loadingMessages[_msgIndex],
               style: const TextStyle(
-                  color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic),
+                  color: AppColors.textMedium,
+                  fontSize: 13,
+                  fontStyle: FontStyle.italic),
               textAlign: TextAlign.center,
             ),
           ] else ...[
@@ -901,15 +931,20 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                         borderRadius: BorderRadius.circular(isSelected ? 6 : 8),
                         child: CachedNetworkImage(
                           imageUrl: url,
-                          width: 70, height: 70,
+                          width: 70,
+                          height: 70,
                           fit: BoxFit.cover,
                           placeholder: (_, __) => Container(
-                            width: 70, height: 70,
+                            width: 70,
+                            height: 70,
                             color: AppColors.background,
-                            child: const Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                            child: const Center(
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2)),
                           ),
                           errorWidget: (_, __, ___) => Container(
-                            width: 70, height: 70,
+                            width: 70,
+                            height: 70,
                             color: AppColors.background,
                             child: const Icon(Icons.broken_image_outlined,
                                 color: AppColors.softGray, size: 20),
@@ -918,14 +953,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                       ),
                       if (isSelected)
                         Positioned(
-                          right: 3, top: 3,
+                          right: 3,
+                          top: 3,
                           child: Container(
                             decoration: const BoxDecoration(
                               color: AppColors.sage,
                               shape: BoxShape.circle,
                             ),
                             padding: const EdgeInsets.all(2),
-                            child: const Icon(Icons.check, color: Colors.white, size: 12),
+                            child: const Icon(Icons.check,
+                                color: Colors.white, size: 12),
                           ),
                         ),
                     ],
@@ -964,8 +1001,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   const Expanded(
                     child: Text(
                       'Ne pas répéter cette photo dans le livre',
-                      style:
-                          TextStyle(color: AppColors.textDark, fontSize: 13),
+                      style: TextStyle(color: AppColors.textDark, fontSize: 13),
                     ),
                   ),
                 ],
@@ -1013,7 +1049,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             const SizedBox(height: 6),
             Text(
               'Ton livre fait $_pages pages. Le format imprimé accepte au '
-              'maximum 200 pages chez notre imprimeur. Retire des souvenirs '
+              'maximum 197 pages chez notre imprimeur. Retire des souvenirs '
               'pour pouvoir commander (le PDF digital reste possible sans '
               'limite).',
               style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
@@ -1021,7 +1057,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             const SizedBox(height: 8),
             TextButton.icon(
               onPressed: _openMemorySelection,
-              icon: const Icon(Icons.checklist_outlined, size: 16, color: Colors.red),
+              icon: const Icon(Icons.checklist_outlined,
+                  size: 16, color: Colors.red),
               label: const Text('Retirer des souvenirs',
                   style: TextStyle(color: Colors.red, fontSize: 13)),
               style: TextButton.styleFrom(
@@ -1046,13 +1083,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.info_outline, size: 16, color: AppColors.amber),
+                const Icon(Icons.info_outline,
+                    size: 16, color: AppColors.amber),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
                     'Ton livre fait $_pages pages. Notre imprimeur exige un '
-                    'minimum de 30 pages (nombre pair) : $_blankPagesAdded '
-                    'page$plural blanche$plural seront ajoutées à la fin.',
+                    'nombre de pages précis selon un palier fixe : '
+                    '$_blankPagesAdded page$plural blanche$plural seront '
+                    'ajoutées à la fin pour l\'atteindre.',
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textMedium),
                   ),
@@ -1082,7 +1121,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       ),
       child: Row(
         children: [
-          const Icon(Icons.check_circle_outline, size: 16, color: AppColors.sage),
+          const Icon(Icons.check_circle_outline,
+              size: 16, color: AppColors.sage),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -1139,8 +1179,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               selected: _selectedFormat == 'printed' && _coverType == 'soft',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
-                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
-                  : () => setState(() { _selectedFormat = 'printed'; _coverType = 'soft'; }),
+                      'Retire des souvenirs pour repasser sous 197 pages avant de choisir ce format.')
+                  : () => setState(() {
+                        _selectedFormat = 'printed';
+                        _coverType = 'soft';
+                      }),
             ),
           ),
           const SizedBox(height: 12),
@@ -1156,8 +1199,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               selected: _selectedFormat == 'printed' && _coverType == 'hard',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
-                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
-                  : () => setState(() { _selectedFormat = 'printed'; _coverType = 'hard'; }),
+                      'Retire des souvenirs pour repasser sous 197 pages avant de choisir ce format.')
+                  : () => setState(() {
+                        _selectedFormat = 'printed';
+                        _coverType = 'hard';
+                      }),
             ),
           ),
           const SizedBox(height: 12),
@@ -1165,7 +1211,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           Center(
             child: TextButton.icon(
               onPressed: _showPricingTable,
-              icon: const Icon(Icons.info_outline, size: 16, color: AppColors.textMedium),
+              icon: const Icon(Icons.info_outline,
+                  size: 16, color: AppColors.textMedium),
               label: const Text(
                 'Comment le prix est calculé ?',
                 style: TextStyle(color: AppColors.textMedium, fontSize: 13),
@@ -1189,8 +1236,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           const Center(
             child: Text(
               '🔒  Paiement sécurisé',
-              style:
-                  TextStyle(color: AppColors.textMedium, fontSize: 12),
+              style: TextStyle(color: AppColors.textMedium, fontSize: 12),
             ),
           ),
         ],
@@ -1225,13 +1271,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             decoration: BoxDecoration(
               color: AppColors.white,
               borderRadius: BorderRadius.circular(14),
-              border:
-                  Border.all(color: AppColors.border, width: 0.5),
+              border: Border.all(color: AppColors.border, width: 0.5),
             ),
             child: Column(
               children: [
-                _OrderRow(
-                    label: 'Carnet', value: _notebook!.title),
+                _OrderRow(label: 'Carnet', value: _notebook!.title),
                 const Divider(height: 24, color: AppColors.border),
                 _OrderRow(
                     label: 'Souvenirs',
@@ -1241,14 +1285,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                     label: 'Format',
                     value: switch (_selectedFormat) {
                       'digital' => 'PDF Digital',
-                      'printed' => _coverType == 'hard' ? 'Couverture rigide' : 'Couverture souple',
+                      'printed' => _coverType == 'hard'
+                          ? 'Couverture rigide'
+                          : 'Couverture souple',
                       _ => 'PDF Digital',
                     }),
                 if (!isDigital) ...[
                   const Divider(height: 24, color: AppColors.border),
-                  _OrderRow(
-                    label: 'Pages',
-                    value: '$_printedPages pages'),
+                  _OrderRow(label: 'Pages', value: '$_printedPages pages'),
                   const Divider(height: 24, color: AppColors.border),
                   _OrderRow(
                     label: 'Total',
@@ -1278,20 +1322,34 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   const Text('Adresse de livraison',
-                    style: TextStyle(fontFamily: 'PlayfairDisplay', fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.textDark)),
+                      style: TextStyle(
+                          fontFamily: 'PlayfairDisplay',
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.textDark)),
                   const SizedBox(height: 12),
                   Row(children: [
-                    Expanded(child: _AddressField(_firstNameCtrl, 'Prénom', required: true)),
+                    Expanded(
+                        child: _AddressField(_firstNameCtrl, 'Prénom',
+                            required: true)),
                     const SizedBox(width: 10),
-                    Expanded(child: _AddressField(_lastNameCtrl, 'Nom', required: true)),
+                    Expanded(
+                        child: _AddressField(_lastNameCtrl, 'Nom',
+                            required: true)),
                   ]),
                   const SizedBox(height: 10),
                   _AddressField(_streetCtrl, 'Rue et numéro', required: true),
                   const SizedBox(height: 10),
                   Row(children: [
-                    SizedBox(width: 100, child: _AddressField(_npaCtrl, 'NPA', required: true, keyboardType: TextInputType.number)),
+                    SizedBox(
+                        width: 100,
+                        child: _AddressField(_npaCtrl, 'NPA',
+                            required: true,
+                            keyboardType: TextInputType.number)),
                     const SizedBox(width: 10),
-                    Expanded(child: _AddressField(_cityCtrl, 'Ville', required: true)),
+                    Expanded(
+                        child:
+                            _AddressField(_cityCtrl, 'Ville', required: true)),
                   ]),
                   const SizedBox(height: 10),
                   _AddressField(_countryCtrl, 'Pays', required: true),
@@ -1331,8 +1389,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               onPressed: () => setState(() => _step = 1),
               child: const Text(
                 '← Changer le format',
-                style:
-                    TextStyle(color: AppColors.textMedium, fontSize: 13),
+                style: TextStyle(color: AppColors.textMedium, fontSize: 13),
               ),
             ),
           ),
@@ -1365,7 +1422,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Future<void> _showPricingTable() async {
     // Exemples de paliers (pages imprimées) — le prix de TON livre est mis en
     // évidence si son nombre de pages tombe dans la liste.
-    const samples = [30, 40, 60, 80, 100, 150, 200];
+    const samples = [25, 41, 61, 81, 101, 149, 197];
     final mine = _printedPages;
     final rows = {...samples, mine}.toList()..sort();
 
@@ -1384,7 +1441,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             children: [
               Center(
                 child: Container(
-                  width: 36, height: 4,
+                  width: 36,
+                  height: 4,
                   decoration: BoxDecoration(
                     color: AppColors.softGray.withOpacity(0.4),
                     borderRadius: BorderRadius.circular(2),
@@ -1405,28 +1463,51 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               const Text(
                 'Prix tout compris : impression + livraison en Suisse + TVA. '
                 'Il dépend de la couverture (souple / rigide) et du nombre de '
-                'pages. Les livres imprimés font 30 pages minimum.',
-                style: TextStyle(color: AppColors.textMedium, fontSize: 13, height: 1.4),
+                'pages. Les livres imprimés font 25 pages minimum.',
+                style: TextStyle(
+                    color: AppColors.textMedium, fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 16),
               // En-tête du tableau
               Container(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
+                padding:
+                    const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                 decoration: BoxDecoration(
                   color: AppColors.background,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: const Row(
                   children: [
-                    Expanded(flex: 2, child: Text('Pages', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark))),
-                    Expanded(flex: 3, child: Text('Souple', textAlign: TextAlign.end, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark))),
-                    Expanded(flex: 3, child: Text('Rigide', textAlign: TextAlign.end, style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: AppColors.textDark))),
+                    Expanded(
+                        flex: 2,
+                        child: Text('Pages',
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppColors.textDark))),
+                    Expanded(
+                        flex: 3,
+                        child: Text('Souple',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppColors.textDark))),
+                    Expanded(
+                        flex: 3,
+                        child: Text('Rigide',
+                            textAlign: TextAlign.end,
+                            style: TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 13,
+                                color: AppColors.textDark))),
                   ],
                 ),
               ),
               for (final p in rows)
                 Container(
-                  padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 9, horizontal: 10),
                   decoration: BoxDecoration(
                     color: p == mine ? AppColors.sage.withOpacity(0.10) : null,
                     borderRadius: BorderRadius.circular(8),
@@ -1440,24 +1521,29 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                           style: TextStyle(
                             fontSize: 13,
                             color: AppColors.textDark,
-                            fontWeight: p == mine ? FontWeight.w700 : FontWeight.w500,
+                            fontWeight:
+                                p == mine ? FontWeight.w700 : FontWeight.w500,
                           ),
                         ),
                       ),
                       Expanded(
                         flex: 3,
                         child: Text(
-                          BookPricing.format(BookPricing.price(coverType: 'soft', pages: p)),
+                          BookPricing.format(
+                              BookPricing.price(coverType: 'soft', pages: p)),
                           textAlign: TextAlign.end,
-                          style: const TextStyle(fontSize: 13, color: AppColors.textMedium),
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textMedium),
                         ),
                       ),
                       Expanded(
                         flex: 3,
                         child: Text(
-                          BookPricing.format(BookPricing.price(coverType: 'hard', pages: p)),
+                          BookPricing.format(
+                              BookPricing.price(coverType: 'hard', pages: p)),
                           textAlign: TextAlign.end,
-                          style: const TextStyle(fontSize: 13, color: AppColors.textMedium),
+                          style: const TextStyle(
+                              fontSize: 13, color: AppColors.textMedium),
                         ),
                       ),
                     ],
@@ -1531,12 +1617,15 @@ class _BookCoverPreview extends StatelessWidget {
               Container(color: Colors.black.withOpacity(0.38)),
             // "folio" top-right
             Positioned(
-              top: 10, right: 12,
+              top: 10,
+              right: 12,
               child: Text(
                 'carnet',
                 style: TextStyle(
-                  fontSize: 9, color: Colors.white.withOpacity(0.85),
-                  fontStyle: FontStyle.italic, letterSpacing: 1.5,
+                  fontSize: 9,
+                  color: Colors.white.withOpacity(0.85),
+                  fontStyle: FontStyle.italic,
+                  letterSpacing: 1.5,
                 ),
               ),
             ),
@@ -1545,7 +1634,9 @@ class _BookCoverPreview extends StatelessWidget {
               // Photo version : bandeau bas compact, 2 colonnes (titre à gauche,
               // liste des souvenirs à droite) — laisse plus de place à la photo.
               Positioned(
-                bottom: 0, left: 0, right: 0,
+                bottom: 0,
+                left: 0,
+                right: 0,
                 child: Container(
                   color: Colors.white.withOpacity(0.94),
                   padding: const EdgeInsets.fromLTRB(10, 7, 10, 9),
@@ -1560,8 +1651,10 @@ class _BookCoverPreview extends StatelessWidget {
                             Text(
                               titleText,
                               style: const TextStyle(
-                                fontFamily: 'PlayfairDisplay', fontSize: 11,
-                                fontWeight: FontWeight.bold, color: Color(0xFF2D2416),
+                                fontFamily: 'PlayfairDisplay',
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF2D2416),
                               ),
                               maxLines: 3,
                               overflow: TextOverflow.ellipsis,
@@ -1570,8 +1663,13 @@ class _BookCoverPreview extends StatelessWidget {
                             Container(width: 16, height: 1, color: coverColor),
                             const SizedBox(height: 3),
                             Text(
-                              yearRange.isNotEmpty ? yearRange : '${DateTime.now().year}',
-                              style: const TextStyle(fontSize: 6.5, color: Color(0xFF8C8C8C), letterSpacing: 1.5),
+                              yearRange.isNotEmpty
+                                  ? yearRange
+                                  : '${DateTime.now().year}',
+                              style: const TextStyle(
+                                  fontSize: 6.5,
+                                  color: Color(0xFF8C8C8C),
+                                  letterSpacing: 1.5),
                             ),
                           ],
                         ),
@@ -1614,28 +1712,43 @@ class _BookCoverPreview extends StatelessWidget {
                     child: Text(
                       titleText,
                       style: const TextStyle(
-                        fontFamily: 'PlayfairDisplay', fontSize: 14,
-                        fontWeight: FontWeight.bold, color: Colors.white, height: 1.3,
+                        fontFamily: 'PlayfairDisplay',
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        height: 1.3,
                       ),
                       textAlign: TextAlign.center,
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Container(width: 30, height: 1, color: Colors.white.withOpacity(0.6)),
+                  Container(
+                      width: 30,
+                      height: 1,
+                      color: Colors.white.withOpacity(0.6)),
                   const SizedBox(height: 7),
                   Text(
                     yearRange.isNotEmpty ? yearRange : '${DateTime.now().year}',
-                    style: TextStyle(fontSize: 10, color: Colors.white.withOpacity(0.8), letterSpacing: 2),
+                    style: TextStyle(
+                        fontSize: 10,
+                        color: Colors.white.withOpacity(0.8),
+                        letterSpacing: 2),
                   ),
                   if (highlights.isNotEmpty) ...[
                     const SizedBox(height: 8),
-                    Container(width: 32, height: 0.5, color: Colors.white.withOpacity(0.4)),
+                    Container(
+                        width: 32,
+                        height: 0.5,
+                        color: Colors.white.withOpacity(0.4)),
                     const SizedBox(height: 6),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       child: Text(
                         highlights.take(3).map((h) => '· $h').join('  '),
-                        style: TextStyle(fontSize: 7, color: Colors.white.withOpacity(0.75), fontStyle: FontStyle.italic),
+                        style: TextStyle(
+                            fontSize: 7,
+                            color: Colors.white.withOpacity(0.75),
+                            fontStyle: FontStyle.italic),
                         textAlign: TextAlign.center,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -1667,15 +1780,13 @@ class _ProgressBar extends StatelessWidget {
             value: progress,
             minHeight: 8,
             backgroundColor: AppColors.background,
-            valueColor:
-                const AlwaysStoppedAnimation<Color>(AppColors.sage),
+            valueColor: const AlwaysStoppedAnimation<Color>(AppColors.sage),
           ),
         ),
         const SizedBox(height: 6),
         Text(
           '${(progress * 100).round()}%',
-          style: const TextStyle(
-              color: AppColors.textMedium, fontSize: 12),
+          style: const TextStyle(color: AppColors.textMedium, fontSize: 12),
         ),
       ],
     );
@@ -1713,13 +1824,10 @@ class _FormatCard extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: selected
-              ? AppColors.sage.withOpacity(0.06)
-              : AppColors.white,
+          color: selected ? AppColors.sage.withOpacity(0.06) : AppColors.white,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color:
-                selected ? AppColors.sage : AppColors.border,
+            color: selected ? AppColors.sage : AppColors.border,
             width: selected ? 2 : 0.5,
           ),
         ),
@@ -1772,9 +1880,7 @@ class _FormatCard extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Icon(
-              selected
-                  ? Icons.radio_button_checked
-                  : Icons.radio_button_off,
+              selected ? Icons.radio_button_checked : Icons.radio_button_off,
               color: selected ? AppColors.sage : AppColors.softGray,
               size: 20,
             ),
@@ -1807,15 +1913,13 @@ class _OrderRow extends StatelessWidget {
       children: [
         Text(
           label,
-          style: const TextStyle(
-              color: AppColors.textMedium, fontSize: 14),
+          style: const TextStyle(color: AppColors.textMedium, fontSize: 14),
         ),
         Text(
           value,
           style: TextStyle(
             color: valueColor ?? AppColors.textDark,
-            fontWeight:
-                bold ? FontWeight.w700 : FontWeight.w500,
+            fontWeight: bold ? FontWeight.w700 : FontWeight.w500,
             fontSize: 14,
           ),
         ),
@@ -2041,19 +2145,20 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   }
 
   String _typeLabel(String type) => switch (type) {
-    'anecdote' => 'Anecdote',
-    'growth' => 'Croissance',
-    'event' => 'Événement',
-    'milestone' => 'Étape',
-    'travel' => 'Voyage',
-    'health' => 'Santé',
-    _ => type,
-  };
+        'anecdote' => 'Anecdote',
+        'growth' => 'Croissance',
+        'event' => 'Événement',
+        'milestone' => 'Étape',
+        'travel' => 'Voyage',
+        'health' => 'Santé',
+        _ => type,
+      };
 
   int get _photoCount {
     int n = 0;
     for (final id in _local) {
-      final m = widget.memories.firstWhere((m) => m.id == id, orElse: () => widget.memories.first);
+      final m = widget.memories
+          .firstWhere((m) => m.id == id, orElse: () => widget.memories.first);
       if (m.mediaUrls.isNotEmpty) {
         n += m.mediaUrls.length;
       } else if (m.photoUrl != null && m.photoUrl!.isNotEmpty) {
@@ -2079,7 +2184,8 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
             // Handle
             Container(
               margin: const EdgeInsets.only(top: 12),
-              width: 40, height: 4,
+              width: 40,
+              height: 4,
               decoration: BoxDecoration(
                 color: AppColors.softGray.withOpacity(0.5),
                 borderRadius: BorderRadius.circular(2),
@@ -2101,7 +2207,8 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                   ),
                   const Spacer(),
                   TextButton(
-                    style: TextButton.styleFrom(padding: EdgeInsets.zero, minimumSize: Size.zero),
+                    style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero, minimumSize: Size.zero),
                     onPressed: () => setState(() {
                       if (_local.length == widget.memories.length) {
                         _local.clear();
@@ -2110,8 +2217,11 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                       }
                     }),
                     child: Text(
-                      _local.length == widget.memories.length ? 'Tout décocher' : 'Tout cocher',
-                      style: const TextStyle(color: AppColors.sage, fontSize: 13),
+                      _local.length == widget.memories.length
+                          ? 'Tout décocher'
+                          : 'Tout cocher',
+                      style:
+                          const TextStyle(color: AppColors.sage, fontSize: 13),
                     ),
                   ),
                 ],
@@ -2128,7 +2238,9 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                   final selected = _local.contains(m.id);
                   final hasPhotos = m.mediaUrls.isNotEmpty ||
                       (m.photoUrl != null && m.photoUrl!.isNotEmpty);
-                  final photoCount = m.mediaUrls.isNotEmpty ? m.mediaUrls.length : (hasPhotos ? 1 : 0);
+                  final photoCount = m.mediaUrls.isNotEmpty
+                      ? m.mediaUrls.length
+                      : (hasPhotos ? 1 : 0);
                   final preview = m.rawContent.length > 65
                       ? '${m.rawContent.substring(0, 65)}…'
                       : m.rawContent;
@@ -2138,24 +2250,30 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                       selected ? _local.remove(m.id) : _local.add(m.id);
                     }),
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 20, vertical: 12),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           // Checkbox
                           AnimatedContainer(
                             duration: const Duration(milliseconds: 150),
-                            width: 22, height: 22,
+                            width: 22,
+                            height: 22,
                             decoration: BoxDecoration(
-                              color: selected ? AppColors.sage : AppColors.white,
+                              color:
+                                  selected ? AppColors.sage : AppColors.white,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                color: selected ? AppColors.sage : const Color(0xFFCCC8BE),
+                                color: selected
+                                    ? AppColors.sage
+                                    : const Color(0xFFCCC8BE),
                                 width: 1.5,
                               ),
                             ),
                             child: selected
-                                ? const Icon(Icons.check, size: 14, color: Colors.white)
+                                ? const Icon(Icons.check,
+                                    size: 14, color: Colors.white)
                                 : null,
                           ),
                           const SizedBox(width: 12),
@@ -2170,20 +2288,25 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                                       _formatDate(m),
                                       style: TextStyle(
                                         fontSize: 12,
-                                        color: selected ? AppColors.sage : AppColors.textMedium,
+                                        color: selected
+                                            ? AppColors.sage
+                                            : AppColors.textMedium,
                                         fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                     const SizedBox(width: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: AppColors.background,
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: Text(
                                         _typeLabel(m.type),
-                                        style: const TextStyle(fontSize: 10, color: AppColors.textMedium),
+                                        style: const TextStyle(
+                                            fontSize: 10,
+                                            color: AppColors.textMedium),
                                       ),
                                     ),
                                   ],
@@ -2193,7 +2316,9 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                                   preview,
                                   style: TextStyle(
                                     fontSize: 13,
-                                    color: selected ? AppColors.textDark : AppColors.textMedium,
+                                    color: selected
+                                        ? AppColors.textDark
+                                        : AppColors.textMedium,
                                     height: 1.4,
                                   ),
                                 ),
@@ -2201,11 +2326,17 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                                   const SizedBox(height: 4),
                                   Row(
                                     children: [
-                                      Icon(Icons.photo_outlined, size: 12, color: AppColors.sage.withOpacity(0.8)),
+                                      Icon(Icons.photo_outlined,
+                                          size: 12,
+                                          color:
+                                              AppColors.sage.withOpacity(0.8)),
                                       const SizedBox(width: 3),
                                       Text(
                                         '$photoCount photo${photoCount > 1 ? 's' : ''}',
-                                        style: TextStyle(fontSize: 11, color: AppColors.sage.withOpacity(0.8)),
+                                        style: TextStyle(
+                                            fontSize: 11,
+                                            color: AppColors.sage
+                                                .withOpacity(0.8)),
                                       ),
                                     ],
                                   ),
@@ -2223,12 +2354,14 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
             const Divider(height: 1, color: Color(0xFFEEEBE3)),
             // Confirm button
             Padding(
-              padding: EdgeInsets.fromLTRB(20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
+              padding: EdgeInsets.fromLTRB(
+                  20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
               child: Column(
                 children: [
                   Text(
                     '${_local.length} souvenir${_local.length != 1 ? 's' : ''} · $_photoCount photo${_photoCount != 1 ? 's' : ''}',
-                    style: const TextStyle(color: AppColors.textMedium, fontSize: 13),
+                    style: const TextStyle(
+                        color: AppColors.textMedium, fontSize: 13),
                   ),
                   const SizedBox(height: 10),
                   SizedBox(
@@ -2240,7 +2373,8 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                               widget.onChanged(Set.from(_local));
                               Navigator.pop(context);
                             },
-                      child: Text('Confirmer (${_local.length}/${widget.memories.length})'),
+                      child: Text(
+                          'Confirmer (${_local.length}/${widget.memories.length})'),
                     ),
                   ),
                 ],
@@ -2253,7 +2387,6 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   }
 }
 
-
 class _AddressField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
@@ -2264,18 +2397,20 @@ class _AddressField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => TextFormField(
-    controller: controller,
-    keyboardType: keyboardType,
-    style: const TextStyle(fontSize: 14, color: AppColors.textDark),
-    decoration: InputDecoration(
-      labelText: label,
-      labelStyle: const TextStyle(fontSize: 13, color: AppColors.textMedium),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      isDense: true,
-    ),
-    validator: required
-        ? (v) => (v == null || v.trim().isEmpty) ? 'Champ requis' : null
-        : null,
-  );
+        controller: controller,
+        keyboardType: keyboardType,
+        style: const TextStyle(fontSize: 14, color: AppColors.textDark),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle:
+              const TextStyle(fontSize: 13, color: AppColors.textMedium),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          isDense: true,
+        ),
+        validator: required
+            ? (v) => (v == null || v.trim().isEmpty) ? 'Champ requis' : null
+            : null,
+      );
 }

@@ -54,8 +54,8 @@ class BookPdfService {
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
     final playfairB = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Bold.ttf'));
-    final dmSans = pw.Font.ttf(
-        await rootBundle.load('assets/fonts/DMSans-Regular.ttf'));
+    final dmSans =
+        pw.Font.ttf(await rootBundle.load('assets/fonts/DMSans-Regular.ttf'));
 
     String? svgString;
     try {
@@ -154,8 +154,8 @@ class BookPdfService {
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
     final playfairB = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Bold.ttf'));
-    final dmSans = pw.Font.ttf(
-        await rootBundle.load('assets/fonts/DMSans-Regular.ttf'));
+    final dmSans =
+        pw.Font.ttf(await rootBundle.load('assets/fonts/DMSans-Regular.ttf'));
 
     String? svgString;
     if (notebook.type == 'enfant' && notebook.companion != null) {
@@ -190,7 +190,8 @@ class BookPdfService {
             final response = await http
                 .get(Uri.parse(url))
                 .timeout(const Duration(seconds: 20));
-            if (response.statusCode == 200) bytesByUrl[url] = response.bodyBytes;
+            if (response.statusCode == 200)
+              bytesByUrl[url] = response.bodyBytes;
           } catch (_) {}
         }));
     await fetchAll(urlsToFetch);
@@ -198,8 +199,7 @@ class BookPdfService {
     // simplement omise, et ça se voit). Pour l'IMPRESSION, un livre incomplet
     // partirait chez l'imprimeur sans que personne ne le voie : on retente une
     // fois les manquants, puis on échoue franchement s'il en reste.
-    var missing =
-        urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
+    var missing = urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
     if (padForPrint && missing.isNotEmpty) {
       await fetchAll(missing);
       missing = urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
@@ -210,7 +210,8 @@ class BookPdfService {
       }
     }
 
-    final coverPhotoBytes = coverPhotoUrl != null ? bytesByUrl[coverPhotoUrl] : null;
+    final coverPhotoBytes =
+        coverPhotoUrl != null ? bytesByUrl[coverPhotoUrl] : null;
     // Photos affichées dans le livre. Option : exclure la photo de couverture
     // pour ne pas la répéter à l'intérieur.
     final successfulPhotos = photoEntries.where((e) {
@@ -363,8 +364,7 @@ class BookPdfService {
               heightCm: m.heightCm,
             ))
         .toList();
-    final hasGrowth =
-        notebook.type == 'enfant' && growthMilestones.length >= 2;
+    final hasGrowth = notebook.type == 'enfant' && growthMilestones.length >= 2;
     final childForGrowth = ChildModel(
       id: notebook.id,
       parentId: '',
@@ -376,10 +376,8 @@ class BookPdfService {
       gender: notebook.gender ?? 'boy',
     );
 
-    final totalPages = 1 +
-        photoPages.length +
-        textOnlyMemories.length +
-        (hasGrowth ? 1 : 0);
+    final totalPages =
+        1 + photoPages.length + textOnlyMemories.length + (hasGrowth ? 1 : 0);
     final finalPageCount =
         padForPrint ? _gelatoValidPageCount(totalPages) : totalPages;
     // A4 full-bleed — margins handled inside each widget
@@ -515,11 +513,20 @@ class BookPdfService {
     return (bytes: bytes, pageCount: finalPageCount);
   }
 
-  // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
-  // pair, minimum 30 (le vrai plancher Gelato — 28 était refusé), maximum 200.
+  // Arrondit au nombre de pages valide Gelato le plus proche par le haut.
+  // Règle confirmée par DEUX rejets réels chez Gelato (refusalReasonCode
+  // "product_file") : le catalogue produit annonce des pages paires (28-200),
+  // mais la validation prépresse réelle exige n ≡ 1 (mod 4) — 34 pages a été
+  // refusé en exigeant "exactement 37" le 22.07, et 36 pages a été refusé en
+  // exigeant "exactement 37" le 21.07 (mémoire) : les deux convergent vers la
+  // même prochaine valeur 4k+1. Plancher 25 par prudence (jamais vérifié en
+  // conditions réelles — à confirmer par un nouveau test) ; plafond 197 (le
+  // 200 pair précédent n'est de toute façon pas valide sous cette règle).
   static int _gelatoValidPageCount(int n) {
-    var v = n < 30 ? 30 : (n.isOdd ? n + 1 : n);
-    if (v > 200) v = 200;
+    var v = n < 25 ? 25 : n;
+    final rem = v % 4;
+    if (rem != 1) v += (1 - rem + 4) % 4;
+    if (v > 197) v = 197;
     return v;
   }
 
@@ -548,8 +555,7 @@ class BookPdfService {
         timeout: const Duration(seconds: 20),
       );
       final edge = data?['wraparoundEdgeSize'];
-      final widthMm =
-          edge is Map ? (edge['width'] as num?)?.toDouble() : null;
+      final widthMm = edge is Map ? (edge['width'] as num?)?.toDouble() : null;
       final heightMm =
           edge is Map ? (edge['height'] as num?)?.toDouble() : null;
       if (widthMm != null && widthMm > 0 && heightMm != null && heightMm > 0) {
@@ -564,8 +570,7 @@ class BookPdfService {
     // Épaisseur de tranche ≈ 0.1 mm / page (papier ~150g courant photobook),
     // avec un minimum selon le type de couverture. Approximatif mais évite
     // un échec pur et simple si l'appel réseau rate.
-    final spineMm =
-        max(pageCount * 0.1, coverType == 'hard' ? 10.0 : 4.0);
+    final spineMm = max(pageCount * 0.1, coverType == 'hard' ? 10.0 : 4.0);
     return (width: 2 * _a4W + spineMm * PdfPageFormat.mm, height: _a4H);
   }
 
@@ -576,8 +581,10 @@ class BookPdfService {
     if (bytes.length < 4) return null;
     // PNG : 89 50 4E 47 … largeur [16..19], hauteur [20..23]
     if (bytes[0] == 0x89 && bytes[1] == 0x50 && bytes.length >= 24) {
-      final w = (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
-      final h = (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
+      final w =
+          (bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19];
+      final h =
+          (bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23];
       return (w: w, h: h);
     }
     // JPEG : FF D8 … marqueur SOFn
@@ -610,7 +617,8 @@ class BookPdfService {
       if (t != null && t.isNotEmpty) {
         result.add(t);
       } else {
-        final words = m.rawContent.trim().split(RegExp(r'\s+')).take(4).join(' ');
+        final words =
+            m.rawContent.trim().split(RegExp(r'\s+')).take(4).join(' ');
         if (words.isNotEmpty) result.add(words);
       }
       if (result.length >= 15) break;
@@ -641,38 +649,63 @@ class BookPdfService {
     // Caption box (white solid — no alpha issues)
     pw.Widget captionBox(_PhotoPageEntry e, {double maxChars = 220}) {
       final hasTitle = e.title?.isNotEmpty ?? false;
-      final hasBody = (e.caption?.isNotEmpty ?? false) || (e.locationComment?.isNotEmpty ?? false) || hasTitle;
+      final hasBody = (e.caption?.isNotEmpty ?? false) ||
+          (e.locationComment?.isNotEmpty ?? false) ||
+          hasTitle;
       return pw.Container(
         color: PdfColors.white,
-        padding: pw.EdgeInsets.fromLTRB(14, hasBody ? 10 : 7, 14, hasBody ? 10 : 7),
+        padding:
+            pw.EdgeInsets.fromLTRB(14, hasBody ? 10 : 7, 14, hasBody ? 10 : 7),
         child: pw.Column(
           crossAxisAlignment: pw.CrossAxisAlignment.start,
           children: [
             pw.Text(e.date,
-              style: pw.TextStyle(font: pR, fontSize: 8.5, color: cover, fontStyle: pw.FontStyle.italic)),
+                style: pw.TextStyle(
+                    font: pR,
+                    fontSize: 8.5,
+                    color: cover,
+                    fontStyle: pw.FontStyle.italic)),
             if (hasTitle) ...[
               pw.SizedBox(height: 3),
               pw.Text(e.title!,
-                style: pw.TextStyle(font: pB, fontSize: 11.5, color: _textDark, letterSpacing: 0.2)),
+                  style: pw.TextStyle(
+                      font: pB,
+                      fontSize: 11.5,
+                      color: _textDark,
+                      letterSpacing: 0.2)),
             ],
             if (e.caption != null && e.caption!.isNotEmpty) ...[
               pw.SizedBox(height: 4),
               pw.Text(
-                e.caption!.length > maxChars.toInt()
-                    ? '${e.caption!.substring(0, maxChars.toInt())}…'
-                    : e.caption!,
-                style: pw.TextStyle(font: dm, fontSize: 9.5, color: _textDark, lineSpacing: 2.5)),
+                  e.caption!.length > maxChars.toInt()
+                      ? '${e.caption!.substring(0, maxChars.toInt())}…'
+                      : e.caption!,
+                  style: pw.TextStyle(
+                      font: dm,
+                      fontSize: 9.5,
+                      color: _textDark,
+                      lineSpacing: 2.5)),
             ],
             if (e.locationComment != null && e.locationComment!.isNotEmpty) ...[
               pw.SizedBox(height: 4),
-              pw.Row(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
-                pw.Container(
-                  margin: const pw.EdgeInsets.only(top: 2.5), width: 3, height: 3,
-                  decoration: pw.BoxDecoration(color: cover, shape: pw.BoxShape.circle)),
-                pw.SizedBox(width: 4),
-                pw.Expanded(child: pw.Text(e.locationComment!,
-                  style: pw.TextStyle(font: pR, fontSize: 8, color: cover, fontStyle: pw.FontStyle.italic))),
-              ]),
+              pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Container(
+                        margin: const pw.EdgeInsets.only(top: 2.5),
+                        width: 3,
+                        height: 3,
+                        decoration: pw.BoxDecoration(
+                            color: cover, shape: pw.BoxShape.circle)),
+                    pw.SizedBox(width: 4),
+                    pw.Expanded(
+                        child: pw.Text(e.locationComment!,
+                            style: pw.TextStyle(
+                                font: pR,
+                                fontSize: 8,
+                                color: cover,
+                                fontStyle: pw.FontStyle.italic))),
+                  ]),
             ],
           ],
         ),
@@ -684,46 +717,51 @@ class BookPdfService {
       color: PdfColors.white,
       padding: const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       child: pw.Text('$pageNum / $total',
-        style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium)),
+          style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium)),
     );
 
     // QR média (écouter / regarder) — placé au coin bas-gauche de la demi-page
     pw.Widget qrBadge(String url, String line1, String line2) => pw.Container(
-      color: PdfColors.white,
-      padding: const pw.EdgeInsets.fromLTRB(6, 6, 8, 6),
-      child: pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
-        pw.BarcodeWidget(
-          barcode: pw.Barcode.qrCode(),
-          data: url,
-          width: 46, height: 46,
-          color: _textDark,
-        ),
-        pw.SizedBox(width: 6),
-        pw.Column(
-          mainAxisSize: pw.MainAxisSize.min,
-          crossAxisAlignment: pw.CrossAxisAlignment.start,
-          children: [
-            pw.Text(line1, style: pw.TextStyle(font: pB, fontSize: 7.5, color: cover)),
-            pw.SizedBox(height: 1),
-            pw.Text(line2,
-              style: pw.TextStyle(font: pR, fontSize: 6.5, color: _textMedium)),
-          ],
-        ),
-      ]),
-    );
+          color: PdfColors.white,
+          padding: const pw.EdgeInsets.fromLTRB(6, 6, 8, 6),
+          child: pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
+            pw.BarcodeWidget(
+              barcode: pw.Barcode.qrCode(),
+              data: url,
+              width: 46,
+              height: 46,
+              color: _textDark,
+            ),
+            pw.SizedBox(width: 6),
+            pw.Column(
+              mainAxisSize: pw.MainAxisSize.min,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(line1,
+                    style: pw.TextStyle(font: pB, fontSize: 7.5, color: cover)),
+                pw.SizedBox(height: 1),
+                pw.Text(line2,
+                    style: pw.TextStyle(
+                        font: pR, fontSize: 6.5, color: _textMedium)),
+              ],
+            ),
+          ]),
+        );
 
     // Empile les QR présents (vidéo au-dessus, audio en dessous).
     pw.Widget mediaBadges(_PhotoPageEntry e) => pw.Column(
-      mainAxisSize: pw.MainAxisSize.min,
-      crossAxisAlignment: pw.CrossAxisAlignment.start,
-      children: [
-        if (e.watchUrl != null)
-          qrBadge(e.watchUrl!, 'Regarder',
-              e.videoCount > 1 ? 'les vidéos' : 'la vidéo'),
-        if (e.watchUrl != null && e.listenUrl != null) pw.SizedBox(height: 4),
-        if (e.listenUrl != null) qrBadge(e.listenUrl!, 'Écouter', 'le mémo vocal'),
-      ],
-    );
+          mainAxisSize: pw.MainAxisSize.min,
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            if (e.watchUrl != null)
+              qrBadge(e.watchUrl!, 'Regarder',
+                  e.videoCount > 1 ? 'les vidéos' : 'la vidéo'),
+            if (e.watchUrl != null && e.listenUrl != null)
+              pw.SizedBox(height: 4),
+            if (e.listenUrl != null)
+              qrBadge(e.listenUrl!, 'Écouter', 'le mémo vocal'),
+          ],
+        );
 
     // ── Rendu des 6 templates ────────────────────────────────────────────────
     // Zone imprimable = page moins la marge album ; espacement `_gap` uniforme
@@ -736,13 +774,17 @@ class BookPdfService {
     final ch = _a4H - 2 * margin;
 
     pw.Widget cell(double x, double y, double w, double h, _PhotoPageEntry e) =>
-        pw.Positioned(left: x, top: y,
-          child: pw.SizedBox(width: w, height: h,
-            child: pw.Image(pw.MemoryImage(e.bytes),
-                fit: pw.BoxFit.cover,
-                alignment: e.isPortrait
-                    ? pw.Alignment.topCenter
-                    : pw.Alignment.center)));
+        pw.Positioned(
+            left: x,
+            top: y,
+            child: pw.SizedBox(
+                width: w,
+                height: h,
+                child: pw.Image(pw.MemoryImage(e.bytes),
+                    fit: pw.BoxFit.cover,
+                    alignment: e.isPortrait
+                        ? pw.Alignment.topCenter
+                        : pw.Alignment.center)));
 
     final photos = <pw.Widget>[];
     switch (tpl) {
@@ -793,19 +835,25 @@ class BookPdfService {
         // Base — fixe la taille du Stack au format A4
         pw.SizedBox(width: _a4W, height: _a4H),
         // Fond crème : marges album + remplissage des vides éventuels.
-        pw.Positioned(left: 0, top: 0,
-          child: pw.SizedBox(width: _a4W, height: _a4H,
-            child: pw.Container(color: _cream))),
+        pw.Positioned(
+            left: 0,
+            top: 0,
+            child: pw.SizedBox(
+                width: _a4W, height: _a4H, child: pw.Container(color: _cream))),
         // Photos du template
         ...photos,
         // Légende — 1ʳᵉ page du souvenir, encadrée en haut-gauche (dans la
         // zone de sécurité pour ne pas être rognée).
         if (hasCaption)
-          pw.Positioned(top: _safe, left: _safe, right: _a4W * 0.42,
+          pw.Positioned(
+              top: _safe,
+              left: _safe,
+              right: _a4W * 0.42,
               child: captionBox(entries[0], maxChars: 150)),
         // QR média — DERNIÈRE page du souvenir, bas-gauche.
         if (qrEntry != null)
-          pw.Positioned(bottom: _safe, left: _safe, child: mediaBadges(qrEntry)),
+          pw.Positioned(
+              bottom: _safe, left: _safe, child: mediaBadges(qrEntry)),
         // Numéro de page
         pw.Positioned(bottom: _safe, right: _safe, child: pageBadge),
       ],
@@ -917,7 +965,8 @@ class BookPdfService {
         : (notebook.type == 'enfant' && notebook.companionName != null
             ? '${notebook.title} & ${notebook.companionName}'
             : notebook.title);
-    final displaySubtitle = customSubtitle?.isNotEmpty == true ? customSubtitle! : null;
+    final displaySubtitle =
+        customSubtitle?.isNotEmpty == true ? customSubtitle! : null;
 
     final highlightLine = highlights.isEmpty
         ? null
@@ -927,15 +976,15 @@ class BookPdfService {
 
     // "carnet" brand text — top-right on all covers
     pw.Widget folioTag() => pw.Text(
-      'carnet',
-      style: pw.TextStyle(
-        font: pR,
-        fontSize: 11,
-        color: PdfColors.white,
-        fontStyle: pw.FontStyle.italic,
-        letterSpacing: 1.5,
-      ),
-    );
+          'carnet',
+          style: pw.TextStyle(
+            font: pR,
+            fontSize: 11,
+            color: PdfColors.white,
+            fontStyle: pw.FontStyle.italic,
+            letterSpacing: 1.5,
+          ),
+        );
 
     // A4 dimensions in points
     const w = _a4W;
@@ -946,12 +995,17 @@ class BookPdfService {
       return pw.Stack(
         children: [
           pw.SizedBox(
-            width: w, height: h,
-            child: pw.Image(pw.MemoryImage(coverPhotoBytes), fit: pw.BoxFit.cover),
+            width: w,
+            height: h,
+            child:
+                pw.Image(pw.MemoryImage(coverPhotoBytes), fit: pw.BoxFit.cover),
           ),
-          pw.Positioned(top: _bleed + 20, right: _bleed + 22, child: folioTag()),
           pw.Positioned(
-            bottom: 0, left: 0, right: 0,
+              top: _bleed + 20, right: _bleed + 22, child: folioTag()),
+          pw.Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
             child: pw.Container(
               color: PdfColors.white,
               // Bandeau compact (laisse plus de place à la photo) en 2 colonnes :
@@ -967,19 +1021,28 @@ class BookPdfService {
                       children: [
                         pw.Text(
                           displayTitle,
-                          style: pw.TextStyle(font: pB, fontSize: 18, color: _textDark, letterSpacing: 0.2),
+                          style: pw.TextStyle(
+                              font: pB,
+                              fontSize: 18,
+                              color: _textDark,
+                              letterSpacing: 0.2),
                         ),
                         if (displaySubtitle != null) ...[
                           pw.SizedBox(height: 4),
                           pw.Text(displaySubtitle,
-                            style: pw.TextStyle(font: pR, fontSize: 10, color: _textMedium)),
+                              style: pw.TextStyle(
+                                  font: pR, fontSize: 10, color: _textMedium)),
                         ],
                         pw.SizedBox(height: 8),
                         pw.Container(width: 26, height: 1.5, color: cover),
                         pw.SizedBox(height: 8),
                         pw.Text(
                           'LIVRE DE SOUVENIRS  ·  $yearRange',
-                          style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium, letterSpacing: 1.5),
+                          style: pw.TextStyle(
+                              font: pR,
+                              fontSize: 7,
+                              color: _textMedium,
+                              letterSpacing: 1.5),
                         ),
                       ],
                     ),
@@ -992,10 +1055,14 @@ class BookPdfService {
                         mainAxisSize: pw.MainAxisSize.min,
                         children: coverMemoList
                             .map((h) => pw.Padding(
-                                  padding: const pw.EdgeInsets.only(bottom: 1.5),
+                                  padding:
+                                      const pw.EdgeInsets.only(bottom: 1.5),
                                   child: pw.Text(
                                     '· $h',
-                                    style: pw.TextStyle(font: pR, fontSize: 7, color: _textMedium),
+                                    style: pw.TextStyle(
+                                        font: pR,
+                                        fontSize: 7,
+                                        color: _textMedium),
                                     maxLines: 1,
                                     overflow: pw.TextOverflow.clip,
                                     textAlign: pw.TextAlign.right,
@@ -1022,7 +1089,8 @@ class BookPdfService {
           pw.SvgImage(svg: svgString, width: 110, height: 110)
         else
           pw.Container(
-            width: 72, height: 72,
+            width: 72,
+            height: 72,
             decoration: const pw.BoxDecoration(
               color: PdfColors.white,
               shape: pw.BoxShape.circle,
@@ -1031,31 +1099,43 @@ class BookPdfService {
         pw.SizedBox(height: 26),
         pw.Text(
           displayTitle,
-          style: pw.TextStyle(font: pB, fontSize: 26, color: PdfColors.white, letterSpacing: 0.4),
+          style: pw.TextStyle(
+              font: pB,
+              fontSize: 26,
+              color: PdfColors.white,
+              letterSpacing: 0.4),
           textAlign: pw.TextAlign.center,
         ),
         if (displaySubtitle != null) ...[
           pw.SizedBox(height: 8),
           pw.Text(displaySubtitle,
-            style: pw.TextStyle(font: pR, fontSize: 12, color: PdfColors.white),
-            textAlign: pw.TextAlign.center),
+              style:
+                  pw.TextStyle(font: pR, fontSize: 12, color: PdfColors.white),
+              textAlign: pw.TextAlign.center),
         ],
         pw.SizedBox(height: 18),
         pw.Container(width: 44, height: 1.5, color: PdfColors.white),
         pw.SizedBox(height: 18),
         pw.Text(
           'LIVRE DE SOUVENIRS',
-          style: pw.TextStyle(font: pR, fontSize: 8, color: PdfColors.white, letterSpacing: 3),
+          style: pw.TextStyle(
+              font: pR, fontSize: 8, color: PdfColors.white, letterSpacing: 3),
         ),
         pw.SizedBox(height: 6),
-        pw.Text(yearRange, style: pw.TextStyle(font: pR, fontSize: 10, color: PdfColors.white)),
+        pw.Text(yearRange,
+            style:
+                pw.TextStyle(font: pR, fontSize: 10, color: PdfColors.white)),
         if (highlightLine != null) ...[
           pw.SizedBox(height: 14),
           pw.Container(width: 40, height: 0.5, color: PdfColors.white),
           pw.SizedBox(height: 10),
           pw.Text(
             highlightLine,
-            style: pw.TextStyle(font: pR, fontSize: 7.5, color: PdfColors.white, fontStyle: pw.FontStyle.italic),
+            style: pw.TextStyle(
+                font: pR,
+                fontSize: 7.5,
+                color: PdfColors.white,
+                fontStyle: pw.FontStyle.italic),
             textAlign: pw.TextAlign.center,
           ),
         ],
@@ -1066,7 +1146,8 @@ class BookPdfService {
       children: [
         pw.SizedBox(width: w, height: h, child: pw.Container(color: cover)),
         pw.Positioned(top: _bleed + 20, right: _bleed + 22, child: folioTag()),
-        pw.SizedBox(width: w, height: h, child: pw.Center(child: centeredContent)),
+        pw.SizedBox(
+            width: w, height: h, child: pw.Center(child: centeredContent)),
       ],
     );
   }
@@ -1085,8 +1166,8 @@ class BookPdfService {
   }) {
     final dateStr = memory.dateLabel ??
         '${memory.date.day.toString().padLeft(2, '0')}/'
-        '${memory.date.month.toString().padLeft(2, '0')}/'
-        '${memory.date.year}';
+            '${memory.date.month.toString().padLeft(2, '0')}/'
+            '${memory.date.year}';
     final hasAudio = memory.audioUrl != null && memory.audioUrl!.isNotEmpty;
     final listenUrl = (hasAudio && backendUrl.isNotEmpty)
         ? '$backendUrl/listen?m=${memory.id}'
@@ -1097,24 +1178,29 @@ class BookPdfService {
         : null;
 
     // QR média (texte seul) : un bloc QR + libellé, réutilisé pour vidéo/audio.
-    pw.Widget mediaQr(String url, String line1, String line2) => pw.Row(children: [
-      pw.BarcodeWidget(
-        barcode: pw.Barcode.qrCode(),
-        data: url,
-        width: 56, height: 56,
-        color: _textDark,
-      ),
-      pw.SizedBox(width: 10),
-      pw.Column(
-        mainAxisSize: pw.MainAxisSize.min,
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
-        children: [
-          pw.Text(line1, style: pw.TextStyle(font: pB, fontSize: 9, color: cover)),
-          pw.SizedBox(height: 2),
-          pw.Text(line2, style: pw.TextStyle(font: pR, fontSize: 7.5, color: _textMedium)),
-        ],
-      ),
-    ]);
+    pw.Widget mediaQr(String url, String line1, String line2) =>
+        pw.Row(children: [
+          pw.BarcodeWidget(
+            barcode: pw.Barcode.qrCode(),
+            data: url,
+            width: 56,
+            height: 56,
+            color: _textDark,
+          ),
+          pw.SizedBox(width: 10),
+          pw.Column(
+            mainAxisSize: pw.MainAxisSize.min,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Text(line1,
+                  style: pw.TextStyle(font: pB, fontSize: 9, color: cover)),
+              pw.SizedBox(height: 2),
+              pw.Text(line2,
+                  style: pw.TextStyle(
+                      font: pR, fontSize: 7.5, color: _textMedium)),
+            ],
+          ),
+        ]);
 
     return pw.Container(
       color: _cream,
@@ -1124,13 +1210,19 @@ class BookPdfService {
         children: [
           pw.Text(
             dateStr,
-            style: pw.TextStyle(font: pR, fontSize: 9, color: cover, fontStyle: pw.FontStyle.italic, letterSpacing: 0.5),
+            style: pw.TextStyle(
+                font: pR,
+                fontSize: 9,
+                color: cover,
+                fontStyle: pw.FontStyle.italic,
+                letterSpacing: 0.5),
           ),
           pw.SizedBox(height: 10),
           if (memory.title != null && memory.title!.isNotEmpty) ...[
             pw.Text(
               memory.title!,
-              style: pw.TextStyle(font: pB, fontSize: 16, color: _textDark, letterSpacing: 0.2),
+              style: pw.TextStyle(
+                  font: pB, fontSize: 16, color: _textDark, letterSpacing: 0.2),
             ),
             pw.SizedBox(height: 10),
           ],
@@ -1139,17 +1231,26 @@ class BookPdfService {
           pw.Expanded(
             child: pw.Text(
               memory.rawContent,
-              style: pw.TextStyle(font: pR, fontSize: 11, color: _textDark, lineSpacing: 5),
+              style: pw.TextStyle(
+                  font: pR, fontSize: 11, color: _textDark, lineSpacing: 5),
             ),
           ),
           if (memory.location != null && memory.location!.isNotEmpty) ...[
             pw.SizedBox(height: 8),
             pw.Row(children: [
-              pw.Container(width: 3, height: 3, margin: const pw.EdgeInsets.only(top: 2),
-                decoration: pw.BoxDecoration(color: cover, shape: pw.BoxShape.circle)),
+              pw.Container(
+                  width: 3,
+                  height: 3,
+                  margin: const pw.EdgeInsets.only(top: 2),
+                  decoration: pw.BoxDecoration(
+                      color: cover, shape: pw.BoxShape.circle)),
               pw.SizedBox(width: 5),
               pw.Text(memory.location!,
-                style: pw.TextStyle(font: pR, fontSize: 8, color: cover, fontStyle: pw.FontStyle.italic)),
+                  style: pw.TextStyle(
+                      font: pR,
+                      fontSize: 8,
+                      color: cover,
+                      fontStyle: pw.FontStyle.italic)),
             ]),
           ],
           if (watchUrl != null) ...[
@@ -1172,7 +1273,7 @@ class BookPdfService {
           pw.Align(
             alignment: pw.Alignment.centerRight,
             child: pw.Text('$pageNum / $total',
-              style: pw.TextStyle(font: dm, fontSize: 8, color: _textMedium)),
+                style: pw.TextStyle(font: dm, fontSize: 8, color: _textMedium)),
           ),
         ],
       ),
@@ -1546,8 +1647,19 @@ class _PhotoPageEntry {
   final String? listenUrl;
   final String? watchUrl;
   final int videoCount;
+
   /// Vraie sur la 1ʳᵉ photo du souvenir → porte la carte légende (date + titre
   /// + description), même si le souvenir n'a pas de texte (au moins la date).
   final bool showCaption;
-  const _PhotoPageEntry({required this.bytes, required this.date, this.title, this.caption, this.locationComment, this.isPortrait = true, this.listenUrl, this.watchUrl, this.videoCount = 0, this.showCaption = false});
+  const _PhotoPageEntry(
+      {required this.bytes,
+      required this.date,
+      this.title,
+      this.caption,
+      this.locationComment,
+      this.isPortrait = true,
+      this.listenUrl,
+      this.watchUrl,
+      this.videoCount = 0,
+      this.showCaption = false});
 }
