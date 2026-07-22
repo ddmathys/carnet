@@ -513,20 +513,19 @@ class BookPdfService {
     return (bytes: bytes, pageCount: finalPageCount);
   }
 
-  // Arrondit au nombre de pages valide Gelato le plus proche par le haut.
-  // Règle confirmée par DEUX rejets réels chez Gelato (refusalReasonCode
-  // "product_file") : le catalogue produit annonce des pages paires (28-200),
-  // mais la validation prépresse réelle exige n ≡ 1 (mod 4) — 34 pages a été
-  // refusé en exigeant "exactement 37" le 22.07, et 36 pages a été refusé en
-  // exigeant "exactement 37" le 21.07 (mémoire) : les deux convergent vers la
-  // même prochaine valeur 4k+1. Plancher 25 par prudence (jamais vérifié en
-  // conditions réelles — à confirmer par un nouveau test) ; plafond 197 (le
-  // 200 pair précédent n'est de toute façon pas valide sous cette règle).
+  // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
+  // PAIR, entre 28 et 200. Confirmé le 22.07 par une réponse BAD_REQUEST
+  // explicite de l'API order avec la liste complète des valeurs acceptées
+  // ([28,30,32,...,200]) — 33 (issu d'une tentative précédente de règle
+  // "4n+1", elle-même basée sur un message de rejet plus ambigu vu dans le
+  // dashboard) a été rejeté avec cette liste en retour. Cette liste explicite
+  // fait foi ; le rejet "exactement 37 pages" pour un livre de 34 pages
+  // (dashboard, 22.07) reste inexpliqué — probablement une modification
+  // manuelle du nombre de pages dans le dashboard Gelato au moment de
+  // confirmer/payer, pas un problème du fichier généré par l'app.
   static int _gelatoValidPageCount(int n) {
-    var v = n < 25 ? 25 : n;
-    final rem = v % 4;
-    if (rem != 1) v += (1 - rem + 4) % 4;
-    if (v > 197) v = 197;
+    var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
+    if (v > 200) v = 200;
     return v;
   }
 
