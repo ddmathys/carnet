@@ -120,6 +120,18 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       BookPricing.price(coverType: coverType, pages: _printedPages);
   String _priceLabel(String coverType) => BookPricing.format(_priceFor(coverType));
 
+  // Gelato refuse au-delà de 200 pages. Contrairement au minimum (30, comblé
+  // par des pages blanches), on ne peut pas combler silencieusement un
+  // dépassement sans tronquer du contenu réel — d'où le blocage plutôt qu'un
+  // simple avertissement (cf. rejets de commande passés : le nombre de pages
+  // annoncé à Gelato ne correspondait plus au PDF réellement envoyé).
+  bool get _exceedsGelatoLimit => _pages > 200;
+  // Pages blanches ajoutées en fin de livre pour atteindre le minimum
+  // imprimeur (30, pair) — 0 si le livre dépasse déjà ce minimum, ou s'il
+  // dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
+  int get _blankPagesAdded =>
+      _exceedsGelatoLimit ? 0 : (_printedPages - _pages);
+
   String get _yearRange {
     if (_selectedMemories.isEmpty) return '${DateTime.now().year}';
     final years = _selectedMemories.map((m) => m.date.year).toSet();
@@ -415,6 +427,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   }
 
   Future<void> _placeOrder() async {
+    // Garde-fou : au cas où l'étape précédente serait contournée, on bloque
+    // ici aussi — un livre >200 pages envoyé à Gelato avec un pageCount
+    // tronqué a déjà causé des rejets de commande (nombre de pages annoncé ≠
+    // PDF réellement généré).
+    if (_exceedsGelatoLimit) {
+      _showSnack(
+          'Ce livre dépasse 200 pages — retire des souvenirs avant de commander.');
+      return;
+    }
     if (!(_addressKey.currentState?.validate() ?? false)) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _notebook == null) return;
@@ -956,6 +977,124 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     );
   }
 
+  // Contrôle du nombre de pages avant impression : évite les rejets Gelato en
+  // montrant, AVANT la commande, si des pages blanches seront ajoutées ou si
+  // le livre dépasse la limite de l'imprimeur (auquel cas la commande est
+  // bloquée plutôt que d'envoyer un PDF dont le nombre de pages réel ne
+  // correspondrait plus à celui annoncé à Gelato).
+  Widget _buildPageCountNotice() {
+    if (_exceedsGelatoLimit) {
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: Colors.red.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.red.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.error_outline, size: 16, color: Colors.red),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Ce livre dépasse la limite de notre imprimeur',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.red),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Ton livre fait $_pages pages. Le format imprimé accepte au '
+              'maximum 200 pages chez notre imprimeur. Retire des souvenirs '
+              'pour pouvoir commander (le PDF digital reste possible sans '
+              'limite).',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _openMemorySelection,
+              icon: const Icon(Icons.checklist_outlined, size: 16, color: Colors.red),
+              label: const Text('Retirer des souvenirs',
+                  style: TextStyle(color: Colors.red, fontSize: 13)),
+              style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero, minimumSize: Size.zero),
+            ),
+          ],
+        ),
+      );
+    }
+    if (_blankPagesAdded > 0) {
+      final plural = _blankPagesAdded > 1 ? 's' : '';
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.amber.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.amber.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Icon(Icons.info_outline, size: 16, color: AppColors.amber),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Ton livre fait $_pages pages. Notre imprimeur exige un '
+                    'minimum de 30 pages (nombre pair) : $_blankPagesAdded '
+                    'page$plural blanche$plural seront ajoutées à la fin.',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMedium),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            TextButton.icon(
+              onPressed: _openMemorySelection,
+              icon: const Icon(Icons.add_photo_alternate_outlined,
+                  size: 16, color: AppColors.amber),
+              label: const Text('Ajouter des souvenirs à la place',
+                  style: TextStyle(color: AppColors.amber, fontSize: 13)),
+              style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero, minimumSize: Size.zero),
+            ),
+          ],
+        ),
+      );
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.sage.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: AppColors.sage.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.check_circle_outline, size: 16, color: AppColors.sage),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              '$_pages pages · prêt pour l\'impression, aucune page blanche ajoutée.',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildFormatStep() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
@@ -988,26 +1127,38 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             onTap: () => setState(() => _selectedFormat = 'digital'),
           ),
           const SizedBox(height: 12),
-          _FormatCard(
-            emoji: '📗',
-            title: 'Couverture souple',
-            subtitle: 'Livre 21×28 cm · 5–7 jours',
-            price: _priceLabel('soft'),
-            priceSub: '$_printedPages pages',
-            priceColor: AppColors.amber,
-            selected: _selectedFormat == 'printed' && _coverType == 'soft',
-            onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'soft'; }),
+          Opacity(
+            opacity: _exceedsGelatoLimit ? 0.45 : 1.0,
+            child: _FormatCard(
+              emoji: '📗',
+              title: 'Couverture souple',
+              subtitle: 'Livre 21×28 cm · 5–7 jours',
+              price: _priceLabel('soft'),
+              priceSub: '$_printedPages pages',
+              priceColor: AppColors.amber,
+              selected: _selectedFormat == 'printed' && _coverType == 'soft',
+              onTap: _exceedsGelatoLimit
+                  ? () => _showSnack(
+                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
+                  : () => setState(() { _selectedFormat = 'printed'; _coverType = 'soft'; }),
+            ),
           ),
           const SizedBox(height: 12),
-          _FormatCard(
-            emoji: '📕',
-            title: 'Couverture rigide',
-            subtitle: 'Livre 21×28 cm · couverture cartonnée',
-            price: _priceLabel('hard'),
-            priceSub: '$_printedPages pages',
-            priceColor: AppColors.amber,
-            selected: _selectedFormat == 'printed' && _coverType == 'hard',
-            onTap: () => setState(() { _selectedFormat = 'printed'; _coverType = 'hard'; }),
+          Opacity(
+            opacity: _exceedsGelatoLimit ? 0.45 : 1.0,
+            child: _FormatCard(
+              emoji: '📕',
+              title: 'Couverture rigide',
+              subtitle: 'Livre 21×28 cm · couverture cartonnée',
+              price: _priceLabel('hard'),
+              priceSub: '$_printedPages pages',
+              priceColor: AppColors.amber,
+              selected: _selectedFormat == 'printed' && _coverType == 'hard',
+              onTap: _exceedsGelatoLimit
+                  ? () => _showSnack(
+                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
+                  : () => setState(() { _selectedFormat = 'printed'; _coverType = 'hard'; }),
+            ),
           ),
           const SizedBox(height: 12),
           // Bouton info : grille tarifaire selon le nombre de pages.
@@ -1023,32 +1174,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           ),
           if (_selectedFormat == 'printed') ...[
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: AppColors.amber.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: AppColors.amber.withOpacity(0.3)),
-              ),
-              child: const Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(Icons.info_outline, size: 16, color: AppColors.amber),
-                  SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Les livres imprimés font 30 pages minimum. Si ton livre est '
-                      'plus court, des pages blanches sont ajoutées à la fin.',
-                      style: TextStyle(fontSize: 12, color: AppColors.textMedium),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _buildPageCountNotice(),
           ],
           const SizedBox(height: 32),
           ElevatedButton(
-            onPressed: () => setState(() => _step = 2),
+            onPressed: (_selectedFormat == 'printed' && _exceedsGelatoLimit)
+                ? null
+                : () => setState(() => _step = 2),
             child: Text(_selectedFormat == 'digital'
                 ? 'Continuer'
                 : 'Continuer · ${_priceLabel(_coverType)}'),
