@@ -22,11 +22,9 @@ import 'features/memories/memory_detail_screen.dart';
 import 'features/books/book_generate_screen.dart';
 import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
-import 'features/subscription/subscription_screen.dart';
 import 'features/orders/order_tracking_screen.dart';
 import 'features/orders/order_confirmation_screen.dart';
 import 'features/admin/admin_orders_screen.dart';
-import 'features/admin/admin_users_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -57,7 +55,6 @@ final _router = GoRouter(
     ),
     GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
-    GoRoute(path: '/subscription', builder: (_, __) => const SubscriptionScreen()),
 
     // ── Souvenirs (organisés par tags, plus par carnets) ──
     GoRoute(
@@ -129,7 +126,6 @@ final _router = GoRouter(
 
     // ── Admin ──
     GoRoute(path: '/admin/orders', builder: (_, __) => const AdminOrdersScreen()),
-    GoRoute(path: '/admin/users', builder: (_, __) => const AdminUsersScreen()),
   ],
 );
 

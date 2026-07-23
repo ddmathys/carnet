@@ -133,7 +133,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 14),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: AppColors.surface,
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: AppColors.border),
                           ),
@@ -183,7 +183,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.border),
               ),
@@ -199,15 +199,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
             const SizedBox(height: 32),
-
-            // Abonnement — accessible à tout moment (même sans dépasser un quota)
-            _ProfileTile(
-              icon: Icons.workspace_premium_outlined,
-              label: 'Passer à Premium',
-              color: AppColors.amber,
-              onTap: () => context.push('/subscription'),
-            ),
-            const SizedBox(height: 8),
 
             // Mes commandes
             _ProfileTile(
@@ -232,13 +223,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 label: 'Console admin',
                 color: AppColors.sageDark,
                 onTap: () => context.push('/admin/orders'),
-              ),
-              const SizedBox(height: 8),
-              _ProfileTile(
-                icon: Icons.group_outlined,
-                label: 'Utilisateurs & Premium',
-                color: AppColors.sageDark,
-                onTap: () => context.push('/admin/users'),
               ),
               const SizedBox(height: 8),
             ],
@@ -280,7 +264,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     const samples = [30, 40, 60, 80, 100, 150, 200];
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: AppColors.surface,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
@@ -501,7 +485,7 @@ class _ProfileTile extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: AppColors.border),
       ),

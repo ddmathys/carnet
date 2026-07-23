@@ -141,7 +141,7 @@ class _FilterChip extends StatelessWidget {
         margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: selected ? AppColors.sage : AppColors.white,
+          color: selected ? AppColors.sage : AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(color: selected ? AppColors.sage : AppColors.border, width: 1),
         ),
@@ -279,7 +279,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.border, width: 0.5),
       ),

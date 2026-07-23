@@ -1,62 +1,27 @@
 import 'dart:math' show min;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+/// Pas d'abonnement dans l'app : les limites ci-dessous sont larges et
+/// s'appliquent à tout le monde. Seule l'impression d'un livre est payante
+/// (voir `book_pricing.dart` / `order_service.dart`).
 class QuotaService {
-  static const int freePhotoLimit = 300; // affiché à l'utilisateur
-  // Blocage réel (marge de tolérance au-dessus de la limite affichée) : on
-  // n'empêche l'ajout qu'à partir de 350, mais l'UI annonce 300.
-  static const int freePhotoHardLimit = 350;
-  static const int premiumPhotoLimit = 15000;
-  static const double premiumPriceChf = 29.0;
+  static const int photoLimit = 15000;
+  static const int photoHardLimit = 15000;
 
-  // Vidéos souvenir. La durée par clip dépend du palier (gratuit 2 min /
-  // premium 10 min) — c'est le principal levier de coût de stockage. Le nombre
-  // de vidéos est aussi un palier (plafond au NOMBRE de clips, pas à la durée
-  // cumulée).
-  // Estimation stockage : gratuit 30 clips × 2 min (~25 Mo) ≈ 0,75 Go ;
-  // premium 150 clips × jusqu'à 10 min (~90 Mo) ≈ 13,5 Go max par utilisateur.
-  static const int freeVideoLimit = 30;
-  static const int premiumVideoLimit = 150;
-  static const int freeVideoDurationSec = 120; // 2 min
-  static const int premiumVideoDurationSec = 600; // 10 min
-  // Conservé pour compat/affichage par défaut (= palier gratuit).
-  static const int maxVideoDurationSec = freeVideoDurationSec;
-  // Nombre max de vidéos attachées à UN même souvenir. Le GRATUIT reste plafonné
-  // (page de livre lisible, coût de stockage) ; le PREMIUM n'a PAS de limite par
-  // souvenir — il n'est borné que par son quota global (premiumVideoLimit).
-  static const int freeMaxVideosPerMemory = 10;
-  // Conservé pour compat (valeur par défaut = palier gratuit).
-  static const int maxVideosPerMemory = freeMaxVideosPerMemory;
+  // Vidéos souvenir : 150 clips de 10 min max chacun.
+  // Estimation stockage : 150 clips × jusqu'à 10 min (~90 Mo) ≈ 13,5 Go max
+  // par utilisateur.
+  static const int videoLimit = 150;
+  static const int videoDurationSec = 600; // 10 min
+  // Pas de plafond propre par souvenir : borné par le quota global ci-dessus.
+  static const int maxVideosPerMemory = videoLimit;
 
-  /// Nombre max de vidéos par souvenir selon le palier : gratuit 10, premium
-  /// sans limite propre (borné par le quota global de 150).
-  static Future<int> getMaxVideosPerMemory(String userId) async {
-    return await isPremium(userId)
-        ? premiumVideoLimit
-        : freeMaxVideosPerMemory;
-  }
+  static Future<int> getMaxVideosPerMemory(String userId) async =>
+      maxVideosPerMemory;
 
-  // Mémos vocaux (un par souvenir). Même logique de palier gratuit/premium.
-  static const int freeAudioLimit = 15;
-  static const int premiumAudioLimit = 150;
+  static const int audioLimit = 150;
 
-  // Check subscription tier from users/{uid} document.
-  static Future<String> getSubscriptionTier(String userId) async {
-    try {
-      final doc = await FirebaseFirestore.instance.collection('users').doc(userId).get();
-      return (doc.data()?['subscriptionTier'] as String?) ?? 'free';
-    } catch (_) {
-      return 'free';
-    }
-  }
-
-  static Future<bool> isPremium(String userId) async {
-    return (await getSubscriptionTier(userId)) == 'premium';
-  }
-
-  static Future<int> getPhotoLimit(String userId) async {
-    return await isPremium(userId) ? premiumPhotoLimit : freePhotoLimit;
-  }
+  static Future<int> getPhotoLimit(String userId) async => photoLimit;
 
   // Count total photos across all notebooks of a user.
   static Future<int> countUserPhotos(String userId) async {
@@ -105,13 +70,9 @@ class QuotaService {
     return QuotaStatus(current: count, limit: limit);
   }
 
-  // Limite de blocage réelle (≠ limite affichée pour le gratuit).
-  static Future<int> getHardPhotoLimit(String userId) async {
-    return await isPremium(userId) ? premiumPhotoLimit : freePhotoHardLimit;
-  }
+  static Future<int> getHardPhotoLimit(String userId) async => photoHardLimit;
 
-  /// Peut-on ajouter [adding] photo(s) ? Bloque à la limite réelle (350 free /
-  /// 10000 premium). Renvoie aussi le compte courant pour l'écran d'upgrade.
+  /// Peut-on ajouter [adding] photo(s) ? Bloque à la limite réelle.
   static Future<({bool allowed, int current, int limit})> canAddPhotos(
     String userId, {
     int adding = 1,
@@ -121,18 +82,13 @@ class QuotaService {
     return (allowed: count + adding <= hardLimit, current: count, limit: hardLimit);
   }
 
-  static Future<int> getVideoLimit(String userId) async {
-    return await isPremium(userId) ? premiumVideoLimit : freeVideoLimit;
-  }
+  static Future<int> getVideoLimit(String userId) async => videoLimit;
 
-  /// Durée max par clip (secondes) selon le palier : gratuit 2 min / premium
-  /// 10 min. Le plafond premium évite des fichiers énormes qui échouent à
-  /// l'upload (l'app charge tout le fichier en mémoire, cf. VideoService).
-  static Future<int> getVideoDurationLimitSec(String userId) async {
-    return await isPremium(userId)
-        ? premiumVideoDurationSec
-        : freeVideoDurationSec;
-  }
+  /// Durée max par clip (secondes). Le plafond évite des fichiers énormes qui
+  /// échouent à l'upload (l'app charge tout le fichier en mémoire, cf.
+  /// VideoService).
+  static Future<int> getVideoDurationLimitSec(String userId) async =>
+      videoDurationSec;
 
   // Compte le nombre TOTAL de vidéos (chaque souvenir peut en porter plusieurs)
   // sur tous les carnets de l'utilisateur.
@@ -171,7 +127,7 @@ class QuotaService {
     }
   }
 
-  /// Peut-on ajouter [adding] vidéo(s) ? (30 free / 150 premium).
+  /// Peut-on ajouter [adding] vidéo(s) ?
   static Future<({bool allowed, int current, int limit})> canAddVideos(
     String userId, {
     int adding = 1,
@@ -188,9 +144,7 @@ class QuotaService {
     return QuotaStatus(current: count, limit: limit);
   }
 
-  static Future<int> getAudioLimit(String userId) async {
-    return await isPremium(userId) ? premiumAudioLimit : freeAudioLimit;
-  }
+  static Future<int> getAudioLimit(String userId) async => audioLimit;
 
   // Compte les mémos vocaux (souvenirs avec un audioUrl) sur tous les carnets.
   static Future<int> countUserAudios(String userId) async {
@@ -231,7 +185,7 @@ class QuotaService {
     return QuotaStatus(current: count, limit: limit);
   }
 
-  /// Peut-on ajouter un mémo vocal ? (15 free / 150 premium).
+  /// Peut-on ajouter un mémo vocal ?
   static Future<({bool allowed, int current, int limit})> canAddAudios(
     String userId, {
     int adding = 1,

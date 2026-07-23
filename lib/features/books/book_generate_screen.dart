@@ -664,7 +664,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       labelText: label,
       hintText: hint,
       filled: true,
-      fillColor: AppColors.white,
+      fillColor: AppColors.surface,
       prefixIcon:
           icon != null ? Icon(icon, size: 18, color: AppColors.sage) : null,
       isDense: true,
@@ -706,7 +706,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(color: AppColors.border, width: 0.5),
               ),
@@ -1268,7 +1268,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: AppColors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(color: AppColors.border, width: 0.5),
             ),
@@ -1427,7 +1427,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppColors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1823,7 +1823,7 @@ class _FormatCard extends StatelessWidget {
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: selected ? AppColors.sage.withOpacity(0.06) : AppColors.white,
+          color: selected ? AppColors.sage.withOpacity(0.12) : AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected ? AppColors.sage : AppColors.border,
@@ -2175,7 +2175,7 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
       minChildSize: 0.5,
       builder: (_, ctrl) => Container(
         decoration: const BoxDecoration(
-          color: AppColors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
         child: Column(
@@ -2261,7 +2261,7 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                             height: 22,
                             decoration: BoxDecoration(
                               color:
-                                  selected ? AppColors.sage : AppColors.white,
+                                  selected ? AppColors.sage : AppColors.surface,
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
                                 color: selected

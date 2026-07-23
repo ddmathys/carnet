@@ -442,7 +442,7 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
       margin: const EdgeInsets.fromLTRB(22, 20, 22, 8),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppColors.surface,
         border: Border.all(color: AppColors.border),
         borderRadius: BorderRadius.circular(20),
       ),

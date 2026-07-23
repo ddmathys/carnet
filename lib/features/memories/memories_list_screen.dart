@@ -269,7 +269,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                 )
               : null,
           filled: true,
-          fillColor: AppColors.white,
+          fillColor: AppColors.surface,
           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           border: OutlineInputBorder(
             borderRadius: BorderRadius.circular(50),
@@ -474,7 +474,7 @@ class _FilterChip extends StatelessWidget {
         margin: const EdgeInsets.only(right: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         decoration: BoxDecoration(
-          color: selected ? AppColors.sage : AppColors.white,
+          color: selected ? AppColors.sage : AppColors.surface,
           borderRadius: BorderRadius.circular(50),
           border: Border.all(
             color: selected ? AppColors.sage : AppColors.border,

@@ -295,7 +295,7 @@ class _Chip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: selected ? AppColors.sageDark : AppColors.white,
+            color: selected ? AppColors.sageDark : AppColors.surface,
             borderRadius: BorderRadius.circular(50),
             border: Border.all(
               color: selected ? AppColors.sageDark : AppColors.border,
@@ -420,7 +420,7 @@ class _MemoryRow extends StatelessWidget {
         margin: const EdgeInsets.only(bottom: 8),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: AppColors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: selected ? AppColors.sageDark : AppColors.border,

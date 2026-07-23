@@ -203,7 +203,7 @@ class _ToggleBar extends StatelessWidget {
             duration: const Duration(milliseconds: 200),
             padding: const EdgeInsets.symmetric(vertical: 10),
             decoration: BoxDecoration(
-              color: active ? Colors.white : Colors.transparent,
+              color: active ? AppColors.surface : Colors.transparent,
               borderRadius: BorderRadius.circular(8),
               boxShadow: active
                   ? [
@@ -298,7 +298,7 @@ class _MultiPointChart extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -480,7 +480,7 @@ class _SimpleWeightChart extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: AppColors.cream),
         ),
@@ -502,7 +502,7 @@ class _SimpleWeightChart extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -689,8 +689,9 @@ class _MeasurementList extends StatelessWidget {
               margin: const EdgeInsets.only(bottom: 10),
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color:
-                    isLatest ? AppColors.sage.withOpacity(0.08) : Colors.white,
+                color: isLatest
+                    ? AppColors.sage.withOpacity(0.14)
+                    : AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: isLatest
@@ -975,7 +976,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
       maxChildSize: 0.95,
       builder: (context, scrollController) => Container(
         decoration: const BoxDecoration(
-          color: Colors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(

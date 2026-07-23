@@ -92,20 +92,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   int? _audioDurationMs;
   DateTime? _recordStartedAt;
 
-  // Vidéos souvenir (jusqu'à maxVideosPerMemory clips, durée selon palier :
-  // gratuit 2 min / premium 10 min, stockés sur R2).
+  // Vidéos souvenir (jusqu'à maxVideosPerMemory clips, stockées sur R2).
   final List<String> _localVideoPaths = []; // nouvelles vidéos non uploadées
   final List<int?> _localVideoDurations = []; // parallèle à _localVideoPaths
   final List<String> _existingVideoKeys = []; // clés R2 conservées (édition)
   final List<int> _existingVideoDurations = []; // parallèle à _existingVideoKeys
   final List<String> _removedVideoKeys = []; // clés existantes supprimées
   bool _preparingVideo = false; // sélection/contrôle de durée en cours
-  // Durée max par clip selon le palier (gratuit 2 min / premium 10 min).
-  // Chargée en async au démarrage ; défaut prudent = palier gratuit.
-  int _videoDurationCapSec = QuotaService.freeVideoDurationSec;
-  // Nombre max de vidéos par souvenir (défaut prudent = palier gratuit ; le
-  // premium n'a pas de limite propre, chargé en async au démarrage).
-  int _maxVideosPerMemory = QuotaService.freeMaxVideosPerMemory;
+  // Durée max par clip. Chargée en async au démarrage.
+  int _videoDurationCapSec = QuotaService.videoDurationSec;
+  // Nombre max de vidéos par souvenir, chargé en async au démarrage.
+  int _maxVideosPerMemory = QuotaService.maxVideosPerMemory;
 
   // Step 1: form
   String? _selectedCategory;
@@ -136,8 +133,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     _loadVideoDurationCap();
   }
 
-  // Récupère la durée max par clip ET le nombre max de vidéos par souvenir
-  // selon le palier (premium : pas de limite propre par souvenir).
+  // Récupère la durée max par clip et le nombre max de vidéos par souvenir.
   Future<void> _loadVideoDurationCap() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -454,7 +450,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   Future<void> _pickPhotos(ImageSource source) async {
     // Quota photos : on bloque à la limite réelle (compte les photos déjà en
-    // cours d'ajout). Premium = 10 000, gratuit = 350 (affiché 300).
+    // cours d'ajout).
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final q =
@@ -511,21 +507,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Limite de photos atteinte'),
         content: Text(
-          'Le forfait gratuit est limité à ${QuotaService.freePhotoLimit} photos. '
-          'Passe en premium pour ${QuotaService.premiumPhotoLimit} photos '
-          '(${QuotaService.premiumPriceChf.toStringAsFixed(0)} CHF/an).',
+          'Tu as atteint la limite de ${QuotaService.photoLimit} photos.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Plus tard'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              context.push('/subscription');
-            },
-            child: const Text('Passer premium'),
+            child: const Text('Compris'),
           ),
         ],
       ),
@@ -657,8 +644,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _showSnack('Maximum $_maxVideosPerMemory vidéos par souvenir.');
       return;
     }
-    // Quota global (30 gratuit / 150 premium), en comptant les vidéos déjà
-    // ajoutées localement dans ce souvenir.
+    // Quota global, en comptant les vidéos déjà ajoutées localement dans ce
+    // souvenir.
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid != null) {
       final q = await QuotaService.canAddVideos(
@@ -735,9 +722,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         p.endsWith('.hevc');
   }
 
-  /// Ingère une liste de chemins vidéo : plafond par souvenir (max 3), quota
-  /// global (gratuit/premium) et cap de durée. Ce qui est refusé est signalé
-  /// sans bloquer le reste. Utilisé par l'import unifié galerie.
+  /// Ingère une liste de chemins vidéo : plafond par souvenir, quota global et
+  /// cap de durée. Ce qui est refusé est signalé sans bloquer le reste. Utilisé
+  /// par l'import unifié galerie.
   Future<void> _ingestVideoPaths(List<String> paths) async {
     if (paths.isEmpty) return;
     final remaining = _maxVideosPerMemory - _videoCount;
@@ -757,7 +744,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     bool quotaHit = false;
 
     for (final path in toConsider) {
-      // Quota global, réévalué à chaque ajout (gratuit 30 / premium 150).
+      // Quota global, réévalué à chaque ajout.
       if (uid != null) {
         final q = await QuotaService.canAddVideos(
             uid, adding: _localVideoPaths.length + accepted.length + 1);
@@ -900,21 +887,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Limite de vidéos atteinte'),
         content: Text(
-          'Le forfait gratuit est limité à ${QuotaService.freeVideoLimit} vidéos. '
-          'Passe en premium pour ${QuotaService.premiumVideoLimit} vidéos '
-          '(${QuotaService.premiumPriceChf.toStringAsFixed(0)} CHF/an).',
+          'Tu as atteint la limite de ${QuotaService.videoLimit} vidéos.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Plus tard'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              context.push('/subscription');
-            },
-            child: const Text('Passer premium'),
+            child: const Text('Compris'),
           ),
         ],
       ),
@@ -928,21 +906,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Text('Limite de mémos vocaux atteinte'),
         content: Text(
-          'Le forfait gratuit est limité à ${QuotaService.freeAudioLimit} mémos vocaux. '
-          'Passe en premium pour ${QuotaService.premiumAudioLimit} mémos '
-          '(${QuotaService.premiumPriceChf.toStringAsFixed(0)} CHF/an).',
+          'Tu as atteint la limite de ${QuotaService.audioLimit} mémos vocaux.',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Plus tard'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              context.push('/subscription');
-            },
-            child: const Text('Passer premium'),
+            child: const Text('Compris'),
           ),
         ],
       ),
@@ -954,7 +923,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   Future<void> _showMediaSourceSheet() async {
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: AppColors.white,
+      backgroundColor: AppColors.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -1511,7 +1480,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: AppColors.white,
+          color: AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: _dateNeedsConfirmation ? AppColors.error : AppColors.border,
@@ -1543,7 +1512,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: _locationRequiredEmpty ? AppColors.error : AppColors.border,
@@ -1583,7 +1552,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       children: [
         Container(
           decoration: BoxDecoration(
-            color: AppColors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppColors.border, width: 0.5),
           ),
@@ -1622,7 +1591,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               labelText: label,
               suffixText: suffix,
               filled: true,
-              fillColor: AppColors.white,
+              fillColor: AppColors.surface,
               isDense: true,
               border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(12),
@@ -1718,7 +1687,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 22),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(color: AppColors.sageLight, width: 1.5),
               ),
@@ -1861,68 +1830,100 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
   }
 
+  /// Champ titre partagé par les 4 formulaires : grande typo éditoriale
+  /// (Fraunces) plutôt qu'un TextField générique parmi d'autres.
+  Widget _titleField(String hint) {
+    return TextField(
+      controller: _titleController,
+      onChanged: (_) => setState(() {}),
+      textCapitalization: TextCapitalization.sentences,
+      style: const TextStyle(
+        fontFamily: 'Fraunces',
+        fontSize: 21,
+        fontWeight: FontWeight.w600,
+        height: 1.25,
+        color: AppColors.textDark,
+      ),
+      decoration: InputDecoration(
+        isDense: true,
+        filled: false,
+        hintText: hint,
+        hintStyle: const TextStyle(
+          fontFamily: 'Fraunces',
+          fontSize: 21,
+          fontWeight: FontWeight.w600,
+          color: AppColors.softGray,
+        ),
+        contentPadding: const EdgeInsets.only(bottom: 8),
+        border: InputBorder.none,
+        enabledBorder: UnderlineInputBorder(
+          borderSide: BorderSide(
+              color: _titleRequiredEmpty ? AppColors.error : AppColors.border,
+              width: 1.5),
+        ),
+        focusedBorder: const UnderlineInputBorder(
+          borderSide: BorderSide(color: AppColors.sage, width: 1.5),
+        ),
+      ),
+    );
+  }
+
   Widget _buildParoleForm() {
     final cat = getMilestoneCategoryById('parole');
     final selectedSub = _selectedSubType != null
         ? getMilestoneSubTypeById('parole', _selectedSubType!)
         : null;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 36),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle('💬 Type de parole', error: _selectedSubType == null),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: cat.subTypes
-                .map((sub) => GestureDetector(
-                      onTap: () =>
-                          setState(() => _selectedSubType = sub.id),
-                      child: _Pill(
-                          label: sub.label,
-                          selected: _selectedSubType == sub.id),
-                    ))
-                .toList(),
-          ),
-          if (selectedSub != null && selectedSub.hasFreeText) ...[
-            const SizedBox(height: 20),
-            const _SectionTitle('Qu\'a-t-il/elle dit ?'),
-            const SizedBox(height: 8),
-            TextField(
-              controller: _textController,
-              decoration: const InputDecoration(
-                  hintText: '"maman", "au revoir", ...'),
-              textCapitalization: TextCapitalization.sentences,
-              onChanged: (_) => setState(() {}),
+          _FormCard(children: [
+            _SectionTitle('💬 TYPE DE PAROLE', error: _selectedSubType == null),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: cat.subTypes
+                  .map((sub) => GestureDetector(
+                        onTap: () =>
+                            setState(() => _selectedSubType = sub.id),
+                        child: _Pill(
+                            label: sub.label,
+                            selected: _selectedSubType == sub.id),
+                      ))
+                  .toList(),
             ),
-          ],
-          const SizedBox(height: 20),
-          TextField(
-            controller: _titleController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: 'Titre',
-              hintText: 'Ex : Premier mot',
-              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
-              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
-            ),
-            textCapitalization: TextCapitalization.sentences,
-          ),
-          const SizedBox(height: 16),
-          _buildPhotoSection(),
-          const SizedBox(height: 16),
-          _buildVoiceMemoSection(),
-          const SizedBox(height: 16),
-          _buildVideoSection(),
-          const SizedBox(height: 16),
-          _buildLocationField(),
-          const SizedBox(height: 16),
-          _buildDateSection(),
-          const SizedBox(height: 20),
-          _buildTagSection(),
-          const SizedBox(height: 28),
+            if (selectedSub != null && selectedSub.hasFreeText) ...[
+              const SizedBox(height: 16),
+              TextField(
+                controller: _textController,
+                decoration: const InputDecoration(
+                    hintText: '"maman", "au revoir", ...'),
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: (_) => setState(() {}),
+              ),
+            ],
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_titleField('Ex : Premier mot')]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildPhotoSection(),
+            const SizedBox(height: 16),
+            _buildVideoSection(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildDateSection(),
+            const SizedBox(height: 18),
+            _buildLocationField(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildTagSection()]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildVoiceMemoSection()]),
+          const SizedBox(height: 26),
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
@@ -1938,61 +1939,58 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   Widget _buildMouvementForm() {
     final cat = getMilestoneCategoryById('mouvement');
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 36),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle('🏃 Type de mouvement',
-              error: _selectedSubType == null),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: cat.subTypes
-                .map((sub) => GestureDetector(
-                      onTap: () =>
-                          setState(() => _selectedSubType = sub.id),
-                      child: _Pill(
-                          label: sub.label,
-                          selected: _selectedSubType == sub.id),
-                    ))
-                .toList(),
-          ),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _titleController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: 'Titre',
-              hintText: 'Ex : Premiers pas !',
-              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
-              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
+          _FormCard(children: [
+            _SectionTitle('🏃 TYPE DE MOUVEMENT',
+                error: _selectedSubType == null),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: cat.subTypes
+                  .map((sub) => GestureDetector(
+                        onTap: () =>
+                            setState(() => _selectedSubType = sub.id),
+                        child: _Pill(
+                            label: sub.label,
+                            selected: _selectedSubType == sub.id),
+                      ))
+                  .toList(),
             ),
-            textCapitalization: TextCapitalization.sentences,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _textController,
-            maxLines: 3,
-            decoration: const InputDecoration(
-              labelText: 'Note (optionnel)',
-              hintText: 'Ajoute un détail...',
-              alignLabelWithHint: true,
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _titleField('Ex : Premiers pas !'),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _textController,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'Ajoute un détail... (facultatif)',
+              ),
+              onChanged: (_) => setState(() {}),
             ),
-          ),
-          const SizedBox(height: 16),
-          _buildPhotoSection(),
-          const SizedBox(height: 16),
-          _buildVoiceMemoSection(),
-          const SizedBox(height: 16),
-          _buildVideoSection(),
-          const SizedBox(height: 16),
-          _buildLocationField(),
-          const SizedBox(height: 16),
-          _buildDateSection(),
-          const SizedBox(height: 20),
-          _buildTagSection(),
-          const SizedBox(height: 28),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildPhotoSection(),
+            const SizedBox(height: 16),
+            _buildVideoSection(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildDateSection(),
+            const SizedBox(height: 18),
+            _buildLocationField(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildTagSection()]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildVoiceMemoSection()]),
+          const SizedBox(height: 26),
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
@@ -2026,97 +2024,93 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     final showHeight = heightVal != null && heightVal > 0;
 
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 36),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle('📊 Mesures', error: _measurementMissing),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _weightController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Poids (kg)',
-                    hintText: '8.5',
-                    suffixText: 'kg',
+          _FormCard(children: [
+            _SectionTitle('📊 MESURES', error: _measurementMissing),
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _weightController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Poids (kg)',
+                      hintText: '8.5',
+                      suffixText: 'kg',
+                    ),
+                    onChanged: (_) => setState(() {}),
                   ),
-                  onChanged: (_) => setState(() {}),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: TextField(
-                  controller: _heightController,
-                  keyboardType: const TextInputType.numberWithOptions(
-                      decimal: true),
-                  decoration: const InputDecoration(
-                    labelText: 'Taille (cm)',
-                    hintText: '72',
-                    suffixText: 'cm',
+                const SizedBox(width: 12),
+                Expanded(
+                  child: TextField(
+                    controller: _heightController,
+                    keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true),
+                    decoration: const InputDecoration(
+                      labelText: 'Taille (cm)',
+                      hintText: '72',
+                      suffixText: 'cm',
+                    ),
+                    onChanged: (_) => setState(() {}),
                   ),
-                  onChanged: (_) => setState(() {}),
                 ),
-              ),
-            ],
-          ),
-          if (isEnfant) ...[
-            const SizedBox(height: 24),
-            if (showWeight) ...[
-              GrowthCurveChart(
-                gender: gender,
-                isWeight: true,
-                ageMonths: ageAtDate,
-                value: weightVal,
-              ),
-              const SizedBox(height: 20),
-            ],
-            if (showHeight) ...[
-              GrowthCurveChart(
-                gender: gender,
-                isWeight: false,
-                ageMonths: ageAtDate,
-                value: heightVal,
-              ),
-              const SizedBox(height: 20),
-            ],
-            if (!showWeight && !showHeight) ...[
-              GrowthCurveChart(
-                gender: gender,
-                isWeight: true,
-                ageMonths: ageAtDate,
-                value: null,
-              ),
-              const SizedBox(height: 20),
-            ],
-          ],
-          TextField(
-            controller: _titleController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: 'Titre',
-              hintText: 'Ex : Visite chez le pédiatre',
-              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
-              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
+              ],
             ),
-            textCapitalization: TextCapitalization.sentences,
-          ),
-          const SizedBox(height: 16),
-          _buildPhotoSection(),
-          const SizedBox(height: 16),
-          _buildVoiceMemoSection(),
-          const SizedBox(height: 16),
-          _buildVideoSection(),
-          const SizedBox(height: 16),
-          _buildLocationField(),
-          const SizedBox(height: 16),
-          _buildDateSection(),
-          const SizedBox(height: 20),
-          _buildTagSection(),
-          const SizedBox(height: 28),
+            if (isEnfant) ...[
+              const SizedBox(height: 22),
+              if (showWeight) ...[
+                GrowthCurveChart(
+                  gender: gender,
+                  isWeight: true,
+                  ageMonths: ageAtDate,
+                  value: weightVal,
+                ),
+                const SizedBox(height: 18),
+              ],
+              if (showHeight) ...[
+                GrowthCurveChart(
+                  gender: gender,
+                  isWeight: false,
+                  ageMonths: ageAtDate,
+                  value: heightVal,
+                ),
+                const SizedBox(height: 18),
+              ],
+              if (!showWeight && !showHeight) ...[
+                GrowthCurveChart(
+                  gender: gender,
+                  isWeight: true,
+                  ageMonths: ageAtDate,
+                  value: null,
+                ),
+              ],
+            ],
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_titleField('Ex : Visite chez le pédiatre')]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildPhotoSection(),
+            const SizedBox(height: 16),
+            _buildVideoSection(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildDateSection(),
+            const SizedBox(height: 18),
+            _buildLocationField(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildTagSection()]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildVoiceMemoSection()]),
+          const SizedBox(height: 26),
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
@@ -2134,45 +2128,40 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// dernier, facultatif.
   Widget _buildAnecdoteForm() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 36),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _buildPhotoSection(),
-          const SizedBox(height: 16),
-          _buildVideoSection(),
-          const SizedBox(height: 20),
-          TextField(
-            controller: _titleController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              labelText: 'Titre',
-              hintText: 'Ex : Premier pas dans la neige',
-              enabledBorder: _titleRequiredEmpty ? _errorBorder : null,
-              focusedBorder: _titleRequiredEmpty ? _errorBorder : null,
+          _FormCard(children: [
+            _buildPhotoSection(),
+            const SizedBox(height: 16),
+            _buildVideoSection(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _titleField('Ex : Premier pas dans la neige'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _textController,
+              maxLines: 5,
+              decoration: const InputDecoration(
+                hintText:
+                    'Qu\'est-ce qui t\'a marqué pour ce souvenir ? (facultatif)',
+              ),
+              onChanged: (_) => setState(() {}),
             ),
-            textCapitalization: TextCapitalization.sentences,
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _textController,
-            maxLines: 6,
-            decoration: const InputDecoration(
-              labelText: 'Description (facultatif)',
-              hintText: 'Qu\'est-ce qui t\'a marqué pour ce souvenir ?',
-              alignLabelWithHint: true,
-            ),
-            onChanged: (_) => setState(() {}),
-          ),
-          const SizedBox(height: 16),
-          _buildDateSection(),
-          const SizedBox(height: 16),
-          _buildLocationField(),
-          const SizedBox(height: 20),
-          _buildTagSection(),
-          const SizedBox(height: 20),
-          _buildVoiceMemoSection(),
-          const SizedBox(height: 28),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [
+            _buildDateSection(),
+            const SizedBox(height: 18),
+            _buildLocationField(),
+          ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildTagSection()]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildVoiceMemoSection()]),
+          const SizedBox(height: 26),
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
@@ -2195,7 +2184,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('🏷️ Tags'),
+        const _SectionTitle('🏷️ TAGS'),
         const SizedBox(height: 4),
         const Text(
           'L\'année et le lieu sont ajoutés automatiquement. Les tags servent à '
@@ -2283,7 +2272,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                     width: 90, height: 90,
                     margin: const EdgeInsets.only(right: 8),
                     decoration: BoxDecoration(
-                      color: AppColors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(color: AppColors.sage, width: 1),
                     ),
@@ -2307,7 +2296,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 14),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.border, width: 0.5),
               ),
@@ -2334,13 +2323,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('🎙️ Mémo vocal (optionnel)'),
+        const _SectionTitle('🎙️ MÉMO VOCAL · OPTIONNEL'),
         const SizedBox(height: 8),
         if (_hasAudio) ...[
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             decoration: BoxDecoration(
-              color: AppColors.white,
+              color: AppColors.surface,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: AppColors.sage, width: 1),
             ),
@@ -2394,7 +2383,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               decoration: BoxDecoration(
                 color: _isRecording
                     ? AppColors.error.withOpacity(0.08)
-                    : AppColors.white,
+                    : AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: _isRecording ? AppColors.error : AppColors.border,
@@ -2444,9 +2433,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle(_maxVideosPerMemory <= QuotaService.freeMaxVideosPerMemory
-            ? '🎬 Vidéos (optionnel · $_maxVideosPerMemory max)'
-            : '🎬 Vidéos (optionnel)'),
+        _SectionTitle('🎬 VIDÉOS · OPTIONNEL · $_maxVideosPerMemory MAX'),
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -2471,7 +2458,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                   width: 90, height: 90,
                   margin: const EdgeInsets.only(right: 8),
                   decoration: BoxDecoration(
-                    color: AppColors.white,
+                    color: AppColors.surface,
                     borderRadius: BorderRadius.circular(10),
                     border:
                         Border.all(color: AppColors.border, width: 0.5),
@@ -2489,10 +2476,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          (_maxVideosPerMemory <= QuotaService.freeMaxVideosPerMemory
-                  ? 'Jusqu\'à $_maxVideosPerMemory vidéos de $_videoDurationLabel. '
-                  : 'Vidéos de $_videoDurationLabel. ') +
-              'Un QR code dans le livre mène à toutes les vidéos du souvenir.',
+          'Jusqu\'à $_maxVideosPerMemory vidéos de $_videoDurationLabel. '
+          'Un QR code dans le livre mène à toutes les vidéos du souvenir.',
           style: const TextStyle(color: AppColors.softGray, fontSize: 12),
         ),
       ],
@@ -2503,7 +2488,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle('📍 Lieu', error: _locationRequiredEmpty),
+        _SectionTitle('📍 LIEU', error: _locationRequiredEmpty),
         const SizedBox(height: 8),
         TextField(
           controller: _locationController,
@@ -2526,7 +2511,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle('📅 Date', error: _dateNeedsConfirmation),
+        _SectionTitle('📅 DATE', error: _dateNeedsConfirmation),
         const SizedBox(height: 8),
         if (_datePrecision == DatePrecision.exact)
           DateMaskField(
@@ -2556,7 +2541,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               padding:
                   const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               decoration: BoxDecoration(
-                color: AppColors.white,
+                color: AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                     color: AppColors.border, width: 0.5),
@@ -2730,7 +2715,7 @@ class _TagChip extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
       decoration: BoxDecoration(
-        color: selected ? AppColors.sageDark : AppColors.white,
+        color: selected ? AppColors.sageDark : AppColors.surface,
         borderRadius: BorderRadius.circular(50),
         border: Border.all(
           color: selected ? AppColors.sageDark : AppColors.border,
@@ -2768,11 +2753,37 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) => Text(
         error ? '$text — obligatoire' : text,
         style: TextStyle(
-          fontWeight: FontWeight.w600,
-          color: error ? AppColors.error : AppColors.textDark,
-          fontSize: 15,
+          fontFamily: 'Outfit',
+          fontWeight: FontWeight.w700,
+          fontSize: 11.5,
+          letterSpacing: 0.6,
+          color: error ? AppColors.error : AppColors.textMedium,
         ),
       );
+}
+
+/// Regroupe une section du formulaire dans une carte cohérente (fond blanc,
+/// bord doux) — remplace des champs posés à même le fond crème.
+class _FormCard extends StatelessWidget {
+  final List<Widget> children;
+  const _FormCard({required this.children});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: AppColors.border, width: 0.6),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
 }
 
 class _Pill extends StatelessWidget {
@@ -2786,7 +2797,7 @@ class _Pill extends StatelessWidget {
       duration: const Duration(milliseconds: 150),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: selected ? AppColors.sage : AppColors.white,
+        color: selected ? AppColors.sage : AppColors.surface,
         borderRadius: BorderRadius.circular(50),
         border: Border.all(
           color: selected ? AppColors.sage : AppColors.border,

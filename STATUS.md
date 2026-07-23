@@ -4,6 +4,85 @@ Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
 ---
 
+## ⚡ REPRISE — 22.07.2026 : vraies causes des rejets Gelato, navigation commande
+
+Commits `3747459` → `258ff9f` sur `master`, **poussés**. Backend `gelato/[action].ts`
+redéployé en prod plusieurs fois pour diagnostic (endpoints temporaires retirés
+avant le dernier déploiement). **APK recompilé** (`build\app\outputs\flutter-apk\app-release.apk`),
+correspond au commit `258ff9f`.
+
+> **⚠️ Toujours pas de commande imprimée qui soit allée au bout chez Gelato.**
+> Deux commandes réelles payées ont été refusées ce mois-ci (21.07 et 22.07),
+> pour deux raisons différentes, toutes deux découvertes seulement au moment
+> de confirmer/payer dans **le dashboard Gelato lui-même** — jamais avant, ni
+> côté API (`orderType: draft` réussit toujours, même si le fichier est
+> invalide), ni dans notre propre console admin.
+
+### 1. Contrôle du nombre de pages avant impression (demande initiale)
+Ajout d'un vrai garde-fou dans `book_generate_screen.dart`, étape « Quel
+format ? » : bandeau qui indique le nombre exact de pages blanches ajoutées
+si le livre est sous le minimum imprimeur, et **blocage total** de la
+commande imprimée si le livre dépasse la limite haute (avec raccourci vers
+le sélecteur de souvenirs dans les deux cas). Avant ça, un livre >200 pages
+pouvait être commandé avec un `pageCount` tronqué ne correspondant plus au
+PDF réel envoyé à Gelato — cause connue de rejet depuis longtemps, jamais
+corrigée côté UI.
+
+### 2. La vraie règle du nombre de pages Gelato (aller-retour, résolu)
+- Un livre de 34 pages, commande passée et **réellement payée** dans le
+  dashboard Gelato, a été refusé après coup : *"Product requires exactly 37
+  page(s), while file(s) contain 34 page(s)"*. En croisant avec un rejet
+  similaire du 21.07 (36 pages → même exigence de 37), j'ai conclu à tort à
+  une règle **n ≡ 1 (mod 4)** et corrigé le code en ce sens (commit `bdbaa0a`).
+- Cette règle était **fausse** : une commande suivante (33 pages, produite par
+  le nouveau code) a été refusée par une réponse `BAD_REQUEST` **explicite et
+  structurée** de l'API Gelato, listant les valeurs valides : uniquement des
+  **nombres pairs de 28 à 200**. Revert immédiat (commit `258ff9f`).
+- **Conclusion actuelle** : la règle pair/28-200 (celle d'origine, avant tout
+  ce fil) est la bonne — confirmée par la liste explicite renvoyée par
+  l'API. La cause du rejet "exactement 37 pour 34 pages" du 22.07 **reste
+  non élucidée** : 34 est une valeur valide dans cette liste, donc ce n'est
+  probablement pas un problème de validité du nombre de pages en soi, plutôt
+  quelque chose de modifié/mal réconcilié côté dashboard Gelato au moment de
+  confirmer la commande. À surveiller au prochain test réel.
+- Diagnostic fait via deux endpoints backend temporaires (`product-info`,
+  `order-status`, déjà retirés) qui interrogent directement le catalogue et
+  une commande Gelato par id — utile si ça se reproduit (voir mémoire projet
+  pour la méthode : `vercel env pull` ne renvoie **aucune valeur** pour les
+  secrets de ce projet, il faut déployer un endpoint diagnostic plutôt que
+  lire les clés en local).
+
+### 3. Navigation bloquée après une commande
+Sur l'écran « Suivi de commande », le bouton retour faisait `context.pop()`
+alors que l'écran est parfois atteint via `context.go()` (confirmation de
+commande → suivi), qui remplace toute la pile de navigation : rien à
+dépiler, le bouton ne faisait rien. Fix : `context.canPop() ? context.pop()
+: context.go('/orders')`. Même correctif défensif (`PopScope`) sur l'écran
+de confirmation pour le bouton retour matériel Android.
+
+### 4. Audit du parcours commande + validation admin (fait, pas implémenté)
+Repéré mais **pas encore corrigé** (en attente de decision) :
+- `order.status` (visible client) et `gelatoStatus`/`gelatoOrderId`/`gelatoError`
+  (pipeline Gelato, visible admin seulement) sont deux systèmes d'état
+  parallèles jamais reliés — un rejet Gelato est invisible pour le client.
+- Dans la console admin, les 6 statuts sont en sélection libre (`Wrap`
+  cliquable) sans séquence imposée : rien n'empêche de sauter une étape.
+- Le bandeau paiement (`_PayButton`) ne s'appuie que sur `status == 'paid'`
+  et peut rester affiché (« on vous contactera pour le paiement ») alors que
+  le livre est déjà en impression, si le statut a été changé sans jamais
+  passer par `paid`.
+
+### Reste à faire / à vérifier
+- **Refaire un test de commande réelle payée** (nombre de pages pair, ex. 34
+  ou 36) et vérifier dans le dashboard Gelato si le rejet "37 pages" se
+  reproduit malgré un nombre pair valide — si oui, contacter le support
+  Gelato avec l'`orderId` en preuve, le problème dépasse alors ce qu'on peut
+  corriger côté app.
+- Décider si on implémente les améliorations du point 4 (statut d'erreur
+  visible côté client, lien envoi Gelato ↔ statut, rappel de séquence admin).
+
+---
+
 ## ⚡ REPRISE — 16.07.2026 : lecture/édition éditoriales, livre in-app, gros uploads
 
 Commits `65a2225` → `b714985` sur `master`, **poussés** (arbre propre).

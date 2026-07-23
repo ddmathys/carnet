@@ -32,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
   QuotaStatus? _quota;
   QuotaStatus? _videoQuota;
   QuotaStatus? _audioQuota;
-  String _tier = 'free';
 
   List<TagModel> _myTags = [];
   List<TagModel> _sharedTags = [];
@@ -136,7 +135,6 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadQuota() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final tier = await QuotaService.getSubscriptionTier(uid);
     final results = await Future.wait([
       QuotaService.checkQuota(uid),
       QuotaService.checkVideoQuota(uid),
@@ -147,7 +145,6 @@ class _HomeScreenState extends State<HomeScreen> {
         _quota = results[0];
         _videoQuota = results[1];
         _audioQuota = results[2];
-        _tier = tier;
       });
     }
   }
@@ -168,8 +165,6 @@ class _HomeScreenState extends State<HomeScreen> {
         SliverToBoxAdapter(
           child: _TopBar(
             initial: _initial,
-            maxUsage: _maxUsageRatio,
-            warn: _nearAnyLimit,
             onProfile: () => context.push('/profile'),
             onSpace: () => _showMonEspace(context),
           ),
@@ -231,7 +226,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
                   decoration: BoxDecoration(
                     color: _filterLabels.isEmpty
-                        ? AppColors.white
+                        ? AppColors.surface
                         : AppColors.sageDark,
                     borderRadius: BorderRadius.circular(50),
                     border: Border.all(
@@ -412,20 +407,6 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
-  double get _maxUsageRatio {
-    final rs = [
-      _quota?.ratio ?? 0,
-      _videoQuota?.ratio ?? 0,
-      _audioQuota?.ratio ?? 0,
-    ];
-    return rs.fold<double>(0, (m, r) => r > m ? r : m);
-  }
-
-  bool get _nearAnyLimit =>
-      (_quota?.nearLimit ?? false) ||
-      (_videoQuota?.nearLimit ?? false) ||
-      (_audioQuota?.nearLimit ?? false);
-
   String get _initial {
     final e = FirebaseAuth.instance.currentUser?.email ?? '';
     return e.isNotEmpty ? e[0].toUpperCase() : '·';
@@ -437,14 +418,9 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
       builder: (_) => _MonEspaceSheet(
-        tier: _tier,
         quota: _quota,
         videoQuota: _videoQuota,
         audioQuota: _audioQuota,
-        onUpsell: () {
-          Navigator.pop(context);
-          context.push('/subscription');
-        },
       ),
     );
   }
@@ -491,14 +467,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
 class _TopBar extends StatelessWidget {
   final String initial;
-  final double maxUsage;
-  final bool warn;
   final VoidCallback onProfile;
   final VoidCallback onSpace;
   const _TopBar({
     required this.initial,
-    required this.maxUsage,
-    required this.warn,
     required this.onProfile,
     required this.onSpace,
   });
@@ -511,40 +483,24 @@ class _TopBar extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(20, 10, 18, 2),
         child: Row(
           children: [
-            Container(
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: AppColors.sageDark,
-                borderRadius: BorderRadius.circular(11),
-                boxShadow: [
-                  BoxShadow(
-                    color: AppColors.sageDark.withOpacity(0.35),
-                    blurRadius: 10,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: const Icon(Icons.auto_stories_rounded,
-                  color: Colors.white, size: 20),
-            ),
-            const SizedBox(width: 10),
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: const [
-                Text('Carnet',
+                Text('carnet',
                     style: TextStyle(
                       fontFamily: 'Fraunces',
-                      fontSize: 25,
+                      fontStyle: FontStyle.italic,
+                      fontSize: 24,
                       fontWeight: FontWeight.w600,
                       color: AppColors.textDark,
                       height: 1,
                     )),
-                SizedBox(width: 2),
+                SizedBox(width: 1),
                 Text('.',
                     style: TextStyle(
                       fontFamily: 'Fraunces',
-                      fontSize: 25,
+                      fontStyle: FontStyle.italic,
+                      fontSize: 24,
                       fontWeight: FontWeight.w700,
                       color: AppColors.sageDark,
                       height: 1,
@@ -552,7 +508,18 @@ class _TopBar extends StatelessWidget {
               ],
             ),
             const Spacer(),
-            _SpaceGauge(ratio: maxUsage, warn: warn, onTap: onSpace),
+            GestureDetector(
+              onTap: onSpace,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(
+                    color: AppColors.sageTint, shape: BoxShape.circle),
+                child: const Icon(Icons.folder_outlined,
+                    size: 18, color: AppColors.sageDark),
+              ),
+            ),
             const SizedBox(width: 12),
             GestureDetector(
               onTap: onProfile,
@@ -568,62 +535,6 @@ class _TopBar extends StatelessWidget {
                 ),
               ),
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SpaceGauge extends StatelessWidget {
-  final double ratio;
-  final bool warn;
-  final VoidCallback onTap;
-  const _SpaceGauge(
-      {required this.ratio, required this.warn, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 38,
-        height: 38,
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Container(
-              width: 34,
-              height: 34,
-              decoration: const BoxDecoration(
-                  color: AppColors.sageTint, shape: BoxShape.circle),
-            ),
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                value: ratio.clamp(0.02, 1.0),
-                strokeWidth: 3,
-                backgroundColor: AppColors.sage.withOpacity(0.22),
-                valueColor: AlwaysStoppedAnimation(
-                    warn ? AppColors.amber : AppColors.sage),
-              ),
-            ),
-            if (warn)
-              Positioned(
-                top: 1,
-                right: 1,
-                child: Container(
-                  width: 11,
-                  height: 11,
-                  decoration: BoxDecoration(
-                    color: AppColors.amber,
-                    shape: BoxShape.circle,
-                    border: Border.all(color: AppColors.background, width: 2),
-                  ),
-                ),
-              ),
           ],
         ),
       ),
@@ -779,17 +690,8 @@ class _CreateBookCta extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Container(
-                width: 54,
-                height: 54,
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.16),
-                  borderRadius: BorderRadius.circular(16),
-                ),
-                child: const Icon(Icons.menu_book_rounded,
-                    color: Colors.white, size: 28),
-              ),
-              const SizedBox(width: 16),
+              const _StackedPagesMark(),
+              const SizedBox(width: 18),
               const Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -816,25 +718,74 @@ class _CreateBookCta extends StatelessWidget {
   }
 }
 
+/// Petite pile de pages en éventail — remplace l'icône livre générique par un
+/// motif dessiné à la main (silhouettes superposées, légèrement pivotées).
+class _StackedPagesMark extends StatelessWidget {
+  const _StackedPagesMark();
+
+  @override
+  Widget build(BuildContext context) {
+    Widget page(double angle, double opacity, double size) => Transform.rotate(
+          angle: angle,
+          child: Container(
+            width: size,
+            height: size * 0.78,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(opacity),
+              borderRadius: BorderRadius.circular(6),
+            ),
+          ),
+        );
+    return SizedBox(
+      width: 54,
+      height: 54,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          page(-0.22, 0.16, 40),
+          page(0.14, 0.22, 40),
+          Container(
+            width: 40,
+            height: 31,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.95),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                    width: 24, height: 2.4,
+                    color: const Color(0xFF6B4A32).withOpacity(0.35)),
+                const SizedBox(height: 4),
+                Container(
+                    width: 17, height: 2.4,
+                    color: const Color(0xFF6B4A32).withOpacity(0.35)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ── Feuille « Mon espace » ───────────────────────────────────────────────────
 
 class _MonEspaceSheet extends StatelessWidget {
-  final String tier;
   final QuotaStatus? quota;
   final QuotaStatus? videoQuota;
   final QuotaStatus? audioQuota;
-  final VoidCallback onUpsell;
   const _MonEspaceSheet({
-    required this.tier,
     required this.quota,
     required this.videoQuota,
     required this.audioQuota,
-    required this.onUpsell,
   });
 
   @override
   Widget build(BuildContext context) {
-    final premium = tier == 'premium';
     return Container(
       decoration: const BoxDecoration(
         color: AppColors.background,
@@ -857,74 +808,16 @@ class _MonEspaceSheet extends StatelessWidget {
                     borderRadius: BorderRadius.circular(99)),
               ),
             ),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text('Mon espace',
-                    style: TextStyle(
-                        fontFamily: 'Fraunces',
-                        fontSize: 21,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.textDark)),
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
-                  decoration: BoxDecoration(
-                      color: AppColors.sageDark,
-                      borderRadius: BorderRadius.circular(99)),
-                  child: Text(premium ? '✦ Premium' : 'Gratuit',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 11.5,
-                          fontWeight: FontWeight.w600)),
-                ),
-              ],
-            ),
+            const Text('Mon espace',
+                style: TextStyle(
+                    fontFamily: 'Fraunces',
+                    fontSize: 21,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark)),
             const SizedBox(height: 16),
             _GaugeRow(label: '🖼 Photos', quota: quota),
             _GaugeRow(label: '🎬 Vidéos', quota: videoQuota),
             _GaugeRow(label: '🎙 Vocaux', quota: audioQuota),
-            if (!premium) ...[
-              const SizedBox(height: 8),
-              Container(
-                padding: const EdgeInsets.all(15),
-                decoration: BoxDecoration(
-                    color: AppColors.sageTint,
-                    borderRadius: BorderRadius.circular(16)),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Passe à l\'illimité',
-                              style: TextStyle(
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.w600,
-                                  color: AppColors.textDark)),
-                          SizedBox(height: 2),
-                          Text('Médias sans limite + livres −20 %',
-                              style: TextStyle(
-                                  fontSize: 12, color: AppColors.textMedium)),
-                        ],
-                      ),
-                    ),
-                    ElevatedButton(
-                      onPressed: onUpsell,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.sageDark,
-                        minimumSize: const Size(0, 40),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(99)),
-                      ),
-                      child:
-                          const Text('Découvrir', style: TextStyle(fontSize: 13)),
-                    ),
-                  ],
-                ),
-              ),
-            ],
           ],
         ),
       ),
@@ -932,6 +825,8 @@ class _MonEspaceSheet extends StatelessWidget {
   }
 }
 
+/// Ligne d'usage simple — juste un compte, sans dénominateur ni barre : il n'y
+/// a plus de palier à approcher, la limite n'a aucun intérêt pour l'utilisateur.
 class _GaugeRow extends StatelessWidget {
   final String label;
   final QuotaStatus? quota;
@@ -939,53 +834,20 @@ class _GaugeRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final q = quota;
-    final ratio = q?.ratio ?? 0;
-    final warn = q?.nearLimit ?? false;
+    final count = quota?.current ?? 0;
     return Padding(
-      padding: const EdgeInsets.only(bottom: 15),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(label,
-                  style: const TextStyle(
-                      fontSize: 13.5,
-                      color: AppColors.textDark,
-                      fontWeight: FontWeight.w500)),
-              Text.rich(TextSpan(children: [
-                TextSpan(
-                    text: '${q?.current ?? 0}',
-                    style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        color: warn ? AppColors.amber : AppColors.textDark)),
-                TextSpan(
-                    text: ' / ${q?.limit ?? 0}',
-                    style: const TextStyle(color: AppColors.textMedium)),
-              ])),
-            ],
-          ),
-          const SizedBox(height: 6),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(99),
-            child: LinearProgressIndicator(
-              value: ratio.clamp(0.0, 1.0),
-              minHeight: 8,
-              backgroundColor: AppColors.softGray.withOpacity(0.28),
-              valueColor: AlwaysStoppedAnimation(
-                  warn ? AppColors.amber : AppColors.sageDark),
-            ),
-          ),
-          if (warn)
-            Padding(
-              padding: const EdgeInsets.only(top: 5),
-              child: Text(
-                '⚠ Plus que ${q?.remaining ?? 0} avant la limite',
-                style: const TextStyle(fontSize: 11.5, color: AppColors.amber),
-              ),
-            ),
+          Text(label,
+              style: const TextStyle(
+                  fontSize: 13.5,
+                  color: AppColors.textDark,
+                  fontWeight: FontWeight.w500)),
+          Text('$count',
+              style: const TextStyle(
+                  fontWeight: FontWeight.w600, color: AppColors.textDark)),
         ],
       ),
     );

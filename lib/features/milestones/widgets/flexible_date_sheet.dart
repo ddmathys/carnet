@@ -183,7 +183,7 @@ class _FlexibleDateSheetState extends State<FlexibleDateSheet> {
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 150),
             decoration: BoxDecoration(
-              color: selected ? AppColors.sage : AppColors.white,
+              color: selected ? AppColors.sage : AppColors.surface,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
                   color: selected ? AppColors.sage : AppColors.beige),
@@ -216,7 +216,7 @@ class _FlexibleDateSheetState extends State<FlexibleDateSheet> {
               margin: EdgeInsets.only(right: i < 3 ? 8 : 0),
               padding: const EdgeInsets.symmetric(vertical: 16),
               decoration: BoxDecoration(
-                color: selected ? AppColors.sage : AppColors.white,
+                color: selected ? AppColors.sage : AppColors.surface,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                     color: selected ? AppColors.sage : AppColors.beige),
@@ -258,7 +258,7 @@ class PrecisionChip extends StatelessWidget {
         duration: const Duration(milliseconds: 150),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
         decoration: BoxDecoration(
-          color: selected ? AppColors.sage : AppColors.white,
+          color: selected ? AppColors.sage : AppColors.surface,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
               color: selected ? AppColors.sage : AppColors.beige),
