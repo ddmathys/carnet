@@ -85,8 +85,10 @@ final _router = GoRouter(
     // ── Livres ──
     GoRoute(
       path: '/book/select',
-      builder: (_, state) =>
-          MemorySelectScreen(initialTagId: state.uri.queryParameters['tag']),
+      builder: (_, state) => MemorySelectScreen(
+        initialTagId: state.uri.queryParameters['tag'],
+        editOrderId: state.uri.queryParameters['editOrder'],
+      ),
     ),
     GoRoute(
       path: '/book/new',
@@ -99,6 +101,7 @@ final _router = GoRouter(
           memoryIds: ids,
           tagId: state.uri.queryParameters['tag'],
           startAtOrder: state.uri.queryParameters['order'] == '1',
+          editOrderId: state.uri.queryParameters['editOrder'],
         );
       },
     ),

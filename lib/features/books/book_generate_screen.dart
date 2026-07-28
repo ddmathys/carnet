@@ -36,11 +36,17 @@ class BookGenerateScreen extends StatefulWidget {
   /// l'étape couverture/aperçu. Utilisé depuis « Mes livres » → Commander.
   final bool startAtOrder;
 
+  /// Si renseigné, cet écran ne crée PAS une nouvelle commande : il régénère
+  /// le PDF pour CETTE commande (refusée par Gelato) et le renvoie
+  /// directement en production. Voir _placeOrder et _loadEditOrderDefaults.
+  final String? editOrderId;
+
   const BookGenerateScreen({
     super.key,
     this.memoryIds = const [],
     this.tagId,
     this.startAtOrder = false,
+    this.editOrderId,
   });
 
   @override
@@ -265,7 +271,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _loadError = null;
         // Commande depuis « Mes livres » : on saute directement aux options
         // d'achat (format imprimé pré-sélectionné).
-        if (widget.startAtOrder) {
+        if (widget.startAtOrder || widget.editOrderId != null) {
           _step = 1;
           _selectedFormat = 'printed';
           _coverType = 'soft';
@@ -287,6 +293,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Admin : pré-remplit l'adresse avec celle de la dernière commande,
       // pour ne plus jamais avoir à la ressaisir.
       if (_isAdmin) _loadLastAddress();
+      // Renvoi après refus : pré-remplit adresse/titre/couverture avec ceux
+      // de la commande refusée (inchangés, seul le PDF est régénéré) — sans
+      // ça l'utilisateur devrait ressaisir son adresse pour rien.
+      if (widget.editOrderId != null) _loadEditOrderDefaults();
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
       // infini, sans message — la cause des « le spinner tourne ».
@@ -318,6 +328,29 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       });
     } catch (_) {
       // Pas grave : l'adresse sera juste à saisir à la main.
+    }
+  }
+
+  // Pré-remplit adresse/titre/couverture avec ceux de la commande qu'on est
+  // en train de corriger (widget.editOrderId) — seul le PDF change, tout le
+  // reste (facturé, adressé) doit rester identique.
+  Future<void> _loadEditOrderDefaults() async {
+    try {
+      final order = await OrderService.getOrder(widget.editOrderId!)
+          .timeout(const Duration(seconds: 10));
+      if (order == null || !mounted) return;
+      setState(() {
+        _coverType = order.coverType;
+        _firstNameCtrl.text = order.firstName;
+        _lastNameCtrl.text = order.lastName;
+        _streetCtrl.text = order.street;
+        _cityCtrl.text = order.city;
+        _npaCtrl.text = order.npa;
+        _countryCtrl.text = order.country;
+      });
+      _titleCtrl.text = order.bookTitle;
+    } catch (_) {
+      // Pas grave : les champs restent à saisir à la main.
     }
   }
 
@@ -485,10 +518,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     // PDF réellement généré).
     if (_exceedsGelatoLimit) {
       _showSnack(
-          'Ce livre dépasse 200 pages — retire des souvenirs avant de commander.');
+          'Ce livre dépasse 199 pages — retire des souvenirs avant de commander.');
       return;
     }
-    if (!(_addressKey.currentState?.validate() ?? false)) return;
+    final isEdit = widget.editOrderId != null;
+    if (!isEdit && !(_addressKey.currentState?.validate() ?? false)) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _notebook == null) return;
 
@@ -518,7 +552,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customTitle: customTitle,
         customSubtitle: _bookSubtitle,
         backendUrl: AppConfig.backendUrl,
-        padForPrint: true, // pages valides Gelato (pair, ≥30)
+        padForPrint: true, // pages valides Gelato (n≡1 mod 6, ≥25)
         coverType: _coverType, // largeur exacte de couverture wraparound
       );
       final pdfBytes = gen.bytes;
@@ -536,6 +570,23 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       final pdfUrl = uploaded.url;
 
       if (!mounted) return;
+
+      // Renvoi après refus : on ne crée PAS de nouvelle commande — le PDF
+      // régénéré est renvoyé directement en production pour LA MÊME commande.
+      // Le backend revérifie lui-même le plafond de 3 tentatives et l'écart
+      // de pages (±3) ; ses messages d'erreur sont affichés tels quels.
+      if (isEdit) {
+        setState(() => _orderMessage = 'Renvoi à l\'impression…');
+        await OrderService.retryGelatoOrder(
+          widget.editOrderId!,
+          pdfUrl: pdfUrl,
+          pageCount: pageCount,
+        );
+        if (!mounted) return;
+        context.go('/orders/${widget.editOrderId}');
+        return;
+      }
+
       setState(() => _orderMessage = 'Création de la commande…');
 
       // 3. Créer la commande avec pdfUrl déjà renseigné
@@ -577,7 +628,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       if (!mounted) return;
       context.go('/order-confirmation/$orderId');
     } catch (e) {
-      _showSnack('Erreur : $e');
+      _showSnack(e.toString().replaceFirst('Exception: ', ''));
       if (mounted)
         setState(() {
           _ordering = false;
@@ -585,6 +636,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         });
     }
   }
+
+  String get _orderButtonLabel => widget.editOrderId != null
+      ? 'Renvoyer à l\'impression'
+      : 'Commander · ${_priceLabel(_coverType)}';
 
   void _showSnack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -817,7 +872,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Ce livre fait $_pages pages, au-delà de la limite de 200 '
+                'Ce livre fait $_pages pages, au-delà de la limite de 199 '
                 'pages de l\'imprimeur — retire des souvenirs pour commander.',
                 style: const TextStyle(color: Colors.red, fontSize: 12),
               ),
@@ -845,7 +900,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 foregroundColor: Colors.white,
                 minimumSize: const Size.fromHeight(52),
               ),
-              child: Text('Commander · ${_priceLabel(_coverType)}'),
+              child: Text(_orderButtonLabel),
             ),
           const SizedBox(height: 14),
           Center(
@@ -1271,7 +1326,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             const SizedBox(height: 6),
             Text(
               'Ton livre fait $_pages pages. Le format imprimé accepte au '
-              'maximum 200 pages chez notre imprimeur. Retire des souvenirs '
+              'maximum 199 pages chez notre imprimeur. Retire des souvenirs '
               'pour pouvoir commander (le PDF digital reste possible sans '
               'limite).',
               style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
@@ -1311,8 +1366,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 Expanded(
                   child: Text(
                     'Ton livre fait $_pages pages. Notre imprimeur exige un '
-                    'minimum de 28 pages (nombre pair) : $_blankPagesAdded '
-                    'page$plural blanche$plural seront ajoutées à la fin.',
+                    'nombre de pages précis : $_blankPagesAdded '
+                    'page$plural blanche$plural seront ajoutées à la fin '
+                    'pour arriver à $_printedPages pages.',
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textMedium),
                   ),
@@ -1400,7 +1456,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               selected: _selectedFormat == 'printed' && _coverType == 'soft',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
-                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
+                      'Retire des souvenirs pour repasser sous 199 pages avant de choisir ce format.')
                   : () => setState(() {
                         _selectedFormat = 'printed';
                         _coverType = 'soft';
@@ -1420,7 +1476,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               selected: _selectedFormat == 'printed' && _coverType == 'hard',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
-                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
+                      'Retire des souvenirs pour repasser sous 199 pages avant de choisir ce format.')
                   : () => setState(() {
                         _selectedFormat = 'printed';
                         _coverType = 'hard';
@@ -1597,7 +1653,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                         backgroundColor: AppColors.amber,
                         foregroundColor: Colors.white,
                       ),
-                      child: Text('Commander · ${_priceLabel(_coverType)}'),
+                      child: Text(_orderButtonLabel),
                     ),
                 ],
               ),
@@ -1684,7 +1740,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               const Text(
                 'Prix tout compris : impression + livraison en Suisse + TVA. '
                 'Il dépend de la couverture (souple / rigide) et du nombre de '
-                'pages. Les livres imprimés font 28 pages minimum.',
+                'pages. Les livres imprimés font 25 pages minimum.',
                 style: TextStyle(
                     color: AppColors.textMedium, fontSize: 13, height: 1.4),
               ),

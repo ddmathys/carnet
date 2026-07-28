@@ -133,7 +133,9 @@ class OrderDetailScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _OrderTimeline(order: order),
-                const SizedBox(height: 24),
+                const SizedBox(height: 16),
+                _GelatoStatusBanner(order: order),
+                const SizedBox(height: 16),
                 _OrderDetailsCard(order: order),
                 const SizedBox(height: 16),
                 _PayButton(order: order),
@@ -341,6 +343,171 @@ class _TimelineStep extends StatelessWidget {
               )),
         ),
       ],
+    );
+  }
+}
+
+/// Bandeau de statut Gelato — visible uniquement quand il y a quelque chose à
+/// dire (refus, renvoi en cours) : sinon caché, pour ne pas encombrer une
+/// commande qui se déroule normalement.
+///
+/// Le statut vient du cron quotidien (ou d'une vérification admin manuelle) —
+/// jamais de la création de la commande elle-même, qui réussit toujours côté
+/// API même pour un fichier invalide (voir mémoire projet).
+class _GelatoStatusBanner extends StatelessWidget {
+  final OrderModel order;
+  const _GelatoStatusBanner({required this.order});
+
+  @override
+  Widget build(BuildContext context) {
+    switch (order.gelatoStatus) {
+      case 'refused':
+        return order.canRetryGelato ? _refusedRetriable(context) : _blocked(
+          'Notre imprimeur refuse toujours ce livre après plusieurs essais. '
+          'Notre équipe reprend la main et te recontacte rapidement.',
+        );
+      case 'error':
+        return _blocked(
+          'Un souci technique est survenu lors de l\'envoi à l\'imprimeur. '
+          'Notre équipe s\'en occupe.',
+        );
+      case 'pending':
+        return _pending();
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _refusedRetriable(BuildContext context) {
+    final left = order.gelatoRetriesLeft;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.red.withOpacity(0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline, size: 18, color: Colors.red),
+              SizedBox(width: 8),
+              Expanded(
+                child: Text('Notre imprimeur n\'a pas accepté ce livre',
+                    style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.red)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Un souci technique de mise en page — rien de grave, ça se corrige '
+            'en ajustant le livre puis en le renvoyant.',
+            style: TextStyle(
+                fontSize: 13, color: AppColors.textDark, height: 1.4),
+          ),
+          if (order.refusalReason != null &&
+              order.refusalReason!.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.6),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                order.refusalReason!,
+                style: const TextStyle(
+                    fontSize: 12,
+                    color: AppColors.textMedium,
+                    fontStyle: FontStyle.italic),
+              ),
+            ),
+          ],
+          const SizedBox(height: 12),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () => context.push(
+                  '/book/select?tag=${order.notebookId}&editOrder=${order.id}'),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Modifier le livre et renvoyer'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            left > 1
+                ? '$left tentatives de renvoi restantes.'
+                : 'Dernière tentative de renvoi automatique.',
+            style: const TextStyle(fontSize: 11, color: AppColors.textMedium),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _pending() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.sage.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.sage.withOpacity(0.3)),
+      ),
+      child: const Row(
+        children: [
+          SizedBox(
+            width: 16,
+            height: 16,
+            child:
+                CircularProgressIndicator(strokeWidth: 2, color: AppColors.sage),
+          ),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'Vérification en cours chez l\'imprimeur…',
+              style: TextStyle(fontSize: 13, color: AppColors.textDark),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _blocked(String message) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.red.withOpacity(0.3)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.support_agent_outlined, size: 18, color: Colors.red),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(message,
+                style: const TextStyle(
+                    fontSize: 13, color: AppColors.textDark, height: 1.4)),
+          ),
+        ],
+      ),
     );
   }
 }

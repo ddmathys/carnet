@@ -22,8 +22,16 @@ class OrderModel {
   final int? pageCount; // nombre de pages du PDF (pour Gelato)
   final String? pdfUrl;
   final String? gelatoOrderId;
-  final String? gelatoStatus; // 'draft' | 'submitted' | 'error' | null
+  // 'draft' (brouillon, à confirmer dans le dashboard Gelato) |
+  // 'pending' (renvoi direct en cours, résultat pas encore connu) |
+  // 'accepted' | 'refused' (résultat réel, connu via /api/gelato/status ou
+  // le cron de poll — jamais via la création elle-même) | 'error' (échec
+  // synchrone à l'envoi) | null (jamais envoyé).
+  final String? gelatoStatus;
   final String? gelatoError;
+  final String? refusalReason;
+  final String? refusalReasonCode;
+  final int gelatoRetryCount;
 
   const OrderModel({
     required this.id,
@@ -49,6 +57,9 @@ class OrderModel {
     this.gelatoOrderId,
     this.gelatoStatus,
     this.gelatoError,
+    this.refusalReason,
+    this.refusalReasonCode,
+    this.gelatoRetryCount = 0,
   });
 
   String get fullName => '$firstName $lastName';
@@ -90,6 +101,10 @@ class OrderModel {
 
   int get statusIndex => statusFlow.indexOf(status);
 
+  bool get gelatoWasRefused => gelatoStatus == 'refused';
+  int get gelatoRetriesLeft => (3 - gelatoRetryCount).clamp(0, 3);
+  bool get canRetryGelato => gelatoWasRefused && gelatoRetriesLeft > 0;
+
   factory OrderModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
     return OrderModel(
@@ -116,6 +131,9 @@ class OrderModel {
       gelatoOrderId: d['gelatoOrderId'],
       gelatoStatus: d['gelatoStatus'],
       gelatoError: d['gelatoError'],
+      refusalReason: d['refusalReason'],
+      refusalReasonCode: d['refusalReasonCode'],
+      gelatoRetryCount: (d['gelatoRetryCount'] as num?)?.toInt() ?? 0,
     );
   }
 

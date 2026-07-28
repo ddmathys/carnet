@@ -487,7 +487,8 @@ class BookPdfService {
       }
 
       // 4. Pages blanches de bourrage pour atteindre un nombre de pages valide
-      //    chez Gelato (pair, 30–200). Uniquement pour l'impression.
+      //    chez Gelato (n≡1 mod 6, entre 25 et 199 — cf. _gelatoValidPageCount).
+      //    Uniquement pour l'impression.
       if (padForPrint) {
         for (int p = totalPages; p < _gelatoValidPageCount(totalPages); p++) {
           doc.addPage(pw.Page(
@@ -513,19 +514,38 @@ class BookPdfService {
     return (bytes: bytes, pageCount: finalPageCount);
   }
 
-  // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
-  // PAIR, entre 28 et 200. Confirmé le 22.07 par une réponse BAD_REQUEST
-  // explicite de l'API order avec la liste complète des valeurs acceptées
-  // ([28,30,32,...,200]) — 33 (issu d'une tentative précédente de règle
-  // "4n+1", elle-même basée sur un message de rejet plus ambigu vu dans le
-  // dashboard) a été rejeté avec cette liste en retour. Cette liste explicite
-  // fait foi ; le rejet "exactement 37 pages" pour un livre de 34 pages
-  // (dashboard, 22.07) reste inexpliqué — probablement une modification
-  // manuelle du nombre de pages dans le dashboard Gelato au moment de
-  // confirmer/payer, pas un problème du fichier généré par l'app.
+  // Arrondit au nombre de pages valide Gelato le plus proche par le haut.
+  //
+  // Historique (à lire avant de retoucher cette règle) :
+  // - 22.07 : deux commandes réellement PAYÉES (34 et 36 pages) rejetées
+  //   après coup par Gelato avec « exactement 37 pages » → hypothèse
+  //   n≡1(mod4), corrigée puis vite revertée.
+  // - Une commande suivante de 33 pages (issue de cette hypothèse) a été
+  //   rejetée par un BAD_REQUEST explicite de l'API order listant les
+  //   valeurs soi-disant valides : les PAIRS de 28 à 200. Code reverté sur
+  //   cette base (c'est l'ancienne version de cette fonction).
+  // - 28.07 : une commande de 40 pages (paire, donc « valide » selon cette
+  //   liste) a de nouveau été rejetée après coup avec « exactement 43
+  //   pages ». La liste `validPageCounts` de l'API catalogue est donc
+  //   **trompeuse** — elle ne reflète pas la vraie contrainte prépresse.
+  //
+  // Les TROIS rejets réels connus (37←34, 37←36, 43←40) sont TOUS expliqués
+  // par une seule règle : n ≡ 1 (mod 6). Le rejet BAD_REQUEST de 33 pages
+  // est également cohérent (33 n'est pas ≡1 mod 6 ; la valeur valide
+  // suivante est 37 — justement celle réclamée par les deux rejets réels).
+  // C'est l'hypothèse actuellement en place. Elle reste une INFÉRENCE
+  // (Gelato ne documente cette contrainte nulle part) — à reconfirmer sur la
+  // prochaine commande réellement payée avant de lui faire confiance à
+  // 100%. Le plancher 25 n'est pas vérifié en conditions réelles (seule la
+  // règle de congruence l'est). Voir mémoire projet + STATUS.md (22.07,
+  // 28.07). En attendant : on ajoute toujours des pages blanches en fin de
+  // livre pour combler l'écart (jamais de troncature de contenu réel), et
+  // l'écran de génération avertit l'utilisateur du nombre exact ajouté.
   static int _gelatoValidPageCount(int n) {
-    var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
-    if (v > 200) v = 200;
+    var v = n < 25 ? 25 : n;
+    final rem = (v - 1) % 6;
+    if (rem != 0) v += 6 - rem;
+    if (v > 199) v = 199; // dernier n≡1(mod6) ≤ 200
     return v;
   }
 

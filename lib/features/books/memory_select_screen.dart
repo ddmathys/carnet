@@ -19,7 +19,11 @@ import '../tags/tag_picker_sheet.dart';
 /// coup), ou cocher les souvenirs un par un. Remplace l'ancien choix de carnets.
 class MemorySelectScreen extends StatefulWidget {
   final String? initialTagId;
-  const MemorySelectScreen({super.key, this.initialTagId});
+  /// Si renseigné, la sélection sert à corriger une commande existante
+  /// refusée par Gelato plutôt qu'à en créer une nouvelle — transmis tel
+  /// quel à BookGenerateScreen, qui change le comportement de l'étape finale.
+  final String? editOrderId;
+  const MemorySelectScreen({super.key, this.initialTagId, this.editOrderId});
 
   @override
   State<MemorySelectScreen> createState() => _MemorySelectScreenState();
@@ -231,7 +235,9 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
     // Un seul tag coché → il donne le titre et la couleur de la couverture.
     final sole = _selectedTags.length == 1 ? _selectedTags.first : null;
     final tag = sole != null ? '&tag=${sole.id}' : '';
-    context.push('/book/new?memories=$ids$tag');
+    final editOrder =
+        widget.editOrderId != null ? '&editOrder=${widget.editOrderId}' : '';
+    context.push('/book/new?memories=$ids$tag$editOrder');
   }
 
   /// Filtre par tags — même sélecteur (Date / Lieu / Événement) que partout.

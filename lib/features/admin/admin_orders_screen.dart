@@ -166,6 +166,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
   bool _saving = false;
   bool _downloadingPdf = false;
   bool _sendingGelato = false;
+  bool _checkingStatus = false;
   bool _deleting = false;
   late String _selectedStatus;
   late final TextEditingController _noteCtrl;
@@ -217,6 +218,31 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
       ));
     } finally {
       if (mounted) setState(() => _sendingGelato = false);
+    }
+  }
+
+  // Rafraîchit le vrai statut Gelato sans attendre le cron quotidien (voir
+  // backend/api/gelato/[action].ts action=status) — utile pour vérifier tout
+  // de suite après avoir confirmé un brouillon dans le dashboard Gelato.
+  Future<void> _checkStatus() async {
+    setState(() => _checkingStatus = true);
+    try {
+      final res = await OrderService.checkGelatoStatus(widget.order.id);
+      if (!mounted) return;
+      final status = res['gelatoStatus'];
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: AppColors.sage,
+        content: Text('Statut Gelato : ${status ?? 'inconnu'}'),
+      ));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: AppColors.error,
+        content:
+            Text('Vérification : ${e.toString().replaceFirst('Exception: ', '')}'),
+      ));
+    } finally {
+      if (mounted) setState(() => _checkingStatus = false);
     }
   }
 
@@ -440,53 +466,96 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
 
   Widget _buildGelatoSection() {
     final o = widget.order;
-    if (o.gelatoStatus == 'error' && o.gelatoError != null) {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: Colors.red.shade50,
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.shade200),
-            ),
-            child: Text('⚠️ Gelato a refusé : ${o.gelatoError}',
-                style: const TextStyle(fontSize: 11, color: Colors.red)),
-          ),
-          const SizedBox(height: 8),
-          _gelatoButton(label: 'Réessayer l’envoi à Gelato'),
-        ],
-      );
-    }
-    if (o.gelatoOrderId != null) {
-      return Container(
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: AppColors.sage.withOpacity(0.10),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: AppColors.sage.withOpacity(0.4)),
+
+    // Le vrai statut ('pending'/'accepted'/'refused') ne vient jamais de la
+    // création elle-même (toujours 200 OK, même fichier invalide) mais du
+    // cron quotidien ou d'une vérification manuelle — voir lib/gelato.ts.
+    final statusBadge = switch (o.gelatoStatus) {
+      'pending' => _statusBox(
+          color: AppColors.amber,
+          text: '⏳ Vérification en cours chez Gelato…',
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '✅ Brouillon Gelato créé · ${o.gelatoOrderId}',
+      'accepted' => _statusBox(
+          color: AppColors.sage,
+          text: '✅ Accepté par Gelato · en production',
+        ),
+      'refused' => _statusBox(
+          color: Colors.red,
+          text: '⚠️ Refusé par Gelato'
+              '${o.gelatoRetryCount > 0 ? ' · ${o.gelatoRetryCount}/3 tentatives client' : ''}',
+          detail: o.refusalReason,
+        ),
+      'error' when o.gelatoError != null => _statusBox(
+          color: Colors.red,
+          text: '⚠️ Échec de l’envoi',
+          detail: o.gelatoError,
+        ),
+      _ => null,
+    };
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (statusBadge != null) ...[statusBadge, const SizedBox(height: 8)],
+        if (o.gelatoOrderId != null) ...[
+          Text('ID Gelato : ${o.gelatoOrderId}',
               style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.sage),
-            ),
-            const SizedBox(height: 2),
-            const Text(
-              'Valide-le dans le dashboard Gelato pour lancer la production.',
-              style: TextStyle(fontSize: 11, color: AppColors.textMedium),
-            ),
+                  fontSize: 11, color: AppColors.textMedium)),
+          const SizedBox(height: 8),
+          _checkButton(),
+          const SizedBox(height: 8),
+        ],
+        if (o.gelatoOrderId == null)
+          _gelatoButton(label: 'Envoyer à Gelato (brouillon)')
+        else if (o.gelatoStatus != 'accepted')
+          Text(
+            o.gelatoStatus == 'draft'
+                ? 'Brouillon : à valider dans le dashboard Gelato pour lancer la production.'
+                : 'Un renvoi direct (hors app) reste possible via le dashboard Gelato si besoin.',
+            style: const TextStyle(fontSize: 11, color: AppColors.textMedium),
+          ),
+      ],
+    );
+  }
+
+  Widget _statusBox({required Color color, required String text, String? detail}) {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withOpacity(0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(text,
+              style: TextStyle(
+                  fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+          if (detail != null && detail.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(detail,
+                style: const TextStyle(
+                    fontSize: 11, color: AppColors.textMedium)),
           ],
-        ),
-      );
-    }
-    return _gelatoButton(label: 'Envoyer à Gelato (brouillon)');
+        ],
+      ),
+    );
+  }
+
+  Widget _checkButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _checkingStatus ? null : _checkStatus,
+        icon: _checkingStatus
+            ? const SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.refresh, size: 16),
+        label: const Text('Vérifier le statut maintenant'),
+      ),
+    );
   }
 
   Widget _gelatoButton({required String label}) {

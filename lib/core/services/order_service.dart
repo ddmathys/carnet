@@ -102,6 +102,58 @@ class OrderService {
     return data;
   }
 
+  // ── Renvoyer après refus (client) ─────────────────────────────────────────
+
+  /// Renvoie DIRECTEMENT en production une commande refusée, avec un livre
+  /// régénéré (`pdfUrl`/`pageCount`). Réservé côté backend au propriétaire de
+  /// la commande, plafonné à 3 tentatives, et à un écart de pages ≤3 par
+  /// rapport à ce qui a déjà été facturé (sinon le backend refuse avec un
+  /// message à transmettre tel quel — pas de repricing automatique).
+  static Future<Map<String, dynamic>> retryGelatoOrder(
+    String orderId, {
+    required String pdfUrl,
+    required int pageCount,
+  }) async {
+    final data = await BackendClient.postJson(
+      '/api/gelato/order',
+      {
+        'orderId': orderId,
+        'orderType': 'order',
+        'pdfUrl': pdfUrl,
+        'pageCount': pageCount,
+      },
+      timeout: const Duration(seconds: 30),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec Gelato');
+    }
+    return data;
+  }
+
+  /// Relit le vrai statut Gelato d'une commande (admin, ou le client pour la
+  /// sienne) — utile pour un rafraîchissement manuel sans attendre le cron
+  /// quotidien.
+  static Future<Map<String, dynamic>> checkGelatoStatus(String orderId) async {
+    final data = await BackendClient.postJson(
+      '/api/gelato/status',
+      {'orderId': orderId},
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? 'Échec de la vérification');
+    }
+    return data;
+  }
+
+  /// Lecture ponctuelle d'une commande (pas un stream) — utilisée pour
+  /// pré-remplir l'écran d'édition d'un livre refusé (adresse, couverture…).
+  static Future<OrderModel?> getOrder(String orderId) async {
+    final doc =
+        await FirebaseFirestore.instance.collection('orders').doc(orderId).get();
+    if (!doc.exists) return null;
+    return OrderModel.fromFirestore(doc);
+  }
+
   // ── Streams ────────────────────────────────────────────────────────────────
 
   // Tri client-side — pas besoin d'index composite Firestore
