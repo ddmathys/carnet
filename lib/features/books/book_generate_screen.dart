@@ -20,6 +20,8 @@ import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
 
+const _adminEmail = 'david.mathys24@gmail.com';
+
 /// Génération d'un livre à partir d'une sélection de SOUVENIRS (plus d'un
 /// carnet) : ils viennent d'un tag, d'un choix manuel, ou des deux.
 class BookGenerateScreen extends StatefulWidget {
@@ -54,6 +56,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── State ──────────────────────────────────────────────────────────────────
   int _step = 0; // 0=cover+create, 1=format, 2=order
+  // Admin (david.mathys24@gmail.com) : un seul écran couverture+format+adresse
+  // avec un bouton « Commander », sans passer par l'assistant en 3 étapes.
+  bool _quickOrder = false;
+  bool get _isAdmin =>
+      FirebaseAuth.instance.currentUser?.email == _adminEmail;
   bool _showPreview = false;
   String _selectedFormat = 'digital';
   String _coverType = 'soft'; // 'soft' ou 'hard'
@@ -111,7 +118,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
   // avant l'étape format) ; sinon estimation. Pour l'imprimé, le prix se base
-  // sur les pages réellement imprimées (bourrage Gelato pair / ≥30).
+  // sur les pages réellement imprimées (bourrage Gelato n≡1 mod 6, 25–199 —
+  // cf. BookPricing.printablePages).
   int get _pages => _previewPageCount > 0
       ? _previewPageCount
       : BookPricing.estimatePages(_selectedMemories);
@@ -121,16 +129,18 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   String _priceLabel(String coverType) =>
       BookPricing.format(_priceFor(coverType));
 
-  // Gelato refuse au-delà de 200 pages (plafond de BookPdfService._gelatoValidPageCount).
-  // Contrairement au minimum (comblé par des pages blanches), on ne peut pas
-  // combler silencieusement un dépassement sans tronquer du contenu réel —
-  // d'où le blocage plutôt qu'un simple avertissement (cf. rejets de commande
-  // passés : le nombre de pages annoncé à Gelato ne correspondait plus au PDF
-  // réellement envoyé).
-  bool get _exceedsGelatoLimit => _pages > 200;
-  // Pages blanches ajoutées en fin de livre pour atteindre le minimum
-  // imprimeur (28, pair) — 0 si le livre dépasse déjà ce minimum, ou s'il
-  // dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
+  // Gelato refuse au-delà de 199 pages (plafond de BookPdfService._gelatoValidPageCount
+  // — dernier n≡1(mod 6) sous la limite de 200 du catalogue). Contrairement au
+  // minimum (comblé par des pages blanches), on ne peut pas combler
+  // silencieusement un dépassement sans tronquer du contenu réel — d'où le
+  // blocage plutôt qu'un simple avertissement (cf. rejets de commande passés :
+  // le nombre de pages annoncé à Gelato ne correspondait plus au PDF réellement
+  // envoyé).
+  bool get _exceedsGelatoLimit => _pages > 199;
+  // Pages blanches ajoutées en fin de livre pour atteindre le prochain nombre
+  // de pages valide chez l'imprimeur (n≡1 mod 6, cf. BookPricing.printablePages)
+  // — 0 si le livre tombe déjà pile sur une valeur valide, ou s'il dépasse la
+  // limite haute (auquel cas aucun bourrage n'est appliqué).
   int get _blankPagesAdded =>
       _exceedsGelatoLimit ? 0 : (_printedPages - _pages);
 
@@ -260,6 +270,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _selectedFormat = 'printed';
           _coverType = 'soft';
         }
+        // Admin : écran unique « Commander » directement (voir _quickOrder).
+        if (_isAdmin) {
+          _quickOrder = true;
+          _selectedFormat = 'printed';
+          _coverType = 'soft';
+        }
       });
       // Initialise les champs éditables : le titre = ce qui s'affiche par
       // défaut sur la couverture (ex. « Léa & Nala »), pour que le champ soit
@@ -268,12 +284,40 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Résout les URLs de photos (R2 signé + Firebase) pour peupler le
       // sélecteur de couverture, y compris pour les souvenirs sur R2.
       _resolvePhotos(allMemories);
+      // Admin : pré-remplit l'adresse avec celle de la dernière commande,
+      // pour ne plus jamais avoir à la ressaisir.
+      if (_isAdmin) _loadLastAddress();
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
       // infini, sans message — la cause des « le spinner tourne ».
       if (!mounted) return;
       setState(
           () => _loadError = 'Chargement impossible. Vérifie ta connexion.');
+    }
+  }
+
+  // Pré-remplit l'adresse de livraison avec celle de la dernière commande de
+  // l'utilisateur — sert le raccourci admin (_quickOrder), pour ne plus avoir
+  // à la ressaisir à chaque livre commandé.
+  Future<void> _loadLastAddress() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
+    try {
+      final orders = await OrderService.userOrdersStream(user.uid)
+          .first
+          .timeout(const Duration(seconds: 10));
+      if (orders.isEmpty || !mounted) return;
+      final last = orders.first; // le plus récent (stream déjà trié)
+      setState(() {
+        _firstNameCtrl.text = last.firstName;
+        _lastNameCtrl.text = last.lastName;
+        _streetCtrl.text = last.street;
+        _cityCtrl.text = last.city;
+        _npaCtrl.text = last.npa;
+        _countryCtrl.text = last.country;
+      });
+    } catch (_) {
+      // Pas grave : l'adresse sera juste à saisir à la main.
     }
   }
 
@@ -590,7 +634,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     }
 
     return PopScope(
-      canPop: !_showPreview && _step == 0,
+      canPop: _quickOrder || (!_showPreview && _step == 0),
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
         if (_showPreview) {
@@ -607,9 +651,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         appBar: AppBar(
           backgroundColor: AppColors.background,
           elevation: 0,
-          title: const Text(
-            'Générer le livre',
-            style: TextStyle(
+          title: Text(
+            _quickOrder ? 'Commander' : 'Générer le livre',
+            style: const TextStyle(
               fontFamily: 'PlayfairDisplay',
               fontWeight: FontWeight.bold,
               color: AppColors.textDark,
@@ -618,7 +662,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           leading: IconButton(
             icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
             onPressed: () {
-              if (_showPreview) {
+              if (_quickOrder) {
+                context.go('/home');
+              } else if (_showPreview) {
                 setState(() {
                   _showPreview = false;
                   _step = 0;
@@ -632,13 +678,189 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           ),
           actions: const [],
         ),
-        body: _showPreview
-            ? _buildBookPreview()
-            : switch (_step) {
-                0 => _buildPreviewStep(),
-                1 => _buildFormatStep(),
-                _ => _buildOrderStep(),
-              },
+        body: _quickOrder
+            ? _buildQuickOrderStep()
+            : (_showPreview
+                ? _buildBookPreview()
+                : switch (_step) {
+                    0 => _buildPreviewStep(),
+                    1 => _buildFormatStep(),
+                    _ => _buildOrderStep(),
+                  }),
+      ),
+    );
+  }
+
+  // ── Quick order (admin) ────────────────────────────────────────────────────
+  // Un seul écran : couverture déjà prête (tous les souvenirs, titre par
+  // défaut), choix souple/rigide, adresse pré-remplie, et un bouton
+  // « Commander ». « Personnaliser » en bas permet de retomber sur
+  // l'assistant complet si besoin (titre, couverture, sélection).
+  Widget _buildQuickOrderStep() {
+    final coverColor = Color(
+        int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}', radix: 16));
+    final title = _titleCtrl.text.trim().isEmpty
+        ? _defaultCoverTitle(_notebook!)
+        : _titleCtrl.text.trim();
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 84,
+                height: 112,
+                child: _BookCoverPreview(
+                  notebook: _notebook!,
+                  coverColor: coverColor,
+                  coverPhotoUrl: _coverPhotoUrl,
+                  yearRange: _yearRange,
+                  highlights: _coverHighlights,
+                  title: title,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontFamily: 'PlayfairDisplay',
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      '${_selectedMemories.length} souvenirs · $_printedPages pages',
+                      style: const TextStyle(
+                          color: AppColors.textMedium, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          const Text('Couverture',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textMedium)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              _CoverChip(
+                label: 'Souple',
+                price: _priceLabel('soft'),
+                selected: _coverType == 'soft',
+                onTap: () => setState(() => _coverType = 'soft'),
+              ),
+              const SizedBox(width: 8),
+              _CoverChip(
+                label: 'Rigide',
+                price: _priceLabel('hard'),
+                selected: _coverType == 'hard',
+                onTap: () => setState(() => _coverType = 'hard'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 24),
+          const Text('Adresse de livraison',
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textMedium)),
+          const SizedBox(height: 8),
+          Form(
+            key: _addressKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(children: [
+                  Expanded(
+                      child: _AddressField(_firstNameCtrl, 'Prénom',
+                          required: true)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child:
+                          _AddressField(_lastNameCtrl, 'Nom', required: true)),
+                ]),
+                const SizedBox(height: 10),
+                _AddressField(_streetCtrl, 'Rue et numéro', required: true),
+                const SizedBox(height: 10),
+                Row(children: [
+                  SizedBox(
+                      width: 100,
+                      child: _AddressField(_npaCtrl, 'NPA',
+                          required: true, keyboardType: TextInputType.number)),
+                  const SizedBox(width: 10),
+                  Expanded(
+                      child: _AddressField(_cityCtrl, 'Ville', required: true)),
+                ]),
+                const SizedBox(height: 10),
+                _AddressField(_countryCtrl, 'Pays', required: true),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
+          if (_exceedsGelatoLimit)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text(
+                'Ce livre fait $_pages pages, au-delà de la limite de 200 '
+                'pages de l\'imprimeur — retire des souvenirs pour commander.',
+                style: const TextStyle(color: Colors.red, fontSize: 12),
+              ),
+            ),
+          if (_ordering) ...[
+            const LinearProgressIndicator(
+              backgroundColor: Color(0xFFEEEBE3),
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _orderMessage,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.textMedium,
+                fontSize: 13,
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ] else
+            ElevatedButton(
+              onPressed: _exceedsGelatoLimit ? null : _placeOrder,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.amber,
+                foregroundColor: Colors.white,
+                minimumSize: const Size.fromHeight(52),
+              ),
+              child: Text('Commander · ${_priceLabel(_coverType)}'),
+            ),
+          const SizedBox(height: 14),
+          Center(
+            child: TextButton(
+              onPressed: () => setState(() {
+                _quickOrder = false;
+                _step = 0;
+              }),
+              child: const Text(
+                'Personnaliser le livre (titre, couverture, souvenirs)',
+                style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1884,6 +2106,57 @@ class _FormatCard extends StatelessWidget {
               size: 20,
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Cover chip (raccourci commande rapide admin) ──────────────────────────────
+
+class _CoverChip extends StatelessWidget {
+  final String label;
+  final String price;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _CoverChip({
+    required this.label,
+    required this.price,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          decoration: BoxDecoration(
+            color:
+                selected ? AppColors.sage.withOpacity(0.12) : AppColors.surface,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? AppColors.sage : AppColors.border,
+              width: selected ? 2 : 0.5,
+            ),
+          ),
+          child: Column(
+            children: [
+              Text(label,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                      color: AppColors.textDark)),
+              const SizedBox(height: 2),
+              Text(price,
+                  style: const TextStyle(
+                      fontSize: 12, color: AppColors.textMedium)),
+            ],
+          ),
         ),
       ),
     );
