@@ -741,15 +741,15 @@ class _MeasurementList extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: AppColors.success.withOpacity(0.14),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
                         gain,
-                        style: TextStyle(
+                        style: const TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
-                          color: Colors.green.shade600,
+                          color: AppColors.success,
                         ),
                       ),
                     ),

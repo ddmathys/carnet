@@ -6,10 +6,9 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/config/app_config.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/order_service.dart';
-
-const _adminEmail = 'david.mathys24@gmail.com';
 
 class AdminOrdersScreen extends StatefulWidget {
   const AdminOrdersScreen({super.key});
@@ -22,7 +21,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   String _filter = 'all'; // 'all' ou un statut
 
   bool get _isAdmin =>
-      FirebaseAuth.instance.currentUser?.email == _adminEmail;
+      FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
 
   @override
   Widget build(BuildContext context) {
@@ -480,13 +479,13 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
           text: '✅ Accepté par Gelato · en production',
         ),
       'refused' => _statusBox(
-          color: Colors.red,
+          color: AppColors.error,
           text: '⚠️ Refusé par Gelato'
               '${o.gelatoRetryCount > 0 ? ' · ${o.gelatoRetryCount}/3 tentatives client' : ''}',
           detail: o.refusalReason,
         ),
       'error' when o.gelatoError != null => _statusBox(
-          color: Colors.red,
+          color: AppColors.error,
           text: '⚠️ Échec de l’envoi',
           detail: o.gelatoError,
         ),
@@ -624,18 +623,18 @@ class _PdfStatusWidget extends StatelessWidget {
           return Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.red.shade50,
+              color: AppColors.error.withOpacity(0.10),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.shade200),
+              border: Border.all(color: AppColors.error.withOpacity(0.4)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text('⚠️ Erreur PDF',
-                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.red)),
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.error)),
                 const SizedBox(height: 4),
                 Text(pdfError,
-                  style: const TextStyle(fontSize: 11, color: Colors.red)),
+                  style: const TextStyle(fontSize: 11, color: AppColors.error)),
               ],
             ),
           );

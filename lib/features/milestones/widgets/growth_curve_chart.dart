@@ -30,9 +30,9 @@ class GrowthCurveChart extends StatelessWidget {
     final unit = isWeight ? 'kg' : 'cm';
 
     final bars = <LineChartBarData>[
-      _refLine(p3Spots, Colors.grey.shade300),
+      _refLine(p3Spots, AppColors.softGray),
       _refLine(p50Spots, AppColors.sage.withOpacity(0.5)),
-      _refLine(p97Spots, Colors.grey.shade300),
+      _refLine(p97Spots, AppColors.softGray),
     ];
 
     if (value != null && value! > 0) {
@@ -90,7 +90,7 @@ class GrowthCurveChart extends StatelessWidget {
                 drawVerticalLine: false,
                 horizontalInterval: isWeight ? 2 : 10,
                 getDrawingHorizontalLine: (_) => FlLine(
-                  color: Colors.grey.shade100,
+                  color: AppColors.border,
                   strokeWidth: 1,
                 ),
               ),
@@ -103,9 +103,9 @@ class GrowthCurveChart extends StatelessWidget {
                     interval: isWeight ? 4 : 20,
                     getTitlesWidget: (v, _) => Text(
                       '${v.toInt()}$unit',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 9,
-                        color: Colors.grey.shade400,
+                        color: AppColors.textMedium,
                       ),
                     ),
                   ),
@@ -116,9 +116,9 @@ class GrowthCurveChart extends StatelessWidget {
                     interval: 6,
                     getTitlesWidget: (v, _) => Text(
                       '${v.toInt()}m',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 9,
-                        color: Colors.grey.shade400,
+                        color: AppColors.textMedium,
                       ),
                     ),
                   ),
@@ -148,7 +148,7 @@ class GrowthCurveChart extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           'Source : OMS 2006 — courbes de référence P3, P50, P97',
-          style: TextStyle(fontSize: 9, color: Colors.grey.shade400),
+          style: const TextStyle(fontSize: 9, color: AppColors.textMedium),
         ),
       ],
     );
@@ -171,17 +171,17 @@ class _Legend extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        _dot(Colors.grey.shade300),
+        _dot(AppColors.softGray),
         const SizedBox(width: 2),
-        Text('P3/P97', style: TextStyle(fontSize: 9, color: Colors.grey.shade400)),
+        const Text('P3/P97', style: TextStyle(fontSize: 9, color: AppColors.textMedium)),
         const SizedBox(width: 6),
         _dot(AppColors.sage.withOpacity(0.5)),
         const SizedBox(width: 2),
-        Text('P50', style: TextStyle(fontSize: 9, color: Colors.grey.shade400)),
+        const Text('P50', style: TextStyle(fontSize: 9, color: AppColors.textMedium)),
         const SizedBox(width: 6),
         _dot(AppColors.sage),
         const SizedBox(width: 2),
-        Text('Enfant', style: TextStyle(fontSize: 9, color: Colors.grey.shade400)),
+        const Text('Enfant', style: TextStyle(fontSize: 9, color: AppColors.textMedium)),
       ],
     );
   }

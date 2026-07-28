@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/config/app_config.dart';
 import '../../core/services/book_pricing.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -217,7 +218,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             const SizedBox(height: 8),
 
             // Admin (visible uniquement pour david.mathys24@gmail.com)
-            if (user.email == 'david.mathys24@gmail.com') ...[
+            if (user.email == AppConfig.adminEmail) ...[
               _ProfileTile(
                 icon: Icons.admin_panel_settings_outlined,
                 label: 'Console admin',

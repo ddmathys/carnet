@@ -13,4 +13,9 @@ class AppConfig {
   // (« à réception »), le bouton « Payer » est masqué. Repasser à `true` quand
   // Stripe est configuré (STRIPE_SECRET_KEY côté backend) pour activer TWINT.
   static const bool paymentEnabled = false;
+
+  // Seul compte avec accès à la console admin et au raccourci « Commander »
+  // en un écran. Garder cette valeur unique : elle était dupliquée dans
+  // plusieurs écrans avant de devenir cette constante.
+  static const String adminEmail = 'david.mathys24@gmail.com';
 }

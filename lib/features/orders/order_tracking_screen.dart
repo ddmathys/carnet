@@ -384,9 +384,9 @@ class _GelatoStatusBanner extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.08),
+        color: AppColors.error.withOpacity(0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.red.withOpacity(0.3)),
+        border: Border.all(color: AppColors.error.withOpacity(0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -394,14 +394,14 @@ class _GelatoStatusBanner extends StatelessWidget {
           const Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(Icons.error_outline, size: 18, color: Colors.red),
+              Icon(Icons.error_outline, size: 18, color: AppColors.error),
               SizedBox(width: 8),
               Expanded(
                 child: Text('Notre imprimeur n\'a pas accepté ce livre',
                     style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: Colors.red)),
+                        color: AppColors.error)),
               ),
             ],
           ),
@@ -419,7 +419,7 @@ class _GelatoStatusBanner extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.6),
+                color: AppColors.background.withOpacity(0.4),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -440,8 +440,8 @@ class _GelatoStatusBanner extends StatelessWidget {
               icon: const Icon(Icons.edit_outlined, size: 18),
               label: const Text('Modifier le livre et renvoyer'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: AppColors.error,
+                foregroundColor: AppColors.white,
                 padding: const EdgeInsets.symmetric(vertical: 12),
               ),
             ),
@@ -492,14 +492,14 @@ class _GelatoStatusBanner extends StatelessWidget {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.08),
+        color: AppColors.error.withOpacity(0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.red.withOpacity(0.3)),
+        border: Border.all(color: AppColors.error.withOpacity(0.3)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.support_agent_outlined, size: 18, color: Colors.red),
+          const Icon(Icons.support_agent_outlined, size: 18, color: AppColors.error),
           const SizedBox(width: 10),
           Expanded(
             child: Text(message,
@@ -797,17 +797,17 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
                 fontFamily: 'PlayfairDisplay', fontWeight: FontWeight.bold)),
         content: const Text(
             'Cette action est irréversible. La commande et le PDF associé seront supprimés.',
-            style: TextStyle(color: Color(0xFF7a6a5a), height: 1.5)),
+            style: TextStyle(color: AppColors.textMedium, height: 1.5)),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
               child: const Text('Garder',
-                  style: TextStyle(color: Color(0xFF7a6a5a)))),
+                  style: TextStyle(color: AppColors.textMedium))),
           TextButton(
               onPressed: () => Navigator.pop(ctx, true),
               child: const Text('Annuler la commande',
                   style: TextStyle(
-                      color: Colors.red, fontWeight: FontWeight.w600))),
+                      color: AppColors.error, fontWeight: FontWeight.w600))),
         ],
       ),
     );
@@ -845,12 +845,12 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
                 width: 16,
                 height: 16,
                 child: CircularProgressIndicator(
-                    strokeWidth: 2, color: Colors.red))
-            : const Icon(Icons.cancel_outlined, size: 18, color: Colors.red),
+                    strokeWidth: 2, color: AppColors.error))
+            : const Icon(Icons.cancel_outlined, size: 18, color: AppColors.error),
         label: const Text('Annuler la commande'),
         style: OutlinedButton.styleFrom(
-          foregroundColor: Colors.red,
-          side: const BorderSide(color: Colors.red),
+          foregroundColor: AppColors.error,
+          side: const BorderSide(color: AppColors.error),
           padding: const EdgeInsets.symmetric(vertical: 12),
         ),
       ),

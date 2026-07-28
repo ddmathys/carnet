@@ -20,8 +20,6 @@ import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
 
-const _adminEmail = 'david.mathys24@gmail.com';
-
 /// Génération d'un livre à partir d'une sélection de SOUVENIRS (plus d'un
 /// carnet) : ils viennent d'un tag, d'un choix manuel, ou des deux.
 class BookGenerateScreen extends StatefulWidget {
@@ -66,7 +64,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // avec un bouton « Commander », sans passer par l'assistant en 3 étapes.
   bool _quickOrder = false;
   bool get _isAdmin =>
-      FirebaseAuth.instance.currentUser?.email == _adminEmail;
+      FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
   bool _showPreview = false;
   String _selectedFormat = 'digital';
   String _coverType = 'soft'; // 'soft' ou 'hard'

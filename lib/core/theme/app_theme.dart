@@ -29,6 +29,7 @@ class AppColors {
   static const darkEarth = Color(0xFFB87A45);
   static const amber     = Color(0xFFE0A65E);
   static const error     = Color(0xFFE0645C);
+  static const success   = Color(0xFF8FAE7A); // vert doux, lisible sur fond sombre
 
   // ── Cover palette ──────────────────────────────────────────────────────
   static const coverGreen  = Color(0xFF3A6648);
