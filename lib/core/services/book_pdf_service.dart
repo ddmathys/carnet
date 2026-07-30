@@ -487,7 +487,7 @@ class BookPdfService {
       }
 
       // 4. Pages blanches de bourrage pour atteindre un nombre de pages valide
-      //    chez Gelato (n≡1 mod 6, entre 25 et 199 — cf. _gelatoValidPageCount).
+      //    chez Gelato (pair, 28–200 — cf. _gelatoValidPageCount).
       //    Uniquement pour l'impression.
       if (padForPrint) {
         for (int p = totalPages; p < _gelatoValidPageCount(totalPages); p++) {
@@ -514,38 +514,44 @@ class BookPdfService {
     return (bytes: bytes, pageCount: finalPageCount);
   }
 
-  // Arrondit au nombre de pages valide Gelato le plus proche par le haut.
+  // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
+  // PAIR, entre 28 et 200.
   //
   // Historique (à lire avant de retoucher cette règle) :
   // - 22.07 : deux commandes réellement PAYÉES (34 et 36 pages) rejetées
-  //   après coup par Gelato avec « exactement 37 pages » → hypothèse
-  //   n≡1(mod4), corrigée puis vite revertée.
-  // - Une commande suivante de 33 pages (issue de cette hypothèse) a été
-  //   rejetée par un BAD_REQUEST explicite de l'API order listant les
-  //   valeurs soi-disant valides : les PAIRS de 28 à 200. Code reverté sur
-  //   cette base (c'est l'ancienne version de cette fonction).
-  // - 28.07 : une commande de 40 pages (paire, donc « valide » selon cette
-  //   liste) a de nouveau été rejetée après coup avec « exactement 43
-  //   pages ». La liste `validPageCounts` de l'API catalogue est donc
-  //   **trompeuse** — elle ne reflète pas la vraie contrainte prépresse.
+  //   après coup, dans le dashboard Gelato, avec « exactement 37 pages » →
+  //   hypothèse n≡1(mod4), corrigée puis vite revertée.
+  // - Une commande de 33 pages (issue de cette hypothèse) a reçu un
+  //   BAD_REQUEST explicite de l'API order, À LA CRÉATION de la commande,
+  //   listant les valeurs valides : les PAIRS de 28 à 200. Règle repassée
+  //   à pair/28-200 sur cette base.
+  // - 28.07 matin : une commande de 40 pages (paire, donc « valide » selon
+  //   cette liste) a de nouveau été rejetée après coup avec « exactement 43
+  //   pages » → nouvelle hypothèse n≡1(mod 6) (plancher 25, plafond 199),
+  //   déployée en remplacement de la règle pair/28-200.
+  // - 28.07 après-midi : un test avec CETTE règle n≡1(mod6) (25 pages) a
+  //   reçu un BAD_REQUEST **à la création même de la commande** — pas après
+  //   coup — listant À NOUVEAU, mot pour mot, la même liste explicite
+  //   (PAIRS, 28 à 200). La règle n≡1(mod6) est donc **confirmée fausse** :
+  //   elle casse la création de la commande elle-même, avant même
+  //   d'atteindre la validation prépresse qui avait produit les rejets
+  //   « exactement 37/43 ».
   //
-  // Les TROIS rejets réels connus (37←34, 37←36, 43←40) sont TOUS expliqués
-  // par une seule règle : n ≡ 1 (mod 6). Le rejet BAD_REQUEST de 33 pages
-  // est également cohérent (33 n'est pas ≡1 mod 6 ; la valeur valide
-  // suivante est 37 — justement celle réclamée par les deux rejets réels).
-  // C'est l'hypothèse actuellement en place. Elle reste une INFÉRENCE
-  // (Gelato ne documente cette contrainte nulle part) — à reconfirmer sur la
-  // prochaine commande réellement payée avant de lui faire confiance à
-  // 100%. Le plancher 25 n'est pas vérifié en conditions réelles (seule la
-  // règle de congruence l'est). Voir mémoire projet + STATUS.md (22.07,
-  // 28.07). En attendant : on ajoute toujours des pages blanches en fin de
-  // livre pour combler l'écart (jamais de troncature de contenu réel), et
-  // l'écran de génération avertit l'utilisateur du nombre exact ajouté.
+  // Conclusion : la liste explicite pair/28-200 renvoyée par l'API order
+  // (vue deux fois, à des mois d'écart, sur deux tentatives indépendantes)
+  // FAIT FOI pour ce champ — c'est la seule source qui soit une vraie
+  // réponse machine de l'API, pas une lecture d'écran. Les rejets
+  // « exactement 37/43 pages » vus après coup dans le dashboard viennent
+  // d'AILLEURS (une validation prépresse ultérieure, distincte, de règle
+  // encore inconnue) : NE PAS essayer de la deviner à partir de 2-3 points
+  // de données et de la réinjecter ici — ça casse la création de commande
+  // à chaque fois. Si un rejet « exactement N pages » revient, le corriger
+  // au cas par cas pour CETTE commande (renvoi avec N pages, cf. écran de
+  // suivi commande) plutôt que de changer cette règle globale sans nouvelle
+  // preuve de type BAD_REQUEST explicite à la création.
   static int _gelatoValidPageCount(int n) {
-    var v = n < 25 ? 25 : n;
-    final rem = (v - 1) % 6;
-    if (rem != 0) v += 6 - rem;
-    if (v > 199) v = 199; // dernier n≡1(mod6) ≤ 200
+    var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
+    if (v > 200) v = 200;
     return v;
   }
 

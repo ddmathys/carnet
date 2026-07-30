@@ -122,7 +122,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
   // avant l'étape format) ; sinon estimation. Pour l'imprimé, le prix se base
-  // sur les pages réellement imprimées (bourrage Gelato n≡1 mod 6, 25–199 —
+  // sur les pages réellement imprimées (bourrage Gelato pair, 28–200 —
   // cf. BookPricing.printablePages).
   int get _pages => _previewPageCount > 0
       ? _previewPageCount
@@ -133,18 +133,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   String _priceLabel(String coverType) =>
       BookPricing.format(_priceFor(coverType));
 
-  // Gelato refuse au-delà de 199 pages (plafond de BookPdfService._gelatoValidPageCount
-  // — dernier n≡1(mod 6) sous la limite de 200 du catalogue). Contrairement au
-  // minimum (comblé par des pages blanches), on ne peut pas combler
-  // silencieusement un dépassement sans tronquer du contenu réel — d'où le
-  // blocage plutôt qu'un simple avertissement (cf. rejets de commande passés :
-  // le nombre de pages annoncé à Gelato ne correspondait plus au PDF réellement
-  // envoyé).
-  bool get _exceedsGelatoLimit => _pages > 199;
-  // Pages blanches ajoutées en fin de livre pour atteindre le prochain nombre
-  // de pages valide chez l'imprimeur (n≡1 mod 6, cf. BookPricing.printablePages)
-  // — 0 si le livre tombe déjà pile sur une valeur valide, ou s'il dépasse la
-  // limite haute (auquel cas aucun bourrage n'est appliqué).
+  // Gelato refuse au-delà de 200 pages (plafond de
+  // BookPdfService._gelatoValidPageCount). Contrairement au minimum (comblé
+  // par des pages blanches), on ne peut pas combler silencieusement un
+  // dépassement sans tronquer du contenu réel — d'où le blocage plutôt qu'un
+  // simple avertissement (cf. rejets de commande passés : le nombre de pages
+  // annoncé à Gelato ne correspondait plus au PDF réellement envoyé).
+  bool get _exceedsGelatoLimit => _pages > 200;
+  // Pages blanches ajoutées en fin de livre pour atteindre le minimum
+  // imprimeur (28, pair) — 0 si le livre dépasse déjà ce minimum, ou s'il
+  // dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
   int get _blankPagesAdded =>
       _exceedsGelatoLimit ? 0 : (_printedPages - _pages);
 
@@ -516,7 +514,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     // PDF réellement généré).
     if (_exceedsGelatoLimit) {
       _showSnack(
-          'Ce livre dépasse 199 pages — retire des souvenirs avant de commander.');
+          'Ce livre dépasse 200 pages — retire des souvenirs avant de commander.');
       return;
     }
     final isEdit = widget.editOrderId != null;
@@ -550,7 +548,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         customTitle: customTitle,
         customSubtitle: _bookSubtitle,
         backendUrl: AppConfig.backendUrl,
-        padForPrint: true, // pages valides Gelato (n≡1 mod 6, ≥25)
+        padForPrint: true, // pages valides Gelato (pair, ≥28)
         coverType: _coverType, // largeur exacte de couverture wraparound
       );
       final pdfBytes = gen.bytes;
@@ -870,7 +868,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Text(
-                'Ce livre fait $_pages pages, au-delà de la limite de 199 '
+                'Ce livre fait $_pages pages, au-delà de la limite de 200 '
                 'pages de l\'imprimeur — retire des souvenirs pour commander.',
                 style: const TextStyle(color: Colors.red, fontSize: 12),
               ),
@@ -1324,7 +1322,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             const SizedBox(height: 6),
             Text(
               'Ton livre fait $_pages pages. Le format imprimé accepte au '
-              'maximum 199 pages chez notre imprimeur. Retire des souvenirs '
+              'maximum 200 pages chez notre imprimeur. Retire des souvenirs '
               'pour pouvoir commander (le PDF digital reste possible sans '
               'limite).',
               style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
@@ -1364,9 +1362,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 Expanded(
                   child: Text(
                     'Ton livre fait $_pages pages. Notre imprimeur exige un '
-                    'nombre de pages précis : $_blankPagesAdded '
-                    'page$plural blanche$plural seront ajoutées à la fin '
-                    'pour arriver à $_printedPages pages.',
+                    'minimum de 28 pages (nombre pair) : $_blankPagesAdded '
+                    'page$plural blanche$plural seront ajoutées à la fin.',
                     style: const TextStyle(
                         fontSize: 12, color: AppColors.textMedium),
                   ),
@@ -1454,7 +1451,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               selected: _selectedFormat == 'printed' && _coverType == 'soft',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
-                      'Retire des souvenirs pour repasser sous 199 pages avant de choisir ce format.')
+                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
                   : () => setState(() {
                         _selectedFormat = 'printed';
                         _coverType = 'soft';
@@ -1474,7 +1471,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               selected: _selectedFormat == 'printed' && _coverType == 'hard',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
-                      'Retire des souvenirs pour repasser sous 199 pages avant de choisir ce format.')
+                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
                   : () => setState(() {
                         _selectedFormat = 'printed';
                         _coverType = 'hard';
@@ -1738,7 +1735,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               const Text(
                 'Prix tout compris : impression + livraison en Suisse + TVA. '
                 'Il dépend de la couverture (souple / rigide) et du nombre de '
-                'pages. Les livres imprimés font 25 pages minimum.',
+                'pages. Les livres imprimés font 28 pages minimum.',
                 style: TextStyle(
                     color: AppColors.textMedium, fontSize: 13, height: 1.4),
               ),

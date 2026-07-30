@@ -141,7 +141,7 @@ class MemoryPolaroid extends StatelessWidget {
                                       style: const TextStyle(
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.w600,
-                                          color: AppColors.textDark)),
+                                          color: AppColors.ink)),
                                 ],
                               ),
                             ),
@@ -213,7 +213,7 @@ class MemoryPolaroid extends StatelessWidget {
                       fontStyle: FontStyle.italic,
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
-                      color: AppColors.textDark)),
+                      color: AppColors.ink)),
               const SizedBox(height: 3),
               Text(sub,
                   maxLines: 1,
@@ -222,7 +222,7 @@ class MemoryPolaroid extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 10,
                       letterSpacing: 0.5,
-                      color: AppColors.textMedium)),
+                      color: AppColors.inkMedium)),
               const SizedBox(height: 4),
             ],
           ),

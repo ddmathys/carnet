@@ -64,18 +64,16 @@ class BookPricing {
     return 1 + pages; // + couverture
   }
 
-  /// Nombre de pages réellement imprimé : n≡1 (mod 6), entre 25 et 199 —
-  /// règle inférée de trois rejets de commandes réellement payées (34→37,
-  /// 36→37, 40→43 pages exigées). Doit rester identique à
-  /// BookPdfService._gelatoValidPageCount, qui documente l'historique
-  /// complet et pourquoi la liste `validPageCounts` du catalogue Gelato
-  /// (pairs, 28-200) est trompeuse. C'est sur CETTE base qu'est facturé un
-  /// livre imprimé.
+  /// Nombre de pages réellement imprimé : PAIR, entre 28 et 200 — liste
+  /// EXPLICITE renvoyée par l'API order de Gelato (BAD_REQUEST à la
+  /// création, deux fois confirmée à des mois d'écart). Doit rester
+  /// identique à BookPdfService._gelatoValidPageCount, qui documente
+  /// l'historique complet (y compris la piste n≡1(mod6), essayée puis
+  /// infirmée par un nouveau BAD_REQUEST). C'est sur CETTE base qu'est
+  /// facturé un livre imprimé.
   static int printablePages(int rawPages) {
-    var v = rawPages < 25 ? 25 : rawPages;
-    final rem = (v - 1) % 6;
-    if (rem != 0) v += 6 - rem;
-    if (v > 199) v = 199;
+    var v = rawPages < 28 ? 28 : (rawPages.isOdd ? rawPages + 1 : rawPages);
+    if (v > 200) v = 200;
     return v;
   }
 
