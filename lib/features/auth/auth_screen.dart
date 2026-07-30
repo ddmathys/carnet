@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:go_router/go_router.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/services/migration_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
@@ -27,6 +28,20 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _resetSent = false;
   bool _obscurePass = true;
   String? _error;
+  String? _versionLabel;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() => _versionLabel = 'v${info.version} (${info.buildNumber})');
+    }
+  }
 
   @override
   void dispose() {
@@ -321,6 +336,15 @@ class _AuthScreenState extends State<AuthScreen> {
                     ),
                   ),
                 ),
+                if (_versionLabel != null) ...[
+                  const SizedBox(height: 22),
+                  Center(
+                    child: Text(_versionLabel!,
+                        style: TextStyle(
+                            fontSize: 11.5,
+                            color: AppColors.textMedium.withOpacity(0.6))),
+                  ),
+                ],
               ],
             ),
           ),

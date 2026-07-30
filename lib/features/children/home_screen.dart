@@ -550,29 +550,20 @@ class _HeroGreeting extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 12, 22, 2),
-      child: Row(
+      child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('$greeting 👋',
-                    style: const TextStyle(
-                      fontFamily: 'Fraunces',
-                      fontSize: 28,
-                      fontWeight: FontWeight.w500,
-                      color: AppColors.textDark,
-                      height: 1.1,
-                    )),
-                const SizedBox(height: 4),
-                const Text('Chaque souvenir mérite d\'être conservé.',
-                    style:
-                        TextStyle(fontSize: 14, color: AppColors.textMedium)),
-              ],
-            ),
-          ),
-          const Text('📖', style: TextStyle(fontSize: 40)),
+          Text('$greeting 👋',
+              style: const TextStyle(
+                fontFamily: 'Fraunces',
+                fontSize: 28,
+                fontWeight: FontWeight.w500,
+                color: AppColors.textDark,
+                height: 1.1,
+              )),
+          const SizedBox(height: 4),
+          const Text('Chaque souvenir mérite d\'être conservé.',
+              style: TextStyle(fontSize: 14, color: AppColors.textMedium)),
         ],
       ),
     );

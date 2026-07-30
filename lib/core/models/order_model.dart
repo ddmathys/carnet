@@ -71,39 +71,58 @@ class OrderModel {
   String get statusEmoji => _statusEmojis[status] ?? '📦';
 
   static const _statusLabels = {
-    'received':  'Commande reçue',
-    'validated': 'Validée',
-    'printing':  'En impression',
-    'ready':     'À envoyer',
-    'invoiced':  'À payer',
-    'paid':      'Payée',
+    'received': 'Commande reçue',
+    'paid':     'Payée',
+    'shipped':  'Livrée',
   };
 
   static const _statusEmojis = {
-    'received':  '📬',
-    'validated': '✅',
-    'printing':  '🖨️',
-    'ready':     '📦',
-    'invoiced':  '🧾',
-    'paid':      '💚',
+    'received': '📬',
+    'paid':     '💚',
+    'shipped':  '📦',
   };
 
-  // Ordered list for timeline. Le paiement déclenche la commande → il vient
-  // AVANT l'impression et l'envoi.
+  // Ordered list pour le suivi client : volontairement réduit à 3 étapes.
+  // Le paiement se fait hors app (l'équipe recontacte séparément) et
+  // déclenche l'impression + l'envoi, regroupés ici sous "Livrée".
   static const statusFlow = [
     'received',
-    'validated',
-    'invoiced',
     'paid',
-    'printing',
-    'ready',
+    'shipped',
   ];
 
   int get statusIndex => statusFlow.indexOf(status);
 
   bool get gelatoWasRefused => gelatoStatus == 'refused';
   int get gelatoRetriesLeft => (3 - gelatoRetryCount).clamp(0, 3);
-  bool get canRetryGelato => gelatoWasRefused && gelatoRetriesLeft > 0;
+
+  // Le renvoi direct (orderType: order) n'est accepté par Gelato QUE pour un
+  // nombre de pages PAIR (confirmé le 30.07.26 : un envoi direct à 37 pages,
+  // le nombre impair exigé par ce refus, a été rejeté SYNCHRONE avec
+  // « Request contains errors » — jamais atteint la prépresse). Quand le
+  // refus exige un nombre impair, le renvoi client ne peut donc jamais
+  // réussir : on bloque plutôt que de laisser un bouton qui échouera
+  // systématiquement — seul un nouveau brouillon confirmé à la main dans le
+  // dashboard Gelato (côté admin) peut résoudre ce cas.
+  bool get gelatoRetryBlockedByParity =>
+      gelatoRequiredPageCount != null && gelatoRequiredPageCount!.isOdd;
+  bool get canRetryGelato =>
+      gelatoWasRefused && gelatoRetriesLeft > 0 && !gelatoRetryBlockedByParity;
+
+  // Gelato exprime son refus de mise en page en texte libre, ex. « Product
+  // requires exactly 37 page(s), while file(s) contain 34 page(s) » — pas de
+  // champ structuré. On extrait le nombre exact demandé pour pré-remplir le
+  // renvoi (voir book_generate_screen._forcedPageCount) plutôt que de laisser
+  // l'utilisateur deviner combien de pages ajouter.
+  static final _exactPageCountPattern =
+      RegExp(r'exactly (\d+) page', caseSensitive: false);
+  int? get gelatoRequiredPageCount {
+    final reason = refusalReason;
+    if (reason == null) return null;
+    final match = _exactPageCountPattern.firstMatch(reason);
+    if (match == null) return null;
+    return int.tryParse(match.group(1)!);
+  }
 
   factory OrderModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;

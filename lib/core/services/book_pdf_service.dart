@@ -149,6 +149,13 @@ class BookPdfService {
     // 'soft' | 'hard' — détermine le produit Gelato interrogé pour la largeur
     // exacte de couverture wraparound. Non requis si padForPrint == false.
     String coverType = 'soft',
+    // Force le nombre de pages final (bourrage de pages blanches jusqu'à
+    // cette valeur) au lieu de la règle générique _gelatoValidPageCount —
+    // utilisé pour renvoyer une commande refusée avec un nombre exact exigé
+    // par Gelato (ex. « exactly 37 page(s) »), qui ne correspond jamais à
+    // cette règle générique (toujours paire, jamais un nombre précis comme
+    // 37). Ignoré si inférieur au nombre de pages réel du contenu.
+    int? forcedPageCount,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -378,8 +385,11 @@ class BookPdfService {
 
     final totalPages =
         1 + photoPages.length + textOnlyMemories.length + (hasGrowth ? 1 : 0);
-    final finalPageCount =
-        padForPrint ? _gelatoValidPageCount(totalPages) : totalPages;
+    final finalPageCount = !padForPrint
+        ? totalPages
+        : (forcedPageCount != null && forcedPageCount > totalPages
+            ? forcedPageCount
+            : _gelatoValidPageCount(totalPages));
     // A4 full-bleed — margins handled inside each widget
     final fmt = PdfPageFormat(_a4W, _a4H, marginAll: 0);
 
@@ -490,7 +500,7 @@ class BookPdfService {
       //    chez Gelato (pair, 28–200 — cf. _gelatoValidPageCount).
       //    Uniquement pour l'impression.
       if (padForPrint) {
-        for (int p = totalPages; p < _gelatoValidPageCount(totalPages); p++) {
+        for (int p = totalPages; p < finalPageCount; p++) {
           doc.addPage(pw.Page(
             pageFormat: fmt,
             build: (_) => pw.Container(color: _cream),
@@ -549,6 +559,21 @@ class BookPdfService {
   // au cas par cas pour CETTE commande (renvoi avec N pages, cf. écran de
   // suivi commande) plutôt que de changer cette règle globale sans nouvelle
   // preuve de type BAD_REQUEST explicite à la création.
+  //
+  // - 30.07.26 : un envoi DIRECT en `orderType: order` avec 37 pages (le
+  //   nombre exact réclamé par un vrai refus prépresse ce jour-là, sur CETTE
+  //   même commande) a été rejeté SYNCHRONE par l'API order, avec « Request
+  //   contains errors » — 3ᵉ confirmation indépendante que la création
+  //   réelle n'accepte QUE des valeurs paires. Conclusion définitive : les
+  //   deux contraintes (paire à la création, n≡1(mod6) à la prépresse après
+  //   confirmation manuelle d'un brouillon dans le dashboard Gelato) sont
+  //   RÉELLES et MUTUELLEMENT INCOMPATIBLES pour ce productUid — aucun
+  //   nombre de pages ne peut satisfaire les deux à la fois via un appel
+  //   direct `orderType: order`. Le renvoi direct en production (voir
+  //   gelato/[action].ts, type='order') NE PEUT DONC PAS résoudre un refus
+  //   « exactement N pages » quand N est impair — seul un nouveau BROUILLON
+  //   (orderType: draft, qui accepte tout) confirmé À LA MAIN dans le
+  //   dashboard Gelato permet d'atteindre la vraie validation prépresse.
   static int _gelatoValidPageCount(int n) {
     var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
     if (v > 200) v = 200;

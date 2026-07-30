@@ -72,6 +72,9 @@ dependencies:
   # Partage natif du lien d'invitation (WhatsApp, SMS, mail…)
   share_plus: ^10.1.4
 
+  # Numéro de version affiché dans l'app (écran de connexion)
+  package_info_plus: ^8.1.2
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

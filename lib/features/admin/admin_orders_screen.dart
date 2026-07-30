@@ -114,12 +114,9 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   }
 
   String _statusShort(String s) => switch (s) {
-    'received'  => 'Reçues',
-    'validated' => 'Validées',
-    'printing'  => 'Impression',
-    'ready'     => 'À envoyer',
-    'invoiced'  => 'À payer',
-    'paid'      => 'Payées',
+    'received' => 'Reçues',
+    'paid'     => 'Payées',
+    'shipped'  => 'Livrées',
     _ => s,
   };
 }

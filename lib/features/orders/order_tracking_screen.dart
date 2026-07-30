@@ -362,10 +362,14 @@ class _GelatoStatusBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (order.gelatoStatus) {
       case 'refused':
-        return order.canRetryGelato ? _refusedRetriable(context) : _blocked(
-          'Notre imprimeur refuse toujours ce livre après plusieurs essais. '
-          'Notre équipe reprend la main et te recontacte rapidement.',
-        );
+        if (order.canRetryGelato) return _refusedRetriable(context);
+        return _blocked(order.gelatoRetryBlockedByParity
+            ? 'Un souci technique de mise en page nécessite une correction '
+                'manuelle de notre côté. Notre équipe s\'en occupe et te '
+                'recontacte rapidement.'
+            : 'Notre imprimeur refuse toujours ce livre après plusieurs '
+                'essais. Notre équipe reprend la main et te recontacte '
+                'rapidement.');
       case 'error':
         return _blocked(
           'Un souci technique est survenu lors de l\'envoi à l\'imprimeur. '
@@ -656,7 +660,8 @@ class _PayButtonState extends State<_PayButton> {
             Expanded(
               child: Text(
                 'Le paiement déclenche la commande de ton livre. L\'équipe '
-                'Carnet te contactera rapidement pour les instructions de paiement.',
+                'Carnet te contactera rapidement pour les instructions de '
+                'paiement, puis ton livre sera livré sous quelques jours.',
                 style: TextStyle(
                     fontSize: 13, color: AppColors.textDark, height: 1.5),
               ),
@@ -782,8 +787,8 @@ class _CancelOrderButton extends StatefulWidget {
 class _CancelOrderButtonState extends State<_CancelOrderButton> {
   bool _deleting = false;
 
-  // Annulable uniquement avant l'envoi en impression
-  static const _cancellableStatuses = {'received', 'validated'};
+  // Annulable uniquement avant paiement
+  static const _cancellableStatuses = {'received'};
 
   bool get _canCancel => _cancellableStatuses.contains(widget.order.status);
 

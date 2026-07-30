@@ -127,7 +127,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   int get _pages => _previewPageCount > 0
       ? _previewPageCount
       : BookPricing.estimatePages(_selectedMemories);
-  int get _printedPages => BookPricing.printablePages(_pages);
+
+  // Renvoi après refus Gelato avec un nombre de pages exact exigé (ex.
+  // « exactly 37 page(s) », cf. OrderModel.gelatoRequiredPageCount) — pré-
+  // rempli depuis la commande refusée, ajustable si besoin (on peut vouloir
+  // plus de pages blanches que le strict minimum demandé).
+  int? _forcedPageCount;
+
+  int get _printedPages => (_forcedPageCount != null && _forcedPageCount! > _pages)
+      ? _forcedPageCount!
+      : BookPricing.printablePages(_pages);
   double _priceFor(String coverType) =>
       BookPricing.price(coverType: coverType, pages: _printedPages);
   String _priceLabel(String coverType) =>
@@ -141,8 +150,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // annoncé à Gelato ne correspondait plus au PDF réellement envoyé).
   bool get _exceedsGelatoLimit => _pages > 200;
   // Pages blanches ajoutées en fin de livre pour atteindre le minimum
-  // imprimeur (28, pair) — 0 si le livre dépasse déjà ce minimum, ou s'il
-  // dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
+  // imprimeur (28, pair), ou le nombre exact exigé par Gelato lors d'un
+  // renvoi (_forcedPageCount) — 0 si le livre dépasse déjà cette cible, ou
+  // s'il dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
   int get _blankPagesAdded =>
       _exceedsGelatoLimit ? 0 : (_printedPages - _pages);
 
@@ -343,6 +353,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _cityCtrl.text = order.city;
         _npaCtrl.text = order.npa;
         _countryCtrl.text = order.country;
+        _forcedPageCount = order.gelatoRequiredPageCount;
       });
       _titleCtrl.text = order.bookTitle;
     } catch (_) {
@@ -518,6 +529,19 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       return;
     }
     final isEdit = widget.editOrderId != null;
+    // Le renvoi direct (orderType: order, via OrderService.retryGelatoOrder)
+    // n'est accepté par Gelato QUE pour un nombre de pages PAIR (confirmé le
+    // 30.07.26 — un envoi impair est rejeté SYNCHRONE, jamais accepté).
+    // Impossible donc de renvoyer directement quand le refus exige un compte
+    // impair : il faut un nouveau brouillon confirmé à la main dans le
+    // dashboard Gelato (console admin → « Envoyer à Gelato »).
+    if (isEdit && (_forcedPageCount?.isOdd ?? false)) {
+      _showSnack(
+          'Ce nombre de pages est impair : Gelato refuse toujours un renvoi '
+          'direct dans ce cas. Passe par la console admin pour créer un '
+          'nouveau brouillon à confirmer dans le dashboard Gelato.');
+      return;
+    }
     if (!isEdit && !(_addressKey.currentState?.validate() ?? false)) return;
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _notebook == null) return;
@@ -550,6 +574,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         backendUrl: AppConfig.backendUrl,
         padForPrint: true, // pages valides Gelato (pair, ≥28)
         coverType: _coverType, // largeur exacte de couverture wraparound
+        forcedPageCount: _forcedPageCount,
       );
       final pdfBytes = gen.bytes;
       final pageCount = gen.pageCount;
@@ -779,18 +804,22 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      title,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    TextField(
+                      controller: _titleCtrl,
+                      textCapitalization: TextCapitalization.sentences,
                       style: const TextStyle(
                         fontFamily: 'PlayfairDisplay',
-                        fontSize: 18,
+                        fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: AppColors.textDark,
                       ),
+                      decoration: _bookFieldDecoration(
+                        label: 'Titre du livre',
+                        icon: Icons.edit_outlined,
+                      ),
+                      onChanged: (_) => setState(() {}),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
                       '${_selectedMemories.length} souvenirs · $_printedPages pages',
                       style: const TextStyle(
@@ -864,6 +893,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
           ),
           const SizedBox(height: 24),
+          if (_forcedPageCount != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: _buildPageCountNotice(),
+            ),
           if (_exceedsGelatoLimit)
             Padding(
               padding: const EdgeInsets.only(bottom: 12),
@@ -1341,6 +1375,87 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         ),
       );
     }
+    if (_forcedPageCount != null) {
+      final plural = _blankPagesAdded > 1 ? 's' : '';
+      return Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: AppColors.amber.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: AppColors.amber.withOpacity(0.3)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, size: 16, color: AppColors.amber),
+                SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Notre imprimeur a refusé la mise en page précédente et '
+                    'exige un nombre de pages précis pour ce livre.',
+                    style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                Text('Nombre de pages à envoyer :',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMedium)),
+                const Spacer(),
+                _pageStepperButton(
+                  icon: Icons.remove,
+                  onTap: _forcedPageCount! > _pages
+                      ? () => setState(() => _forcedPageCount = _forcedPageCount! - 1)
+                      : null,
+                ),
+                SizedBox(
+                  width: 36,
+                  child: Text('$_forcedPageCount',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.textDark)),
+                ),
+                _pageStepperButton(
+                  icon: Icons.add,
+                  onTap: () =>
+                      setState(() => _forcedPageCount = _forcedPageCount! + 1),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _blankPagesAdded > 0
+                  ? 'Ton livre fait $_pages pages : $_blankPagesAdded '
+                      'page$plural blanche$plural seront ajoutées à la fin '
+                      'pour atteindre ce total.'
+                  : 'Ton livre a déjà assez de pages pour ce total.',
+              style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+            ),
+            const SizedBox(height: 6),
+            TextButton.icon(
+              onPressed: _openMemorySelection,
+              icon: const Icon(Icons.add_photo_alternate_outlined,
+                  size: 16, color: AppColors.amber),
+              label: const Text('Ajouter des souvenirs à la place',
+                  style: TextStyle(color: AppColors.amber, fontSize: 13)),
+              style: TextButton.styleFrom(
+                  padding: EdgeInsets.zero, minimumSize: Size.zero),
+            ),
+          ],
+        ),
+      );
+    }
     if (_blankPagesAdded > 0) {
       final plural = _blankPagesAdded > 1 ? 's' : '';
       return Container(
@@ -1403,6 +1518,26 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _pageStepperButton({required IconData icon, VoidCallback? onTap}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        width: 28,
+        height: 28,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: AppColors.surface,
+          border: Border.all(color: AppColors.border),
+        ),
+        child: Icon(icon,
+            size: 15,
+            color: onTap == null ? AppColors.softGray : AppColors.textDark),
       ),
     );
   }
