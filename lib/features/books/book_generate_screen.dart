@@ -468,8 +468,24 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       if (mounted) setState(() => _exporting = false);
     }
     if (pdfBytes == null) return;
+    await _finishDownload(pdfBytes, bookTitle);
+  }
 
-    // 2. Sauvegarde silencieuse côté admin + historique (sans bloquer).
+  // Depuis l'écran d'aperçu (déjà généré, WYSIWYG) : pas besoin de régénérer,
+  // on réutilise directement les octets déjà rendus.
+  Future<void> _downloadPreviewPdf() async {
+    if (_previewPdfBytes == null || _notebook == null) return;
+    final customTitle =
+        _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
+    final bookTitle = customTitle ?? _notebook!.title;
+    await _finishDownload(_previewPdfBytes!, bookTitle);
+  }
+
+  // 2. Sauvegarde silencieuse côté admin + historique (sans bloquer).
+  // 3. On OUVRE le PDF dans l'app (visualiseur plein écran) : on le lit tout
+  //    de suite, sans passer par la feuille de partage. Le partage et
+  //    l'impression restent accessibles depuis la barre du visualiseur.
+  Future<void> _finishDownload(Uint8List pdfBytes, String bookTitle) async {
     _uploadPdfToStorage(
       pdfBytes: pdfBytes,
       bookTitle: bookTitle,
@@ -479,12 +495,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       memoriesCount: _selectedMemories.length,
     );
 
-    // 3. On OUVRE le PDF dans l'app (visualiseur plein écran) : on le lit tout
-    //    de suite, sans passer par la feuille de partage. Le partage et
-    //    l'impression restent accessibles depuis la barre du visualiseur.
     if (!mounted) return;
     Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => PdfViewerScreen(title: bookTitle, bytes: pdfBytes!),
+      builder: (_) => PdfViewerScreen(title: bookTitle, bytes: pdfBytes),
     ));
   }
 
@@ -1183,6 +1196,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     return _PdfPreviewViewer(
       pdfBytes: _previewPdfBytes!,
       pageCount: _previewPageCount,
+      printedPages: _printedPages,
+      priceSoft: _priceLabel('soft'),
+      priceHard: _priceLabel('hard'),
+      exceedsLimit: _exceedsGelatoLimit,
+      onDownload: _downloadPreviewPdf,
       onChooseFormat: () => setState(() {
         _showPreview = false;
         _step = 1;
@@ -2405,11 +2423,23 @@ class _OrderRow extends StatelessWidget {
 class _PdfPreviewViewer extends StatefulWidget {
   final Uint8List pdfBytes;
   final int pageCount;
+  // Infos pages/prix affichées en lecture seule sur cet écran (mêmes valeurs
+  // que l'étape format juste après — juste visibles plus tôt, sans y aller).
+  final int printedPages;
+  final String priceSoft;
+  final String priceHard;
+  final bool exceedsLimit;
+  final VoidCallback onDownload;
   final VoidCallback onChooseFormat;
 
   const _PdfPreviewViewer({
     required this.pdfBytes,
     required this.pageCount,
+    required this.printedPages,
+    required this.priceSoft,
+    required this.priceHard,
+    required this.exceedsLimit,
+    required this.onDownload,
     required this.onChooseFormat,
   });
 
@@ -2520,12 +2550,47 @@ class _PdfPreviewViewerState extends State<_PdfPreviewViewer> {
             ),
           ),
         ),
+        // Pages / prix estimé — mêmes valeurs qu'à l'étape format, visibles
+        // ici sans avoir à y aller.
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20),
+          child: widget.exceedsLimit
+              ? const Text(
+                  'Ce livre dépasse 200 pages : retire des souvenirs pour '
+                  'pouvoir l\'imprimer.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.amber, fontSize: 12.5),
+                )
+              : Text(
+                  '${widget.printedPages} pages imprimées · Souple '
+                  '${widget.priceSoft} · Rigide ${widget.priceHard}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: AppColors.textMedium, fontSize: 12.5),
+                ),
+        ),
         // CTA
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 28),
-          child: ElevatedButton(
-            onPressed: widget.onChooseFormat,
-            child: const Text('Choisir le format →'),
+          padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
+          child: Column(
+            children: [
+              OutlinedButton.icon(
+                onPressed: widget.onDownload,
+                icon: const Icon(Icons.download_outlined, size: 18),
+                label: const Text('Télécharger le PDF'),
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(46),
+                ),
+              ),
+              const SizedBox(height: 10),
+              ElevatedButton(
+                onPressed: widget.onChooseFormat,
+                style: ElevatedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(50),
+                ),
+                child: const Text('Choisir le format →'),
+              ),
+            ],
           ),
         ),
       ],
