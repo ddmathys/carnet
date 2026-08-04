@@ -2449,8 +2449,8 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
     for (final id in _local) {
       final m = widget.memories
           .firstWhere((m) => m.id == id, orElse: () => widget.memories.first);
-      if (m.mediaUrls.isNotEmpty) {
-        n += m.mediaUrls.length;
+      if (m.mediaKeys.isNotEmpty || m.mediaUrls.isNotEmpty) {
+        n += m.mediaKeys.length + m.mediaUrls.length;
       } else if (m.photoUrl != null && m.photoUrl!.isNotEmpty) {
         n++;
       }
@@ -2526,10 +2526,12 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                 itemBuilder: (_, i) {
                   final m = widget.memories[i];
                   final selected = _local.contains(m.id);
-                  final hasPhotos = m.mediaUrls.isNotEmpty ||
+                  final hasR2OrLegacyMedia =
+                      m.mediaKeys.isNotEmpty || m.mediaUrls.isNotEmpty;
+                  final hasPhotos = hasR2OrLegacyMedia ||
                       (m.photoUrl != null && m.photoUrl!.isNotEmpty);
-                  final photoCount = m.mediaUrls.isNotEmpty
-                      ? m.mediaUrls.length
+                  final photoCount = hasR2OrLegacyMedia
+                      ? m.mediaKeys.length + m.mediaUrls.length
                       : (hasPhotos ? 1 : 0);
                   final preview = m.rawContent.length > 65
                       ? '${m.rawContent.substring(0, 65)}…'
@@ -2631,30 +2633,52 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                                     ],
                                   ),
                                 ],
+                                if (selected && hasPhotos) ...[
+                                  const SizedBox(height: 6),
+                                  GestureDetector(
+                                    onTap: () async {
+                                      final updated = await showModalBottomSheet<
+                                          MemoryModel>(
+                                        context: context,
+                                        isScrollControlled: true,
+                                        backgroundColor: Colors.transparent,
+                                        builder: (_) =>
+                                            _MemoryLayoutSheet(memory: m),
+                                      );
+                                      if (updated != null) {
+                                        widget.onMemoryUpdated(updated);
+                                      }
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.sageTint,
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.tune,
+                                              size: 13, color: AppColors.sage),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Mise en page · densité, photos en grand',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.sage
+                                                    .withOpacity(0.9)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ],
                             ),
                           ),
-                          if (selected && hasPhotos)
-                            IconButton(
-                              padding: EdgeInsets.zero,
-                              constraints: const BoxConstraints(),
-                              visualDensity: VisualDensity.compact,
-                              icon: const Icon(Icons.tune,
-                                  size: 18, color: AppColors.sage),
-                              tooltip: 'Mise en page de ce souvenir',
-                              onPressed: () async {
-                                final updated =
-                                    await showModalBottomSheet<MemoryModel>(
-                                  context: context,
-                                  isScrollControlled: true,
-                                  backgroundColor: Colors.transparent,
-                                  builder: (_) => _MemoryLayoutSheet(memory: m),
-                                );
-                                if (updated != null) {
-                                  widget.onMemoryUpdated(updated);
-                                }
-                              },
-                            ),
                         ],
                       ),
                     ),
