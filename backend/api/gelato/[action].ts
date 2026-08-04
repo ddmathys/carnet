@@ -194,8 +194,13 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     })
   }
 
+  // Un envoi "order" passe TOUJOURS par un brouillon d'abord (converti en
+  // vraie commande via PATCH juste après) : Gelato rejette SYNCHRONE toute
+  // création directe orderType:"order" dont le nombre de pages est impair
+  // (confirmé le 30.07.26), alors qu'un brouillon accepte n'importe quel
+  // nombre de pages. Voir plan `clever-hugging-waterfall.md`.
   const payload = {
-    orderType: type,
+    orderType: type === 'order' ? 'draft' : type,
     orderReferenceId: orderId,
     customerReferenceId: String(o0.userId ?? ''),
     currency: 'CHF',
@@ -247,6 +252,40 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     }
 
     const gelatoOrderId = data?.id ?? data?.orderId ?? null
+
+    // Confirmation du brouillon en vraie commande — équivalent programmatique
+    // du bouton "confirmer" du dashboard Gelato. C'est CE PATCH qui déclenche
+    // la vraie validation prépresse, pas la création du brouillon ci-dessus
+    // (voir lib/gelato.ts). ⚠️ Pas encore vérifié en conditions réelles pour
+    // un nombre de pages impair — à reconfirmer sur le prochain refus réel et
+    // documenter le résultat en mémoire projet.
+    if (type === 'order' && gelatoOrderId) {
+      const patchRes = await fetch(
+        `${GELATO_ORDER_URL}/${encodeURIComponent(gelatoOrderId)}`,
+        {
+          method: 'PATCH',
+          headers: { 'X-API-KEY': apiKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ orderType: 'order' }),
+        }
+      )
+      const patchRaw = await patchRes.text()
+      let patchData: any = null
+      try {
+        patchData = JSON.parse(patchRaw)
+      } catch {
+        /* réponse non-JSON — on garde patchRaw */
+      }
+      if (!patchRes.ok) {
+        const detail = (patchData?.message ?? patchRaw ?? '').toString().slice(0, 500)
+        // Même traitement qu'un échec de création : la tentative est quand
+        // même consommée côté client (déjà géré par la transaction plus haut).
+        await ref.update({ gelatoStatus: 'error', gelatoError: detail })
+        return res
+          .status(502)
+          .json({ error: 'Gelato a refusé la confirmation de commande', detail })
+      }
+    }
+
     await ref.update({
       gelatoOrderId,
       // Pour un brouillon : statut 'draft' comme avant. Pour un envoi direct

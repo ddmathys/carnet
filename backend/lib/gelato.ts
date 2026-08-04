@@ -119,16 +119,6 @@ export async function notifyClientOfRefusal(orderId: string): Promise<void> {
   const bookTitle = escapeHtml(String(o.bookTitle ?? ''))
   const firstName = escapeHtml(String(o.firstName ?? ''))
   const retriesLeft = Math.max(0, 3 - Number(o.gelatoRetryCount ?? 0))
-  // Le renvoi direct (orderType: order) n'est accepté par Gelato QUE pour un
-  // nombre de pages PAIR (confirmé le 30.07.26) — quand le refus exige un
-  // nombre impair, le client ne peut pas se dépanner seul dans l'app (le
-  // bouton est caché côté client, voir OrderModel.canRetryGelato) : on ne lui
-  // promet pas un renvoi en un clic qui échouerait à coup sûr.
-  const requiredPages = /exactly (\d+) page/i.exec(
-    String(o.refusalReason ?? '')
-  )?.[1]
-  const blockedByParity =
-    requiredPages != null && Number(requiredPages) % 2 === 1
 
   if (userEmail) {
     const html = wrap(`
@@ -141,24 +131,17 @@ export async function notifyClientOfRefusal(orderId: string): Promise<void> {
       <table width="100%" style="background:#fff7e6;border:1px solid #f0d9a0;border-radius:12px;margin-bottom:20px;">
         <tr><td style="padding:16px 20px;">
           <p style="margin:0;font-size:14px;color:#2d2d2d;line-height:1.6;">
-            ${
-              blockedByParity
-                ? `Notre équipe s'en occupe directement et vous recontacte
-                   rapidement — aucune action de votre part n'est nécessaire.`
-                : `Ouvrez l'application Carnet, rubrique <strong>Mes
-                   commandes</strong> : vous pourrez ajuster le livre en un
-                   clic et le renvoyer directement à l'impression.`
-            }
+            Ouvrez l'application Carnet, rubrique <strong>Mes
+            commandes</strong> : vous pourrez ajuster le livre en un
+            clic et le renvoyer directement à l'impression.
           </p>
         </td></tr>
       </table>
       <p style="margin:0;font-size:13px;color:#888;line-height:1.6;">
         ${
-          blockedByParity
-            ? `Notre équipe reprend la main sur cette commande.`
-            : retriesLeft > 0
-              ? `Il vous reste ${retriesLeft} tentative${retriesLeft > 1 ? 's' : ''} de renvoi automatique — au-delà, notre équipe reprend la main.`
-              : `Le nombre de tentatives automatiques est atteint — notre équipe reprend la main et vous recontacte.`
+          retriesLeft > 0
+            ? `Il vous reste ${retriesLeft} tentative${retriesLeft > 1 ? 's' : ''} de renvoi automatique — au-delà, notre équipe reprend la main.`
+            : `Le nombre de tentatives automatiques est atteint — notre équipe reprend la main et vous recontacte.`
         }
       </p>
     `)

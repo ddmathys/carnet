@@ -96,18 +96,7 @@ class OrderModel {
   bool get gelatoWasRefused => gelatoStatus == 'refused';
   int get gelatoRetriesLeft => (3 - gelatoRetryCount).clamp(0, 3);
 
-  // Le renvoi direct (orderType: order) n'est accepté par Gelato QUE pour un
-  // nombre de pages PAIR (confirmé le 30.07.26 : un envoi direct à 37 pages,
-  // le nombre impair exigé par ce refus, a été rejeté SYNCHRONE avec
-  // « Request contains errors » — jamais atteint la prépresse). Quand le
-  // refus exige un nombre impair, le renvoi client ne peut donc jamais
-  // réussir : on bloque plutôt que de laisser un bouton qui échouera
-  // systématiquement — seul un nouveau brouillon confirmé à la main dans le
-  // dashboard Gelato (côté admin) peut résoudre ce cas.
-  bool get gelatoRetryBlockedByParity =>
-      gelatoRequiredPageCount != null && gelatoRequiredPageCount!.isOdd;
-  bool get canRetryGelato =>
-      gelatoWasRefused && gelatoRetriesLeft > 0 && !gelatoRetryBlockedByParity;
+  bool get canRetryGelato => gelatoWasRefused && gelatoRetriesLeft > 0;
 
   // Gelato exprime son refus de mise en page en texte libre, ex. « Product
   // requires exactly 37 page(s), while file(s) contain 34 page(s) » — pas de

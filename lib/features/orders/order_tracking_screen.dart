@@ -363,13 +363,9 @@ class _GelatoStatusBanner extends StatelessWidget {
     switch (order.gelatoStatus) {
       case 'refused':
         if (order.canRetryGelato) return _refusedRetriable(context);
-        return _blocked(order.gelatoRetryBlockedByParity
-            ? 'Un souci technique de mise en page nécessite une correction '
-                'manuelle de notre côté. Notre équipe s\'en occupe et te '
-                'recontacte rapidement.'
-            : 'Notre imprimeur refuse toujours ce livre après plusieurs '
-                'essais. Notre équipe reprend la main et te recontacte '
-                'rapidement.');
+        return _blocked('Notre imprimeur refuse toujours ce livre après '
+            'plusieurs essais. Notre équipe reprend la main et te recontacte '
+            'rapidement.');
       case 'error':
         return _blocked(
           'Un souci technique est survenu lors de l\'envoi à l\'imprimeur. '
