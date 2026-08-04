@@ -49,9 +49,27 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
-      - name: Publier l'APK
+      - name: Publier l'APK (artefact GitHub Actions, 30 jours)
         uses: actions/upload-artifact@v4
         with:
           name: carnet-apk
           path: build/app/outputs/flutter-apk/app-release.apk
           retention-days: 30
+
+      # Publie aussi l'APK sur dmathys.dev/download/carnet.apk (rewrite Vercel
+      # vers ce fichier sur Firebase Storage, voir landing/vercel.json) — sans
+      # cette étape, ce lien restait figé sur le tout premier build tant que
+      # personne ne le remplaçait à la main (gsutil cp ... gs://.../public/carnet.apk).
+      - name: Authentification Google Cloud (service account Firebase)
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+      - name: Renommer l'APK pour publication
+        run: cp build/app/outputs/flutter-apk/app-release.apk build/app/outputs/flutter-apk/carnet.apk
+
+      - name: Publier sur dmathys.dev/download/carnet.apk
+        uses: google-github-actions/upload-cloud-storage@v2
+        with:
+          path: build/app/outputs/flutter-apk/carnet.apk
+          destination: bloom-bcb1f.firebasestorage.app/public
