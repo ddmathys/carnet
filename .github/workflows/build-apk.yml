@@ -42,8 +42,12 @@ jobs:
       - name: Dépendances
         run: flutter pub get
 
+      # Le numéro de build (visible dans l'app sur l'écran de connexion,
+      # "v1.0.0 (N)") ne bougeait jamais (fixé à 1 dans pubspec.yaml) — donc
+      # aucun moyen de vérifier qu'un téléphone a bien la dernière version.
+      # On force le numéro de run GitHub Actions (toujours croissant, unique).
       - name: Build APK release (signé)
-        run: flutter build apk --release
+        run: flutter build apk --release --build-number=${{ github.run_number }}
         env:
           ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/carnet-release.p12
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
