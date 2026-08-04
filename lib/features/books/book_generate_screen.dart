@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
@@ -14,6 +16,7 @@ import '../../core/models/order_model.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/quota_service.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/pdf_service.dart';
 import 'pdf_viewer_screen.dart';
@@ -1542,6 +1545,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     );
   }
 
+  // Vrai dès qu'un souvenir a été modifié (mise en page ou photos ajoutées)
+  // pendant que la sheet « Souvenirs à inclure » était ouverte — sert à
+  // régénérer l'aperçu automatiquement à la fermeture, sans que l'utilisateur
+  // ait à retaper « Aperçu du livre » lui-même.
+  bool _memoriesChangedInSheet = false;
+
   Future<void> _openMemorySelection() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -1561,12 +1570,19 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         onMemoryUpdated: _applyMemoryLayoutUpdate,
       ),
     );
+    if (_memoriesChangedInSheet) {
+      _memoriesChangedInSheet = false;
+      await _generate();
+    }
   }
 
   // Patche l'état local après un réglage de mise en page (densité / photos en
-  // grand) sauvegardé sur un souvenir — pas de refetch, le prochain « Générer
-  // l'aperçu » utilise directement la version à jour.
+  // grand) ou un ajout de photos sauvegardé sur un souvenir — pas de refetch,
+  // le prochain « Générer l'aperçu » (déclenché automatiquement à la
+  // fermeture de la sheet, voir _openMemorySelection) utilise directement la
+  // version à jour.
   void _applyMemoryLayoutUpdate(MemoryModel updated) {
+    _memoriesChangedInSheet = true;
     setState(() {
       final i = _memories.indexWhere((m) => m.id == updated.id);
       if (i != -1) _memories[i] = updated;
@@ -2335,11 +2351,126 @@ class _MemorySelectionSheet extends StatefulWidget {
 
 class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   late Set<String> _local;
+  // Souvenirs patchés localement après ajout de photos (mediaKeys à jour) —
+  // widget.memories n'est reçu qu'une fois à l'ouverture de la sheet, donc on
+  // superpose ces versions pour que le compteur/bouton "Mise en page" reflètent
+  // les ajouts sans devoir fermer/rouvrir la sheet.
+  final Map<String, MemoryModel> _patched = {};
+  final Set<String> _uploadingIds = {};
 
   @override
   void initState() {
     super.initState();
     _local = Set.from(widget.selectedIds);
+  }
+
+  MemoryModel _memoryAt(int i) {
+    final m = widget.memories[i];
+    return _patched[m.id] ?? m;
+  }
+
+  Future<void> _addPhotosTo(MemoryModel m) async {
+    final source = await showModalBottomSheet<ImageSource>(
+      context: context,
+      backgroundColor: AppColors.surface,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Container(
+              width: 36,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.softGray.withOpacity(0.4),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: const Icon(Icons.perm_media_outlined,
+                  color: AppColors.sage),
+              title: const Text('Choisir dans la galerie'),
+              subtitle: const Text('Plusieurs photos à la fois'),
+              onTap: () => Navigator.pop(context, ImageSource.gallery),
+            ),
+            ListTile(
+              leading:
+                  const Icon(Icons.add_a_photo_outlined, color: AppColors.sage),
+              title: const Text('Prendre une photo'),
+              onTap: () => Navigator.pop(context, ImageSource.camera),
+            ),
+            const SizedBox(height: 8),
+          ],
+        ),
+      ),
+    );
+    if (source == null) return;
+
+    final picker = ImagePicker();
+    List<XFile> picked;
+    try {
+      if (source == ImageSource.gallery) {
+        picked = await picker.pickMultiImage(imageQuality: 80, maxWidth: 1920);
+      } else {
+        final shot = await picker.pickImage(
+            source: ImageSource.camera, imageQuality: 80, maxWidth: 1920);
+        picked = shot != null ? [shot] : const [];
+      }
+    } catch (_) {
+      if (mounted) _showSnack('Impossible d\'accéder à la photo');
+      return;
+    }
+    if (picked.isEmpty || !mounted) return;
+
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid != null) {
+      final q = await QuotaService.canAddPhotos(uid, adding: picked.length);
+      if (!q.allowed) {
+        if (mounted) {
+          _showSnack(
+              'Limite de ${q.limit} photos atteinte — retire des photos avant d\'en ajouter.');
+        }
+        return;
+      }
+    }
+
+    setState(() => _uploadingIds.add(m.id));
+    try {
+      final files = picked.map((x) => File(x.path)).toList();
+      final newKeys = await PhotoService.uploadMultiplePhotosToR2(
+        photos: files,
+        notebookId: m.notebookId,
+      );
+      if (newKeys.length < files.length && mounted) {
+        _showSnack(
+            '${files.length - newKeys.length} photo(s) n\'ont pas pu être envoyées.');
+      }
+      if (newKeys.isEmpty) return;
+
+      final allKeys = [...m.mediaKeys, ...newKeys];
+      await FirebaseFirestore.instance
+          .collection('memories')
+          .doc(m.id)
+          .update({'mediaKeys': allKeys});
+      PhotoService.invalidateSignedCache(m.id);
+
+      final updated = m.copyWith(mediaKeys: allKeys);
+      if (mounted) setState(() => _patched[m.id] = updated);
+      widget.onMemoryUpdated(updated);
+    } catch (e) {
+      if (mounted) _showSnack('Échec de l\'envoi : $e');
+    } finally {
+      if (mounted) setState(() => _uploadingIds.remove(m.id));
+    }
+  }
+
+  void _showSnack(String msg) {
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(msg)));
   }
 
   String _formatDate(MemoryModel m) {
@@ -2438,8 +2569,9 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                 controller: ctrl,
                 itemCount: widget.memories.length,
                 itemBuilder: (_, i) {
-                  final m = widget.memories[i];
+                  final m = _memoryAt(i);
                   final selected = _local.contains(m.id);
+                  final uploading = _uploadingIds.contains(m.id);
                   final hasR2OrLegacyMedia =
                       m.mediaKeys.isNotEmpty || m.mediaUrls.isNotEmpty;
                   final hasPhotos = hasR2OrLegacyMedia ||
@@ -2545,6 +2677,53 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                                                 .withOpacity(0.8)),
                                       ),
                                     ],
+                                  ),
+                                ],
+                                if (selected) ...[
+                                  const SizedBox(height: 6),
+                                  GestureDetector(
+                                    onTap: uploading
+                                        ? null
+                                        : () => _addPhotosTo(m),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                          horizontal: 8, vertical: 4),
+                                      decoration: BoxDecoration(
+                                        color: AppColors.background,
+                                        borderRadius:
+                                            BorderRadius.circular(8),
+                                        border: Border.all(
+                                            color: AppColors.sage
+                                                .withOpacity(0.4)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (uploading)
+                                            const SizedBox(
+                                                width: 12,
+                                                height: 12,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                        strokeWidth: 1.5))
+                                          else
+                                            const Icon(Icons.add_photo_alternate_outlined,
+                                                size: 13,
+                                                color: AppColors.sage),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            uploading
+                                                ? 'Envoi en cours…'
+                                                : 'Ajouter des photos',
+                                            style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: AppColors.sage
+                                                    .withOpacity(0.9)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ],
                                 if (selected && hasPhotos) ...[

@@ -177,6 +177,7 @@ class MemoryModel {
     int? bookVerticalDensity,
     int? bookHorizontalDensity,
     List<String>? bookFeaturedMedia,
+    List<String>? mediaKeys,
   }) =>
       MemoryModel(
         id: id,
@@ -196,7 +197,7 @@ class MemoryModel {
         aiNarration: aiNarration,
         photoUrl: photoUrl,
         mediaUrls: mediaUrls,
-        mediaKeys: mediaKeys,
+        mediaKeys: mediaKeys ?? this.mediaKeys,
         audioUrl: audioUrl,
         audioKey: audioKey,
         audioDurationMs: audioDurationMs,
