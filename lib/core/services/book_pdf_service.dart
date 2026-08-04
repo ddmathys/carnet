@@ -180,8 +180,18 @@ class BookPdfService {
     final resolved =
         await Future.wait(sorted.map((m) => PhotoService.resolvePhotoUrls(m)));
     for (var i = 0; i < sorted.length; i++) {
-      for (final url in resolved[i]) {
-        photoEntries.add(_PhotoEntry(memory: sorted[i], url: url));
+      // Identifiants stables alignés sur `resolved[i]` — voir rawMediaIdsOf.
+      // Repli sur null (pas de rawId) si les longueurs divergent : ça n'arrive
+      // que si resolvePhotoUrls est retombé sur mediaUrls seul après un échec
+      // de signature (photo_service.dart) malgré des mediaKeys non vides.
+      final rawIds = rawMediaIdsOf(sorted[i]);
+      final aligned = rawIds.length == resolved[i].length;
+      for (var j = 0; j < resolved[i].length; j++) {
+        photoEntries.add(_PhotoEntry(
+          memory: sorted[i],
+          url: resolved[i][j],
+          rawId: aligned ? rawIds[j] : null,
+        ));
       }
     }
 
@@ -290,27 +300,45 @@ class BookPdfService {
     }
 
     // Moteur de mise en page (cf. « Moteur de mise en page A4 pour Carnet ») :
-    // un souvenir à la fois (jamais deux souvenirs sur une page), photos
-    // séparées en VERTICALES (h>w) et HORIZONTALES (w>=h). On émet d'abord les
-    // pages verticales, puis les horizontales. Catalogue de 6 templates :
-    //   Verticales : V4 (≥4 → grille 2×2), V3 (3 → 1 grande + 2), V2 (2 →
-    //   empilées), V1 (1 → pleine page).
-    //   Horizontales : H2 (≥2 → 2 empilées), H1 (1 → pleine page).
-    // Légende posée sur la 1ʳᵉ page du souvenir ; QR média sur la DERNIÈRE.
+    // un souvenir à la fois (jamais deux souvenirs sur une page). Dans chaque
+    // souvenir : d'abord les photos "en grand" (bookFeaturedMedia, jusqu'à 3,
+    // une pleine page chacune), puis les VERTICALES (h>w), puis les
+    // HORIZONTALES (w>=h). Catalogue de 7 templates :
+    //   Verticales : V4 (grille 2×2), V3 (1 grande + 2), V2 (empilées), V1
+    //   (pleine page). Horizontales : H4 (grille 2×2), H2 (empilées), H1
+    //   (pleine page).
+    // La densité par groupe (2 ou 4 par page) est réglable par souvenir via
+    // bookVerticalDensity/bookHorizontalDensity (défauts 4/2 = comportement
+    // historique, inchangé pour un souvenir qui n'y touche pas).
+    // Légende posée sur la 1ʳᵉ page émise du souvenir ; QR média sur la DERNIÈRE.
     final photoPages = <_BookPhotoPage>[];
     int idx = 0;
     while (idx < successfulPhotos.length) {
       final memId = successfulPhotos[idx].memory.id;
+      final memory = successfulPhotos[idx].memory;
       final group = <int>[];
       while (idx < successfulPhotos.length &&
           successfulPhotos[idx].memory.id == memId) {
         group.add(idx);
         idx++;
       }
-      final verticals = group.where(isPortraitAt).toList();
-      final horizontals = group.where((j) => !isPortraitAt(j)).toList();
-      // Ordre d'émission : verticales d'abord, horizontales ensuite.
-      final emission = [...verticals, ...horizontals];
+
+      final featuredIds = memory.bookFeaturedMedia;
+      final featured = featuredIds.isEmpty
+          ? const <int>[]
+          : group
+              .where((j) {
+                final rawId = successfulPhotos[j].rawId;
+                return rawId != null && featuredIds.contains(rawId);
+              })
+              .take(3)
+              .toList();
+      final rest = group.where((j) => !featured.contains(j)).toList();
+      final verticals = rest.where(isPortraitAt).toList();
+      final horizontals = rest.where((j) => !isPortraitAt(j)).toList();
+      // Ordre d'émission : en grand d'abord, verticales ensuite, horizontales
+      // en dernier — légende/QR se posent sur la 1ʳᵉ/dernière de CET ordre.
+      final emission = [...featured, ...verticals, ...horizontals];
       if (emission.isEmpty) continue;
       final firstIdx = emission.first;
       final lastIdx = emission.last;
@@ -323,32 +351,71 @@ class BookPdfService {
             tpl: tpl,
           );
 
-      // Verticales : V4 tant qu'il reste ≥4, puis V3 / V2 / V1 sur le reste.
-      var v = 0;
-      while (verticals.length - v >= 4) {
-        photoPages.add(pageFor(verticals.sublist(v, v + 4), _Tpl.v4));
-        v += 4;
-      }
-      switch (verticals.length - v) {
-        case 3:
-          photoPages.add(pageFor(verticals.sublist(v, v + 3), _Tpl.v3));
-          break;
-        case 2:
-          photoPages.add(pageFor(verticals.sublist(v, v + 2), _Tpl.v2));
-          break;
-        case 1:
-          photoPages.add(pageFor(verticals.sublist(v, v + 1), _Tpl.v1));
-          break;
+      // Photos "en grand" : une pleine page chacune (V1 ou H1 selon orientation).
+      for (final j in featured) {
+        photoPages.add(pageFor([j], isPortraitAt(j) ? _Tpl.v1 : _Tpl.h1));
       }
 
-      // Horizontales : H2 tant qu'il reste ≥2, puis H1 sur le dernier.
-      var h = 0;
-      while (horizontals.length - h >= 2) {
-        photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
-        h += 2;
+      // Verticales : densité 4 (défaut) = V4 tant qu'il reste ≥4, puis V3/V2/V1
+      // sur le reste. Densité 2 = V2 tant qu'il reste ≥2, puis V1 sur le reste.
+      var v = 0;
+      if (memory.bookVerticalDensity == 2) {
+        while (verticals.length - v >= 2) {
+          photoPages.add(pageFor(verticals.sublist(v, v + 2), _Tpl.v2));
+          v += 2;
+        }
+        if (verticals.length - v == 1) {
+          photoPages.add(pageFor(verticals.sublist(v, v + 1), _Tpl.v1));
+        }
+      } else {
+        while (verticals.length - v >= 4) {
+          photoPages.add(pageFor(verticals.sublist(v, v + 4), _Tpl.v4));
+          v += 4;
+        }
+        switch (verticals.length - v) {
+          case 3:
+            photoPages.add(pageFor(verticals.sublist(v, v + 3), _Tpl.v3));
+            break;
+          case 2:
+            photoPages.add(pageFor(verticals.sublist(v, v + 2), _Tpl.v2));
+            break;
+          case 1:
+            photoPages.add(pageFor(verticals.sublist(v, v + 1), _Tpl.v1));
+            break;
+        }
       }
-      if (horizontals.length - h == 1) {
-        photoPages.add(pageFor(horizontals.sublist(h, h + 1), _Tpl.h1));
+
+      // Horizontales : densité 2 (défaut) = H2 tant qu'il reste ≥2, puis H1 sur
+      // le dernier. Densité 4 = H4 tant qu'il reste ≥4 ; le reste (1/2/3) est
+      // réparti sur les templates existants (3 → H2+H1, 2 → H2, 1 → H1) — pas
+      // de "H3" dédié, inutile pour une seule combinaison possible.
+      var h = 0;
+      if (memory.bookHorizontalDensity == 4) {
+        while (horizontals.length - h >= 4) {
+          photoPages.add(pageFor(horizontals.sublist(h, h + 4), _Tpl.h4));
+          h += 4;
+        }
+        switch (horizontals.length - h) {
+          case 3:
+            photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
+            photoPages
+                .add(pageFor(horizontals.sublist(h + 2, h + 3), _Tpl.h1));
+            break;
+          case 2:
+            photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
+            break;
+          case 1:
+            photoPages.add(pageFor(horizontals.sublist(h, h + 1), _Tpl.h1));
+            break;
+        }
+      } else {
+        while (horizontals.length - h >= 2) {
+          photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
+          h += 2;
+        }
+        if (horizontals.length - h == 1) {
+          photoPages.add(pageFor(horizontals.sublist(h, h + 1), _Tpl.h1));
+        }
       }
     }
 
@@ -839,6 +906,7 @@ class BookPdfService {
     final photos = <pw.Widget>[];
     switch (tpl) {
       case _Tpl.v4: // grille 2×2, 4 cases identiques
+      case _Tpl.h4: // idem, orientation gérée par cell() (isPortrait)
         final w = (cw - gap) / 2, h = (ch - gap) / 2;
         photos.addAll([
           cell(cx, cy, w, h, entries[0]),
@@ -1673,12 +1741,34 @@ class BookPdfService {
 class _PhotoEntry {
   final MemoryModel memory;
   final String url;
-  const _PhotoEntry({required this.memory, required this.url});
+  // Identifiant stable (clé R2 ou URL Firebase legacy) de la photo, dans le
+  // même ordre que `url` — voir `rawMediaIdsOf`. Null si le mirroring n'a pas
+  // pu être aligné avec les URLs résolues (repli de PhotoService.resolvePhotoUrls
+  // en cas d'échec de signature) : la mise en avant se désactive silencieusement
+  // pour ce souvenir plutôt que de mal attribuer une photo.
+  final String? rawId;
+  const _PhotoEntry({required this.memory, required this.url, this.rawId});
 }
 
-/// Catalogue des 6 templates de mise en page (cf. spec « Moteur de mise en
-/// page A4 pour Carnet »). Verticales : v4/v3/v2/v1 ; horizontales : h2/h1.
-enum _Tpl { v4, v3, v2, v1, h2, h1 }
+/// Reproduit SANS appel réseau le branchement de `PhotoService.resolvePhotoUrls`
+/// pour obtenir, dans le même ordre, l'identifiant stable de chaque photo
+/// (clé R2 si le souvenir en a, sinon URL Firebase legacy). Utilisé pour
+/// retrouver quelles photos sont marquées "en grand" (`bookFeaturedMedia`)
+/// malgré des URLs signées/expirantes. DOIT rester aligné avec
+/// `resolvePhotoUrls` (photo_service.dart).
+List<String> rawMediaIdsOf(MemoryModel m) {
+  if (m.mediaKeys.isEmpty) {
+    if (m.mediaUrls.isNotEmpty) return m.mediaUrls;
+    return (m.photoUrl != null && m.photoUrl!.isNotEmpty)
+        ? [m.photoUrl!]
+        : const [];
+  }
+  return [...m.mediaKeys, ...m.mediaUrls];
+}
+
+/// Catalogue des 7 templates de mise en page (cf. spec « Moteur de mise en
+/// page A4 pour Carnet »). Verticales : v4/v3/v2/v1 ; horizontales : h4/h2/h1.
+enum _Tpl { v4, v3, v2, v1, h4, h2, h1 }
 
 /// Une page de photos d'un même souvenir, avec son template.
 class _BookPhotoPage {

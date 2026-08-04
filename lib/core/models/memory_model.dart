@@ -39,6 +39,14 @@ class MemoryModel {
   final double? weightKg;
   final double? heightCm;
   final DateTime createdAt;
+  // Mise en page du livre imprimé — réglages par souvenir (écran preview).
+  // Densité par défaut = comportement historique du moteur (4 verticales puis
+  // 2 horizontales par page) : un souvenir qui n'y touche jamais rend à
+  // l'identique d'avant. bookFeaturedMedia = identifiants stables (clé R2 ou
+  // URL Firebase legacy) des photos affichées en pleine page, max 3.
+  final int bookVerticalDensity;
+  final int bookHorizontalDensity;
+  final List<String> bookFeaturedMedia;
 
   const MemoryModel({
     required this.id,
@@ -67,6 +75,9 @@ class MemoryModel {
     this.weightKg,
     this.heightCm,
     required this.createdAt,
+    this.bookVerticalDensity = 4,
+    this.bookHorizontalDensity = 2,
+    this.bookFeaturedMedia = const [],
   });
 
   factory MemoryModel.fromFirestore(DocumentSnapshot doc) {
@@ -101,6 +112,10 @@ class MemoryModel {
       createdAt: d['createdAt'] != null
           ? (d['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
+      bookVerticalDensity: (d['bookVerticalDensity'] as num?)?.toInt() ?? 4,
+      bookHorizontalDensity:
+          (d['bookHorizontalDensity'] as num?)?.toInt() ?? 2,
+      bookFeaturedMedia: List<String>.from(d['bookFeaturedMedia'] ?? []),
     );
   }
 
@@ -153,5 +168,46 @@ class MemoryModel {
         'weightKg': weightKg,
         'heightCm': heightCm,
         'createdAt': Timestamp.fromDate(createdAt),
+        'bookVerticalDensity': bookVerticalDensity,
+        'bookHorizontalDensity': bookHorizontalDensity,
+        'bookFeaturedMedia': bookFeaturedMedia,
       };
+
+  MemoryModel copyWith({
+    int? bookVerticalDensity,
+    int? bookHorizontalDensity,
+    List<String>? bookFeaturedMedia,
+  }) =>
+      MemoryModel(
+        id: id,
+        notebookId: notebookId,
+        userId: userId,
+        tagIds: tagIds,
+        tagLabels: tagLabels,
+        sharedWith: sharedWith,
+        type: type,
+        subType: subType,
+        date: date,
+        datePrecision: datePrecision,
+        dateLabel: dateLabel,
+        title: title,
+        location: location,
+        rawContent: rawContent,
+        aiNarration: aiNarration,
+        photoUrl: photoUrl,
+        mediaUrls: mediaUrls,
+        mediaKeys: mediaKeys,
+        audioUrl: audioUrl,
+        audioKey: audioKey,
+        audioDurationMs: audioDurationMs,
+        videoKeys: videoKeys,
+        videoDurationsMs: videoDurationsMs,
+        weightKg: weightKg,
+        heightCm: heightCm,
+        createdAt: createdAt,
+        bookVerticalDensity: bookVerticalDensity ?? this.bookVerticalDensity,
+        bookHorizontalDensity:
+            bookHorizontalDensity ?? this.bookHorizontalDensity,
+        bookFeaturedMedia: bookFeaturedMedia ?? this.bookFeaturedMedia,
+      );
 }

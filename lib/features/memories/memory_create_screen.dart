@@ -1720,8 +1720,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             crossAxisSpacing: 10,
             childAspectRatio: 1,
             children: [
-              for (final s in specs.skip(1)) _editTile(s, radius: 16),
               _editAddTile(),
+              for (final s in specs.skip(1)) _editTile(s, radius: 16),
             ],
           ),
         ],

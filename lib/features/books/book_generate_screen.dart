@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:printing/printing.dart';
@@ -1821,8 +1822,19 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             if (!allUrls.contains(_coverPhotoUrl)) _coverPhotoUrl = null;
           }
         }),
+        onMemoryUpdated: _applyMemoryLayoutUpdate,
       ),
     );
+  }
+
+  // Patche l'état local après un réglage de mise en page (densité / photos en
+  // grand) sauvegardé sur un souvenir — pas de refetch, le prochain « Générer
+  // l'aperçu » utilise directement la version à jour.
+  void _applyMemoryLayoutUpdate(MemoryModel updated) {
+    setState(() {
+      final i = _memories.indexWhere((m) => m.id == updated.id);
+      if (i != -1) _memories[i] = updated;
+    });
   }
 
   // Feuille d'information : grille tarifaire selon le nombre de pages.
@@ -2576,11 +2588,13 @@ class _MemorySelectionSheet extends StatefulWidget {
   final List<MemoryModel> memories;
   final Set<String> selectedIds;
   final ValueChanged<Set<String>> onChanged;
+  final ValueChanged<MemoryModel> onMemoryUpdated;
 
   const _MemorySelectionSheet({
     required this.memories,
     required this.selectedIds,
     required this.onChanged,
+    required this.onMemoryUpdated,
   });
 
   @override
@@ -2802,6 +2816,27 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                               ],
                             ),
                           ),
+                          if (selected && hasPhotos)
+                            IconButton(
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              visualDensity: VisualDensity.compact,
+                              icon: const Icon(Icons.tune,
+                                  size: 18, color: AppColors.sage),
+                              tooltip: 'Mise en page de ce souvenir',
+                              onPressed: () async {
+                                final updated =
+                                    await showModalBottomSheet<MemoryModel>(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (_) => _MemoryLayoutSheet(memory: m),
+                                );
+                                if (updated != null) {
+                                  widget.onMemoryUpdated(updated);
+                                }
+                              },
+                            ),
                         ],
                       ),
                     ),
@@ -2836,6 +2871,270 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Réglages de mise en page pour UN souvenir : densité verticale/horizontale
+/// (2 ou 4 photos/page) et jusqu'à 3 photos "en grand" (pleine page dans le
+/// livre). Sauvegarde directe sur Firestore ; renvoie le MemoryModel à jour
+/// (via `Navigator.pop`) pour que l'appelant patche son état local.
+class _MemoryLayoutSheet extends StatefulWidget {
+  final MemoryModel memory;
+  const _MemoryLayoutSheet({required this.memory});
+
+  @override
+  State<_MemoryLayoutSheet> createState() => _MemoryLayoutSheetState();
+}
+
+class _MemoryLayoutSheetState extends State<_MemoryLayoutSheet> {
+  late int _vDensity = widget.memory.bookVerticalDensity;
+  late int _hDensity = widget.memory.bookHorizontalDensity;
+  final Set<String> _featured = {};
+  Map<String, String>? _thumbs; // rawId -> URL affichable
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _featured.addAll(widget.memory.bookFeaturedMedia);
+    _loadThumbs();
+  }
+
+  // Miroir de PhotoService.resolvePhotoUrls (R2 signées d'abord, puis legacy)
+  // mais en conservant l'identifiant STABLE (clé ou URL) comme clé de map —
+  // c'est cet identifiant qui est stocké dans bookFeaturedMedia et comparé
+  // côté génération PDF (book_pdf_service.dart::rawMediaIdsOf).
+  Future<void> _loadThumbs() async {
+    final m = widget.memory;
+    final map = <String, String>{};
+    if (m.mediaKeys.isNotEmpty) {
+      map.addAll(await PhotoService.signedUrlsForMemory(m.id));
+    }
+    for (final u in m.mediaUrls) {
+      map[u] = u;
+    }
+    if (map.isEmpty && m.photoUrl != null && m.photoUrl!.isNotEmpty) {
+      map[m.photoUrl!] = m.photoUrl!;
+    }
+    if (mounted) setState(() => _thumbs = map);
+  }
+
+  void _toggleFeatured(String rawId) {
+    setState(() {
+      if (_featured.contains(rawId)) {
+        _featured.remove(rawId);
+      } else if (_featured.length < 3) {
+        _featured.add(rawId);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Maximum 3 photos en grand par souvenir.'),
+        ));
+      }
+    });
+  }
+
+  Future<void> _save() async {
+    setState(() => _saving = true);
+    final updated = widget.memory.copyWith(
+      bookVerticalDensity: _vDensity,
+      bookHorizontalDensity: _hDensity,
+      bookFeaturedMedia: _featured.toList(),
+    );
+    try {
+      await FirebaseFirestore.instance
+          .collection('memories')
+          .doc(widget.memory.id)
+          .update({
+        'bookVerticalDensity': _vDensity,
+        'bookHorizontalDensity': _hDensity,
+        'bookFeaturedMedia': _featured.toList(),
+      });
+      if (mounted) Navigator.pop(context, updated);
+    } catch (_) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Échec de la sauvegarde — réessaie.'),
+        ));
+      }
+    }
+  }
+
+  Widget _densityChoice(
+      String label, int value, ValueChanged<int> onChanged) {
+    Widget pill(int v) {
+      final sel = value == v;
+      return GestureDetector(
+        onTap: () => onChanged(v),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+          decoration: BoxDecoration(
+            color: sel ? AppColors.sage : AppColors.surface,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+                color: sel ? AppColors.sage : const Color(0xFFCCC8BE)),
+          ),
+          child: Text('$v / page',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: sel ? Colors.white : AppColors.textMedium,
+              )),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label,
+            style: const TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textDark)),
+        const SizedBox(height: 8),
+        Row(children: [pill(2), const SizedBox(width: 10), pill(4)]),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return DraggableScrollableSheet(
+      initialChildSize: 0.75,
+      maxChildSize: 0.92,
+      minChildSize: 0.5,
+      builder: (_, ctrl) => Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: Column(
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.softGray.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 4),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Mise en page du souvenir',
+                  style: TextStyle(
+                    fontFamily: 'PlayfairDisplay',
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textDark,
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                controller: ctrl,
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+                children: [
+                  _densityChoice('Photos verticales', _vDensity,
+                      (v) => setState(() => _vDensity = v)),
+                  const SizedBox(height: 18),
+                  _densityChoice('Photos horizontales', _hDensity,
+                      (v) => setState(() => _hDensity = v)),
+                  const SizedBox(height: 22),
+                  Text(
+                    'Photos en grand (${_featured.length}/3)',
+                    style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark),
+                  ),
+                  const SizedBox(height: 4),
+                  const Text(
+                    'Touche jusqu\'à 3 photos pour qu\'elles occupent une page entière dans le livre.',
+                    style:
+                        TextStyle(fontSize: 12, color: AppColors.textMedium),
+                  ),
+                  const SizedBox(height: 10),
+                  if (_thumbs == null)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 30),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_thumbs!.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Text('Aucune photo sur ce souvenir.',
+                          style: TextStyle(color: AppColors.textMedium)),
+                    )
+                  else
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: 3,
+                      mainAxisSpacing: 8,
+                      crossAxisSpacing: 8,
+                      childAspectRatio: 1,
+                      children: [
+                        for (final entry in _thumbs!.entries)
+                          GestureDetector(
+                            onTap: () => _toggleFeatured(entry.key),
+                            child: Stack(
+                              fit: StackFit.expand,
+                              children: [
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: CachedNetworkImage(
+                                    imageUrl: entry.value,
+                                    fit: BoxFit.cover,
+                                  ),
+                                ),
+                                if (_featured.contains(entry.key))
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                          color: AppColors.sage, width: 3),
+                                      color:
+                                          AppColors.sage.withOpacity(0.15),
+                                    ),
+                                    child: const Align(
+                                      alignment: Alignment.topRight,
+                                      child: Padding(
+                                        padding: EdgeInsets.all(4),
+                                        child: Icon(Icons.star,
+                                            color: AppColors.sage, size: 18),
+                                      ),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+            const Divider(height: 1, color: Color(0xFFEEEBE3)),
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                  20, 12, 20, 12 + MediaQuery.of(context).padding.bottom),
+              child: SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  onPressed: _saving ? null : _save,
+                  child: Text(_saving ? 'Enregistrement…' : 'Enregistrer'),
+                ),
               ),
             ),
           ],

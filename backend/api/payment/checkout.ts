@@ -1,10 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from '../../lib/verify'
 import { db } from '../../lib/firebase'
+import { computePrice, type CoverType } from '../../lib/pricing'
 
 // Crée une session Stripe Checkout pour payer une commande (TWINT + carte).
-// Le montant = order.price (prix calculé selon le nombre de pages). CHF requis
-// pour TWINT. Renvoie l'URL de paiement hébergée par Stripe.
+// Le montant est RECALCULÉ ici depuis coverType + pageCount (lib/pricing.ts) —
+// order.price vient du client à la création et ne doit jamais être facturé tel
+// quel. CHF requis pour TWINT. Renvoie l'URL de paiement hébergée par Stripe.
 const BASE_URL =
   process.env.PUBLIC_BASE_URL ?? 'https://bloom-backend-gray.vercel.app'
 
@@ -34,12 +36,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'Not your order' })
   }
 
-  const amount = Math.round(Number(o.price ?? 0) * 100) // centimes
-  if (amount <= 0) {
-    return res.status(400).json({ error: 'Montant invalide' })
+  const rawPages = Number(o.pageCount ?? 0)
+  if (!rawPages || rawPages <= 0) {
+    return res
+      .status(400)
+      .json({ error: 'pageCount manquant sur la commande — PDF non généré ?' })
   }
+  const coverType: CoverType = o.coverType === 'hard' ? 'hard' : 'soft'
+  const trustedPrice = computePrice(coverType, rawPages)
+  const amount = Math.round(trustedPrice * 100) // centimes
+
+  // Le prix stocké venait du client à la création — on le corrige ici pour que
+  // l'app/les emails affichent toujours ce qui est réellement facturé.
+  if (Math.abs(Number(o.price ?? 0) - trustedPrice) > 0.001) {
+    await snap.ref.update({ price: trustedPrice })
+  }
+
   const bookTitle = String(o.bookTitle ?? 'Livre')
-  const cover = o.coverType === 'hard' ? 'rigide' : 'souple'
+  const cover = coverType === 'hard' ? 'rigide' : 'souple'
 
   const params = new URLSearchParams()
   params.set('mode', 'payment')
