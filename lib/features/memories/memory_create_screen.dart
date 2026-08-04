@@ -29,8 +29,9 @@ import '../tags/tag_picker_sheet.dart';
 
 class MemoryCreateScreen extends StatefulWidget {
   final String? memoryId;
-  // Flux « importer des médias » depuis le dashboard : ouvre la galerie
-  // d'emblée, puis l'utilisateur complète le formulaire.
+  // Flux « importer des médias » depuis le dashboard : propose d'emblée le
+  // choix galerie / appareil photo / caméra, puis l'utilisateur complète le
+  // formulaire.
   final bool startImport;
   // Souvenir créé depuis un tag (ex. depuis la page d'un tag) → tag pré-coché.
   final String? initialTagId;
@@ -181,7 +182,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
     if (widget.startImport) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _pickMediaFromGallery();
+        if (mounted) _showMediaSourceSheet();
       });
     }
   }

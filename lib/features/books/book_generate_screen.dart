@@ -64,10 +64,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
   bool _showPreview = false;
-  String _selectedFormat = 'digital';
   String _coverType = 'soft'; // 'soft' ou 'hard'
   bool _generating = false;
-  bool _exporting = false;
   double _progress = 0.0;
   int _msgIndex = 0;
   Timer? _progressTimer;
@@ -274,10 +272,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _coverPhotoUrl = defaultCover;
         _loadError = null;
         // Commande depuis « Mes livres » : on saute directement aux options
-        // d'achat (format imprimé pré-sélectionné).
+        // d'achat.
         if (widget.startAtOrder || widget.editOrderId != null) {
           _step = 1;
-          _selectedFormat = 'printed';
           _coverType = 'soft';
         }
       });
@@ -419,49 +416,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   }
 
   // ── PDF export ─────────────────────────────────────────────────────────────
-
-  Future<void> _downloadPdf() async {
-    if (_notebook == null) return;
-    setState(() => _exporting = true);
-
-    final customTitle =
-        _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
-    final bookTitle = customTitle ?? _notebook!.title;
-
-    // 1. Génération des octets du PDF (étape lourde mais bornée). Le spinner
-    //    ne couvre QUE cette étape.
-    Uint8List? pdfBytes;
-    try {
-      final coverColor = _notebook!.coverColor.isNotEmpty
-          ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
-              radix: 16))
-          : AppColors.sage;
-
-      final gen = await BookPdfService.generateForNotebook(
-        notebook: _notebook!,
-        coverColor: coverColor,
-        memories: _selectedMemories,
-        locationComments: _locationComments,
-        coverPhotoUrl: _coverPhotoUrl,
-        excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
-        customTitle: customTitle,
-        customSubtitle: _bookSubtitle,
-        backendUrl: AppConfig.backendUrl,
-      ).timeout(const Duration(seconds: 180));
-      pdfBytes = gen.bytes;
-    } catch (e) {
-      pdfBytes = null;
-      if (mounted) _showSnack('Erreur génération PDF : $e');
-    } finally {
-      // On arrête le spinner dès que le PDF est prêt (ou a échoué) — surtout
-      // PAS après le partage : la feuille de partage système est une étape
-      // interactive qui ne doit jamais bloquer l'indicateur.
-      if (mounted) setState(() => _exporting = false);
-    }
-    if (pdfBytes == null) return;
-    await _finishDownload(pdfBytes, bookTitle);
-  }
-
   // Depuis l'écran d'aperçu (déjà généré, WYSIWYG) : pas besoin de régénérer,
   // on réutilise directement les octets déjà rendus.
   Future<void> _downloadPreviewPdf() async {
@@ -1372,7 +1326,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const Text(
-            'Quel format ?',
+            'Quelle couverture ?',
             style: TextStyle(
               fontFamily: 'PlayfairDisplay',
               fontSize: 26,
@@ -1382,21 +1336,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           ),
           const SizedBox(height: 6),
           const Text(
-            'Choisis comment tu veux recevoir ton livre.',
+            'Le PDF se télécharge depuis l\'aperçu — ici, choisis le livre imprimé.',
             style: TextStyle(color: AppColors.textMedium, fontSize: 14),
           ),
           const SizedBox(height: 24),
-          _FormatCard(
-            emoji: '📱',
-            title: 'PDF Digital',
-            subtitle: 'Télécharge et imprime toi-même',
-            price: 'Gratuit',
-            priceSub: '$_pages pages',
-            priceColor: AppColors.sage,
-            selected: _selectedFormat == 'digital',
-            onTap: () => setState(() => _selectedFormat = 'digital'),
-          ),
-          const SizedBox(height: 12),
           Opacity(
             opacity: _exceedsGelatoLimit ? 0.45 : 1.0,
             child: _FormatCard(
@@ -1406,14 +1349,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               price: _priceLabel('soft'),
               priceSub: '$_printedPages pages',
               priceColor: AppColors.amber,
-              selected: _selectedFormat == 'printed' && _coverType == 'soft',
+              selected: _coverType == 'soft',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
                       'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
-                  : () => setState(() {
-                        _selectedFormat = 'printed';
-                        _coverType = 'soft';
-                      }),
+                  : () => setState(() => _coverType = 'soft'),
             ),
           ),
           const SizedBox(height: 12),
@@ -1426,14 +1366,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               price: _priceLabel('hard'),
               priceSub: '$_printedPages pages',
               priceColor: AppColors.amber,
-              selected: _selectedFormat == 'printed' && _coverType == 'hard',
+              selected: _coverType == 'hard',
               onTap: _exceedsGelatoLimit
                   ? () => _showSnack(
                       'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
-                  : () => setState(() {
-                        _selectedFormat = 'printed';
-                        _coverType = 'hard';
-                      }),
+                  : () => setState(() => _coverType = 'hard'),
             ),
           ),
           const SizedBox(height: 12),
@@ -1449,18 +1386,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ),
             ),
           ),
-          if (_selectedFormat == 'printed') ...[
-            const SizedBox(height: 12),
-            _buildPageCountNotice(),
-          ],
+          const SizedBox(height: 12),
+          _buildPageCountNotice(),
           const SizedBox(height: 32),
           ElevatedButton(
-            onPressed: (_selectedFormat == 'printed' && _exceedsGelatoLimit)
+            onPressed: _exceedsGelatoLimit
                 ? null
                 : () => setState(() => _step = 2),
-            child: Text(_selectedFormat == 'digital'
-                ? 'Continuer'
-                : 'Continuer · ${_priceLabel(_coverType)}'),
+            child: Text('Continuer · ${_priceLabel(_coverType)}'),
           ),
           const SizedBox(height: 16),
           const Center(
@@ -1474,19 +1407,17 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     );
   }
 
-  // ── Step 2: Download or Order ──────────────────────────────────────────────
+  // ── Step 2: Commande ──────────────────────────────────────────────────────
 
   Widget _buildOrderStep() {
-    final isDigital = _selectedFormat == 'digital';
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            isDigital ? 'Ton PDF est prêt' : 'Récapitulatif commande',
-            style: const TextStyle(
+          const Text(
+            'Récapitulatif commande',
+            style: TextStyle(
               fontFamily: 'PlayfairDisplay',
               fontSize: 24,
               fontWeight: FontWeight.bold,
@@ -1513,40 +1444,25 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 const Divider(height: 24, color: AppColors.border),
                 _OrderRow(
                     label: 'Format',
-                    value: switch (_selectedFormat) {
-                      'digital' => 'PDF Digital',
-                      'printed' => _coverType == 'hard'
-                          ? 'Couverture rigide'
-                          : 'Couverture souple',
-                      _ => 'PDF Digital',
-                    }),
-                if (!isDigital) ...[
-                  const Divider(height: 24, color: AppColors.border),
-                  _OrderRow(label: 'Pages', value: '$_printedPages pages'),
-                  const Divider(height: 24, color: AppColors.border),
-                  _OrderRow(
-                    label: 'Total',
-                    value: _priceLabel(_coverType),
-                    bold: true,
-                    valueColor: AppColors.amber,
-                  ),
-                ],
+                    value: _coverType == 'hard'
+                        ? 'Couverture rigide'
+                        : 'Couverture souple'),
+                const Divider(height: 24, color: AppColors.border),
+                _OrderRow(label: 'Pages', value: '$_printedPages pages'),
+                const Divider(height: 24, color: AppColors.border),
+                _OrderRow(
+                  label: 'Total',
+                  value: _priceLabel(_coverType),
+                  bold: true,
+                  valueColor: AppColors.amber,
+                ),
               ],
             ),
           ),
           const SizedBox(height: 28),
 
-          if (isDigital) ...[
-            _exporting
-                ? const Center(child: CircularProgressIndicator())
-                : ElevatedButton.icon(
-                    onPressed: _downloadPdf,
-                    icon: const Icon(Icons.download_outlined),
-                    label: const Text('Télécharger le PDF'),
-                  ),
-          ] else ...[
-            // Formulaire adresse
-            Form(
+          // Formulaire adresse
+          Form(
               key: _addressKey,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -1609,9 +1525,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                       child: Text(_orderButtonLabel),
                     ),
                 ],
-              ),
-            ),
-          ],
+              )),
 
           const SizedBox(height: 16),
           Center(
@@ -2674,6 +2588,15 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                                         ],
                                       ),
                                     ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Choisis jusqu\'à 3 photos à imprimer en '
+                                    'grand (pleine page)',
+                                    style: TextStyle(
+                                        fontSize: 10.5,
+                                        color: AppColors.textMedium
+                                            .withOpacity(0.85)),
                                   ),
                                 ],
                               ],
