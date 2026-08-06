@@ -161,7 +161,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
   bool _expanded = false;
   bool _saving = false;
   bool _downloadingPdf = false;
-  bool _sendingGelato = false;
+  bool _sendingToPrint = false;
   bool _checkingStatus = false;
   bool _deleting = false;
   late String _selectedStatus;
@@ -192,43 +192,42 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
     }
   }
 
-  Future<void> _sendToGelato() async {
-    setState(() => _sendingGelato = true);
+  // Envoie la commande à l'impression chez Prodigi. Le backend refuse si
+  // `order.status != 'paid'` (garde-fou anti-commande gratuite) — le bouton
+  // est déjà désactivé côté UI dans ce cas, ceci est la double vérification.
+  Future<void> _sendToPrint() async {
+    setState(() => _sendingToPrint = true);
     try {
-      final res =
-          await OrderService.sendToGelato(widget.order.id, orderType: 'draft');
+      final res = await OrderService.sendToPrint(widget.order.id);
       if (!mounted) return;
-      final id = res['gelatoOrderId'];
+      final id = res['prodigiOrderId'];
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         backgroundColor: AppColors.sage,
         content: Text(
-          'Brouillon créé chez Gelato${id != null ? ' · $id' : ''}. '
-          'Valide-le dans le dashboard Gelato pour lancer la production.',
+          'Commande envoyée à l\'impression${id != null ? ' · $id' : ''}.',
         ),
       ));
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         backgroundColor: AppColors.error,
-        content: Text('Gelato : ${e.toString().replaceFirst('Exception: ', '')}'),
+        content: Text(e.toString().replaceFirst('Exception: ', '')),
       ));
     } finally {
-      if (mounted) setState(() => _sendingGelato = false);
+      if (mounted) setState(() => _sendingToPrint = false);
     }
   }
 
-  // Rafraîchit le vrai statut Gelato sans attendre le cron quotidien (voir
-  // backend/api/gelato/[action].ts action=status) — utile pour vérifier tout
-  // de suite après avoir confirmé un brouillon dans le dashboard Gelato.
+  // Rafraîchit le vrai statut Prodigi sans attendre le cron quotidien.
   Future<void> _checkStatus() async {
     setState(() => _checkingStatus = true);
     try {
-      final res = await OrderService.checkGelatoStatus(widget.order.id);
+      final res = await OrderService.checkPrintStatus(widget.order.id);
       if (!mounted) return;
-      final status = res['gelatoStatus'];
+      final status = res['prodigiStatus'];
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         backgroundColor: AppColors.sage,
-        content: Text('Statut Gelato : ${status ?? 'inconnu'}'),
+        content: Text('Statut impression : ${status ?? 'inconnu'}'),
       ));
     } catch (e) {
       if (!mounted) return;
@@ -250,7 +249,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
         title: const Text('Supprimer la commande ?'),
         content: const Text(
             'La commande et son PDF seront définitivement supprimés de '
-            'l\'application. (Pense à la supprimer aussi chez Gelato si besoin.)'),
+            'l\'application. (Pense à la supprimer aussi chez l\'imprimeur si besoin.)'),
         actions: [
           TextButton(
               onPressed: () => Navigator.pop(ctx, false),
@@ -410,7 +409,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // Bouton PDF pour envoyer à Gelato
+                  // Bouton PDF (téléchargement manuel, ex. pour vérification)
                   if (widget.order.pdfUrl != null) SizedBox(
                     width: double.infinity,
                     child: OutlinedButton.icon(
@@ -418,7 +417,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                       icon: _downloadingPdf
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                           : const Icon(Icons.picture_as_pdf_outlined, size: 18),
-                      label: const Text('Télécharger PDF → Gelato'),
+                      label: const Text('Télécharger le PDF'),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: AppColors.sage,
                         side: const BorderSide(color: AppColors.sage),
@@ -428,10 +427,10 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                   else
                     _PdfStatusWidget(order: widget.order),
 
-                  // ── Envoi à Gelato (brouillon à valider) ──────────────────
+                  // ── Envoi à l'impression ──────────────────────────────────
                   if (widget.order.pdfUrl != null) ...[
                     const SizedBox(height: 8),
-                    _buildGelatoSection(),
+                    _buildPrintSection(),
                   ],
 
                   // ── Supprimer la commande ─────────────────────────────────
@@ -460,56 +459,80 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
     );
   }
 
-  Widget _buildGelatoSection() {
+  Widget _buildPrintSection() {
     final o = widget.order;
 
-    // Le vrai statut ('pending'/'accepted'/'refused') ne vient jamais de la
-    // création elle-même (toujours 200 OK, même fichier invalide) mais du
-    // cron quotidien ou d'une vérification manuelle — voir lib/gelato.ts.
-    final statusBadge = switch (o.gelatoStatus) {
+    final statusBadge = switch (o.prodigiStatus) {
       'pending' => _statusBox(
           color: AppColors.amber,
-          text: '⏳ Vérification en cours chez Gelato…',
+          text: '⏳ En cours chez l\'imprimeur…',
         ),
       'accepted' => _statusBox(
           color: AppColors.sage,
-          text: '✅ Accepté par Gelato · en production',
+          text: '✅ Accepté · en production',
         ),
-      'refused' => _statusBox(
+      'error' when o.prodigiError != null => _statusBox(
           color: AppColors.error,
-          text: '⚠️ Refusé par Gelato'
-              '${o.gelatoRetryCount > 0 ? ' · ${o.gelatoRetryCount}/3 tentatives client' : ''}',
-          detail: o.refusalReason,
-        ),
-      'error' when o.gelatoError != null => _statusBox(
-          color: AppColors.error,
-          text: '⚠️ Échec de l’envoi',
-          detail: o.gelatoError,
+          text: '⚠️ Échec de l\'envoi'
+              '${o.prodigiRetryCount > 0 ? ' · ${o.prodigiRetryCount}/3 tentatives' : ''}',
+          detail: o.prodigiError,
         ),
       _ => null,
     };
+
+    // Garde-fou anti-commande gratuite : impossible d'envoyer à l'impression
+    // tant que la commande n'est pas marquée « payée » (même vérification
+    // côté backend — voir backend/api/prodigi/[action].ts).
+    final canSend = o.status == 'paid';
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (statusBadge != null) ...[statusBadge, const SizedBox(height: 8)],
-        if (o.gelatoOrderId != null) ...[
-          Text('ID Gelato : ${o.gelatoOrderId}',
+        if (o.prodigiOrderId != null) ...[
+          Text('ID Prodigi : ${o.prodigiOrderId}',
               style: const TextStyle(
                   fontSize: 11, color: AppColors.textMedium)),
           const SizedBox(height: 8),
           _checkButton(),
           const SizedBox(height: 8),
         ],
-        if (o.gelatoOrderId == null)
-          _gelatoButton(label: 'Envoyer à Gelato (brouillon)')
-        else if (o.gelatoStatus != 'accepted')
+        // Premier envoi : bouton direct, pas de PDF à corriger.
+        if (o.prodigiOrderId == null) ...[
+          _printButton(enabled: canSend, label: 'Envoyer à l\'impression'),
+          if (!canSend) ...[
+            const SizedBox(height: 6),
+            const Text(
+              'Marque d\'abord la commande « Payée » pour débloquer l\'envoi.',
+              style: TextStyle(fontSize: 11, color: AppColors.textMedium),
+            ),
+          ],
+        ]
+        // Erreur : le renvoi passe par l'éditeur (régénère le PDF) plutôt que
+        // par un simple retry — plafonné à 3 tentatives (voir OrderModel).
+        else if (o.prodigiHasError) ...[
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: (!canSend || !o.canRetryPrint)
+                  ? null
+                  : () => context.push(
+                      '/book/select?tag=${o.notebookId}&editOrder=${o.id}'),
+              icon: const Icon(Icons.edit_outlined, size: 18),
+              label: const Text('Modifier le livre et renvoyer'),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.amber),
+            ),
+          ),
+          const SizedBox(height: 6),
           Text(
-            o.gelatoStatus == 'draft'
-                ? 'Brouillon : à valider dans le dashboard Gelato pour lancer la production.'
-                : 'Un renvoi direct (hors app) reste possible via le dashboard Gelato si besoin.',
+            !canSend
+                ? 'Marque d\'abord la commande « Payée » pour débloquer le renvoi.'
+                : o.canRetryPrint
+                    ? '${o.prodigiRetriesLeft} tentative${o.prodigiRetriesLeft > 1 ? 's' : ''} de renvoi restante${o.prodigiRetriesLeft > 1 ? 's' : ''}.'
+                    : 'Nombre maximum de renvois atteint (3) — contacte le support Prodigi si besoin.',
             style: const TextStyle(fontSize: 11, color: AppColors.textMedium),
           ),
+        ],
       ],
     );
   }
@@ -554,12 +577,12 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
     );
   }
 
-  Widget _gelatoButton({required String label}) {
+  Widget _printButton({required bool enabled, required String label}) {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton.icon(
-        onPressed: _sendingGelato ? null : _sendToGelato,
-        icon: _sendingGelato
+        onPressed: (!enabled || _sendingToPrint) ? null : _sendToPrint,
+        icon: _sendingToPrint
             ? const SizedBox(
                 width: 16, height: 16,
                 child: CircularProgressIndicator(
@@ -607,7 +630,7 @@ class _PdfStatusWidget extends StatelessWidget {
                 } catch (_) {}
               },
               icon: const Icon(Icons.picture_as_pdf_outlined, size: 18),
-              label: const Text('Télécharger PDF → Gelato'),
+              label: const Text('Télécharger le PDF'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: AppColors.sage,
                 side: const BorderSide(color: AppColors.sage),

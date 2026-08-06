@@ -19,19 +19,19 @@ class OrderModel {
   final String notebookId;
   final String? adminNote;
   final int memoryCount;
-  final int? pageCount; // nombre de pages du PDF (pour Gelato)
+  final int? pageCount; // nombre de pages du PDF (imprimeur)
   final String? pdfUrl;
-  final String? gelatoOrderId;
-  // 'draft' (brouillon, à confirmer dans le dashboard Gelato) |
-  // 'pending' (renvoi direct en cours, résultat pas encore connu) |
-  // 'accepted' | 'refused' (résultat réel, connu via /api/gelato/status ou
-  // le cron de poll — jamais via la création elle-même) | 'error' (échec
-  // synchrone à l'envoi) | null (jamais envoyé).
-  final String? gelatoStatus;
-  final String? gelatoError;
-  final String? refusalReason;
-  final String? refusalReasonCode;
-  final int gelatoRetryCount;
+  final String? prodigiOrderId;
+  // 'pending' (envoyée, résultat définitif pas encore connu) | 'accepted'
+  // (en production/expédiée) | 'error' (refusée ou échec technique) | null
+  // (jamais envoyée à l'impression).
+  final String? prodigiStatus;
+  final String? prodigiError;
+  // Nombre de renvois admin après une erreur (voir _buildPrintSection dans
+  // admin_orders_screen.dart) — plafonné à 3, appliqué aussi côté backend
+  // (backend/api/prodigi/[action].ts) pour ne pas dépendre uniquement du
+  // client.
+  final int prodigiRetryCount;
 
   const OrderModel({
     required this.id,
@@ -54,12 +54,10 @@ class OrderModel {
     required this.memoryCount,
     this.pageCount,
     this.pdfUrl,
-    this.gelatoOrderId,
-    this.gelatoStatus,
-    this.gelatoError,
-    this.refusalReason,
-    this.refusalReasonCode,
-    this.gelatoRetryCount = 0,
+    this.prodigiOrderId,
+    this.prodigiStatus,
+    this.prodigiError,
+    this.prodigiRetryCount = 0,
   });
 
   String get fullName => '$firstName $lastName';
@@ -93,25 +91,9 @@ class OrderModel {
 
   int get statusIndex => statusFlow.indexOf(status);
 
-  bool get gelatoWasRefused => gelatoStatus == 'refused';
-  int get gelatoRetriesLeft => (3 - gelatoRetryCount).clamp(0, 3);
-
-  bool get canRetryGelato => gelatoWasRefused && gelatoRetriesLeft > 0;
-
-  // Gelato exprime son refus de mise en page en texte libre, ex. « Product
-  // requires exactly 37 page(s), while file(s) contain 34 page(s) » — pas de
-  // champ structuré. On extrait le nombre exact demandé pour pré-remplir le
-  // renvoi (voir book_generate_screen._forcedPageCount) plutôt que de laisser
-  // l'utilisateur deviner combien de pages ajouter.
-  static final _exactPageCountPattern =
-      RegExp(r'exactly (\d+) page', caseSensitive: false);
-  int? get gelatoRequiredPageCount {
-    final reason = refusalReason;
-    if (reason == null) return null;
-    final match = _exactPageCountPattern.firstMatch(reason);
-    if (match == null) return null;
-    return int.tryParse(match.group(1)!);
-  }
+  bool get prodigiHasError => prodigiStatus == 'error';
+  int get prodigiRetriesLeft => (3 - prodigiRetryCount).clamp(0, 3);
+  bool get canRetryPrint => prodigiHasError && prodigiRetriesLeft > 0;
 
   factory OrderModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
@@ -136,12 +118,10 @@ class OrderModel {
       memoryCount: (d['memoryCount'] as num?)?.toInt() ?? 0,
       pageCount: (d['pageCount'] as num?)?.toInt(),
       pdfUrl: d['pdfUrl'],
-      gelatoOrderId: d['gelatoOrderId'],
-      gelatoStatus: d['gelatoStatus'],
-      gelatoError: d['gelatoError'],
-      refusalReason: d['refusalReason'],
-      refusalReasonCode: d['refusalReasonCode'],
-      gelatoRetryCount: (d['gelatoRetryCount'] as num?)?.toInt() ?? 0,
+      prodigiOrderId: d['prodigiOrderId'],
+      prodigiStatus: d['prodigiStatus'],
+      prodigiError: d['prodigiError'],
+      prodigiRetryCount: (d['prodigiRetryCount'] as num?)?.toInt() ?? 0,
     );
   }
 

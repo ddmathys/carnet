@@ -1,4 +1,4 @@
-import 'dart:math' show min, max, pi;
+import 'dart:math' show min, max;
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -10,7 +10,6 @@ import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
 import 'photo_service.dart';
-import 'backend_client.dart';
 import '../utils/date_precision.dart';
 
 class BookPdfService {
@@ -18,18 +17,18 @@ class BookPdfService {
   static const _textDark = PdfColor(0.176, 0.141, 0.086);
   static const _textMedium = PdfColor(0.55, 0.55, 0.55);
 
-  // Format « print-ready » Gelato : livre photo softcover 21×28 cm (Gelato n'a
-  // pas d'A4 en livre photo ; 21×28 est le portrait le plus proche) + 4 mm de
-  // fond perdu (bleed) sur chaque côté → document 218×288 mm. Les images
-  // remplissent tout le document ; texte / QR / numéro de page sont rentrés
-  // de _safe pour rester dans la zone de sécurité après coupe.
-  static const _bleed = 0.4 * PdfPageFormat.cm; // 4 mm
-  static const _a4W = 21.0 * PdfPageFormat.cm + 2 * _bleed; // 218 mm (doc)
-  static const _a4H = 28.0 * PdfPageFormat.cm + 2 * _bleed; // 288 mm (doc)
-  // Zone de sécurité : le trait de coupe passe à _bleed du bord du document ;
-  // avec la tolérance du massicot (~1-2 mm), un élément posé À _bleed peut être
-  // rogné. Le contenu est donc rentré de 5 mm supplémentaires (9 mm du bord).
-  static const _safe = _bleed + 0.5 * PdfPageFormat.cm;
+  // Format « print-ready » Prodigi — CONFIRMÉ le 06.08.26 via deux fiches
+  // produit Prodigi (softcover ET hardcover A4 portrait) : « Product size:
+  // 21x29.7cm », cohérent avec les dimensions d'image recommandées
+  // (2480×3507px, soit exactement 210×297mm à 300dpi) → c'est le vrai ISO A4
+  // standard, PAS le 21×30cm arrondi affiché sur la page catalogue. Document
+  // = taille de coupe EXACTE, sans fond perdu à fournir (Prodigi le génère
+  // automatiquement — contrairement à Gelato où l'app gérait un fond perdu de
+  // 4 mm manuellement). Marge de sécurité 10 mm (doc Prodigi, pas encore
+  // reconfirmée en sandbox mais cohérente avec la pratique standard).
+  static const _a4W = 21.0 * PdfPageFormat.cm; // 210 mm
+  static const _a4H = 29.7 * PdfPageFormat.cm; // 297 mm
+  static const _safe = 1.0 * PdfPageFormat.cm; // 10 mm
 
   // Mise en page album : images BORD À BORD (full-bleed), sans marge ni
   // espacement blanc entre photos. (Mettre une valeur > 0 réintroduirait un
@@ -146,16 +145,9 @@ class BookPdfService {
     String backendUrl = '',
     bool padForPrint = false,
     bool excludeCoverPhotoFromBook = false,
-    // 'soft' | 'hard' — détermine le produit Gelato interrogé pour la largeur
-    // exacte de couverture wraparound. Non requis si padForPrint == false.
+    // 'soft' | 'hard' — détermine le produit imprimeur interrogé pour la
+    // largeur exacte de couverture wraparound. Non requis si padForPrint == false.
     String coverType = 'soft',
-    // Force le nombre de pages final (bourrage de pages blanches jusqu'à
-    // cette valeur) au lieu de la règle générique _gelatoValidPageCount —
-    // utilisé pour renvoyer une commande refusée avec un nombre exact exigé
-    // par Gelato (ex. « exactly 37 page(s) »), qui ne correspond jamais à
-    // cette règle générique (toujours paire, jamais un nombre précis comme
-    // 37). Ignoré si inférieur au nombre de pages réel du contenu.
-    int? forcedPageCount,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -301,8 +293,8 @@ class BookPdfService {
 
     // Moteur de mise en page (cf. « Moteur de mise en page A4 pour Carnet ») :
     // un souvenir à la fois (jamais deux souvenirs sur une page). Dans chaque
-    // souvenir : d'abord les photos "en grand" (bookFeaturedMedia, jusqu'à 3,
-    // une pleine page chacune), puis les VERTICALES (h>w), puis les
+    // souvenir : d'abord les photos "en grand" (bookFeaturedMedia, nombre
+    // illimité, une pleine page chacune), puis les VERTICALES (h>w), puis les
     // HORIZONTALES (w>=h). Catalogue de 7 templates :
     //   Verticales : V4 (grille 2×2), V3 (1 grande + 2), V2 (empilées), V1
     //   (pleine page). Horizontales : H4 (grille 2×2), H2 (empilées), H1
@@ -331,7 +323,6 @@ class BookPdfService {
                 final rawId = successfulPhotos[j].rawId;
                 return rawId != null && featuredIds.contains(rawId);
               })
-              .take(3)
               .toList();
       final rest = group.where((j) => !featured.contains(j)).toList();
       final verticals = rest.where(isPortraitAt).toList();
@@ -452,61 +443,33 @@ class BookPdfService {
 
     final totalPages =
         1 + photoPages.length + textOnlyMemories.length + (hasGrowth ? 1 : 0);
-    final finalPageCount = !padForPrint
-        ? totalPages
-        : (forcedPageCount != null && forcedPageCount > totalPages
-            ? forcedPageCount
-            : _gelatoValidPageCount(totalPages));
+    final finalPageCount =
+        !padForPrint ? totalPages : _validPageCount(coverType, totalPages);
     // A4 full-bleed — margins handled inside each widget
     final fmt = PdfPageFormat(_a4W, _a4H, marginAll: 0);
-
-    // Couverture d'IMPRESSION uniquement : Gelato attend un visuel de
-    // couverture au format « wraparound » (dos + tranche + face), bien plus
-    // large qu'une simple page — sans ça l'image ne remplit qu'une fraction
-    // gauche du gabarit chez l'imprimeur (le reste part blanc). On ne va
-    // chercher la largeur exacte (dépend du nombre de pages) que pour le PDF
-    // envoyé à Gelato ; l'aperçu / partage garde la couverture simple.
-    final coverSpread = padForPrint
-        ? await _fetchCoverSpreadSizePt(
-            coverType: coverType, pageCount: finalPageCount)
-        : null;
-    final coverFmt = coverSpread != null
-        ? PdfPageFormat(coverSpread.width, coverSpread.height, marginAll: 0)
-        : fmt;
 
     Future<Uint8List> buildAndSave(String? svg) async {
       final doc = pw.Document(title: notebook.title, author: 'Folio');
 
-      // 1. Cover
+      // 1. Cover — page normale, simple (Prodigi : « save your complete
+      // photo book as a single PDF with the cover and all content pages as
+      // single pages, not spreads » ; la tranche est calculée et ajoutée
+      // automatiquement par Prodigi selon le nombre de pages, pas de gabarit
+      // wraparound à générer nous-mêmes — contrairement à Gelato.
       doc.addPage(pw.Page(
-        pageFormat: coverFmt,
-        build: (_) => coverSpread != null
-            ? _coverSpreadNotebook(
-                spreadWidth: coverSpread.width,
-                spreadHeight: coverSpread.height,
-                notebook: notebook,
-                svgString: svg,
-                cover: pdfCover,
-                pR: playfairR,
-                pB: playfairB,
-                coverPhotoBytes: coverPhotoBytes,
-                yearRange: yearRange,
-                highlights: highlights,
-                customTitle: customTitle,
-                customSubtitle: customSubtitle,
-              )
-            : _coverPageNotebook(
-                notebook: notebook,
-                svgString: svg,
-                cover: pdfCover,
-                pR: playfairR,
-                pB: playfairB,
-                coverPhotoBytes: coverPhotoBytes,
-                yearRange: yearRange,
-                highlights: highlights,
-                customTitle: customTitle,
-                customSubtitle: customSubtitle,
-              ),
+        pageFormat: fmt,
+        build: (_) => _coverPageNotebook(
+          notebook: notebook,
+          svgString: svg,
+          cover: pdfCover,
+          pR: playfairR,
+          pB: playfairB,
+          coverPhotoBytes: coverPhotoBytes,
+          yearRange: yearRange,
+          highlights: highlights,
+          customTitle: customTitle,
+          customSubtitle: customSubtitle,
+        ),
       ));
 
       // 2. Photo pages (templates V4/V3/V2/V1 verticales, H2/H1 horizontales)
@@ -564,8 +527,7 @@ class BookPdfService {
       }
 
       // 4. Pages blanches de bourrage pour atteindre un nombre de pages valide
-      //    chez Gelato (pair, 28–200 — cf. _gelatoValidPageCount).
-      //    Uniquement pour l'impression.
+      //    (pair — cf. _validPageCount). Uniquement pour l'impression.
       if (padForPrint) {
         for (int p = totalPages; p < finalPageCount; p++) {
           doc.addPage(pw.Page(
@@ -591,104 +553,26 @@ class BookPdfService {
     return (bytes: bytes, pageCount: finalPageCount);
   }
 
-  // Arrondit au nombre de pages valide Gelato le plus proche par le haut :
-  // PAIR, entre 28 et 200.
-  //
-  // Historique (à lire avant de retoucher cette règle) :
-  // - 22.07 : deux commandes réellement PAYÉES (34 et 36 pages) rejetées
-  //   après coup, dans le dashboard Gelato, avec « exactement 37 pages » →
-  //   hypothèse n≡1(mod4), corrigée puis vite revertée.
-  // - Une commande de 33 pages (issue de cette hypothèse) a reçu un
-  //   BAD_REQUEST explicite de l'API order, À LA CRÉATION de la commande,
-  //   listant les valeurs valides : les PAIRS de 28 à 200. Règle repassée
-  //   à pair/28-200 sur cette base.
-  // - 28.07 matin : une commande de 40 pages (paire, donc « valide » selon
-  //   cette liste) a de nouveau été rejetée après coup avec « exactement 43
-  //   pages » → nouvelle hypothèse n≡1(mod 6) (plancher 25, plafond 199),
-  //   déployée en remplacement de la règle pair/28-200.
-  // - 28.07 après-midi : un test avec CETTE règle n≡1(mod6) (25 pages) a
-  //   reçu un BAD_REQUEST **à la création même de la commande** — pas après
-  //   coup — listant À NOUVEAU, mot pour mot, la même liste explicite
-  //   (PAIRS, 28 à 200). La règle n≡1(mod6) est donc **confirmée fausse** :
-  //   elle casse la création de la commande elle-même, avant même
-  //   d'atteindre la validation prépresse qui avait produit les rejets
-  //   « exactement 37/43 ».
-  //
-  // Conclusion : la liste explicite pair/28-200 renvoyée par l'API order
-  // (vue deux fois, à des mois d'écart, sur deux tentatives indépendantes)
-  // FAIT FOI pour ce champ — c'est la seule source qui soit une vraie
-  // réponse machine de l'API, pas une lecture d'écran. Les rejets
-  // « exactement 37/43 pages » vus après coup dans le dashboard viennent
-  // d'AILLEURS (une validation prépresse ultérieure, distincte, de règle
-  // encore inconnue) : NE PAS essayer de la deviner à partir de 2-3 points
-  // de données et de la réinjecter ici — ça casse la création de commande
-  // à chaque fois. Si un rejet « exactement N pages » revient, le corriger
-  // au cas par cas pour CETTE commande (renvoi avec N pages, cf. écran de
-  // suivi commande) plutôt que de changer cette règle globale sans nouvelle
-  // preuve de type BAD_REQUEST explicite à la création.
-  //
-  // - 30.07.26 : un envoi DIRECT en `orderType: order` avec 37 pages (le
-  //   nombre exact réclamé par un vrai refus prépresse ce jour-là, sur CETTE
-  //   même commande) a été rejeté SYNCHRONE par l'API order, avec « Request
-  //   contains errors » — 3ᵉ confirmation indépendante que la création
-  //   réelle n'accepte QUE des valeurs paires. Conclusion définitive : les
-  //   deux contraintes (paire à la création, n≡1(mod6) à la prépresse après
-  //   confirmation manuelle d'un brouillon dans le dashboard Gelato) sont
-  //   RÉELLES et MUTUELLEMENT INCOMPATIBLES pour ce productUid — aucun
-  //   nombre de pages ne peut satisfaire les deux à la fois via un appel
-  //   direct `orderType: order`. Le renvoi direct en production (voir
-  //   gelato/[action].ts, type='order') NE PEUT DONC PAS résoudre un refus
-  //   « exactement N pages » quand N est impair — seul un nouveau BROUILLON
-  //   (orderType: draft, qui accepte tout) confirmé À LA MAIN dans le
-  //   dashboard Gelato permet d'atteindre la vraie validation prépresse.
-  static int _gelatoValidPageCount(int n) {
-    var v = n < 28 ? 28 : (n.isOdd ? n + 1 : n);
-    if (v > 200) v = 200;
-    return v;
-  }
+  // Arrondit au nombre de pages valide le plus proche par le haut : PAIR.
+  // Règle de prudence héritée de la doc générale Prodigi — testé le 06.08.26
+  // via de vrais appels POST /v4.0/quotes avec des nombres de pages IMPAIRS
+  // (soft 41p, hard 25p) : acceptés sans erreur à ce stade. La parité n'est
+  // donc PAS confirmée comme rejetée par Prodigi (contrairement à ce qu'on
+  // pensait initialement) — reste peut-être vérifiée seulement à la création
+  // réelle (POST /v4.0/orders, non testé pour ne pas risquer une vraie
+  // commande avec la clé live). On garde le nombre pair par précaution
+  // (aucun coût à le faire), mais ce n'est plus présenté comme une règle
+  // Prodigi confirmée. Bornes de pages, elles, confirmées le 06.08.26 sur les
+  // fiches produit Prodigi : softcover 20-300, hardcover 24-300 (500 en
+  // 150gsm gloss only, non géré ici par simplicité). Doit rester identique à
+  // BookPricing.printablePages.
+  static const Map<String, int> _minValidPages = {'soft': 20, 'hard': 24};
 
-  // Taille totale (en points) du gabarit de couverture « wraparound » (dos +
-  // tranche + face) chez Gelato, pour un type de couverture + un nombre de
-  // pages donnés — la tranche s'épaissit avec le nombre de pages. On
-  // interroge le backend (qui détient la clé Gelato et calcule via l'API
-  // officielle `cover-dimensions`) ; en cas d'échec (hors-ligne, config
-  // manquante…) on retombe sur une formule standard d'imprimerie plutôt que
-  // d'échouer la génération du PDF.
-  //
-  // IMPORTANT : on utilise la HAUTEUR renvoyée par Gelato, pas `_a4H` — une
-  // command test (36 pages, 2026-07-21) a été rejetée par Gelato après coup
-  // (« problème avec le fichier de conception ») alors que la largeur venait
-  // bien de leur API ; la hauteur, elle, était supposée égale à `_a4H` sans
-  // jamais être vérifiée. Tant que la vraie cause n'est pas confirmée, on ne
-  // prend plus ce raccourci.
-  static Future<({double width, double height})> _fetchCoverSpreadSizePt({
-    required String coverType,
-    required int pageCount,
-  }) async {
-    try {
-      final data = await BackendClient.postJson(
-        '/api/gelato/cover-dimensions',
-        {'coverType': coverType, 'pageCount': pageCount},
-        timeout: const Duration(seconds: 20),
-      );
-      final edge = data?['wraparoundEdgeSize'];
-      final widthMm = edge is Map ? (edge['width'] as num?)?.toDouble() : null;
-      final heightMm =
-          edge is Map ? (edge['height'] as num?)?.toDouble() : null;
-      if (widthMm != null && widthMm > 0 && heightMm != null && heightMm > 0) {
-        return (
-          width: widthMm * PdfPageFormat.mm,
-          height: heightMm * PdfPageFormat.mm,
-        );
-      }
-    } catch (_) {
-      // Repli formule ci-dessous.
-    }
-    // Épaisseur de tranche ≈ 0.1 mm / page (papier ~150g courant photobook),
-    // avec un minimum selon le type de couverture. Approximatif mais évite
-    // un échec pur et simple si l'appel réseau rate.
-    final spineMm = max(pageCount * 0.1, coverType == 'hard' ? 10.0 : 4.0);
-    return (width: 2 * _a4W + spineMm * PdfPageFormat.mm, height: _a4H);
+  static int _validPageCount(String coverType, int n) {
+    final min = _minValidPages[coverType] ?? 24;
+    var v = n < min ? min : (n.isOdd ? n + 1 : n);
+    if (v > 300) v = 300;
+    return v;
   }
 
   // ── Helpers ───────────────────────────────────────────────────────────────
@@ -978,94 +862,6 @@ class BookPdfService {
     );
   }
 
-  // Couverture d'impression : gabarit « wraparound » complet (dos + tranche +
-  // face) à la largeur exacte fournie par Gelato (`spreadWidth`, en points).
-  // Face = même visuel que `_coverPageNotebook` (photo ou couleur unie),
-  // posée à droite ; dos et tranche en couleur unie — le dos n'affiche rien
-  // (reliure classique), la tranche porte le titre à la verticale si elle
-  // est assez large pour rester lisible.
-  static pw.Widget _coverSpreadNotebook({
-    required double spreadWidth,
-    required double spreadHeight,
-    required NotebookModel notebook,
-    required String? svgString,
-    required PdfColor cover,
-    required pw.Font pR,
-    required pw.Font pB,
-    Uint8List? coverPhotoBytes,
-    required String yearRange,
-    List<String> highlights = const [],
-    String? customTitle,
-    String? customSubtitle,
-  }) {
-    final spineWidth = (spreadWidth - 2 * _a4W).clamp(0.0, spreadWidth);
-    final displayTitle = customTitle?.isNotEmpty == true
-        ? customTitle!
-        : (notebook.type == 'enfant' && notebook.companionName != null
-            ? '${notebook.title} & ${notebook.companionName}'
-            : notebook.title);
-    // Sous ~12 mm, le texte tourné serait tronqué/illisible : tranche unie.
-    final showSpineTitle = spineWidth >= 12 * PdfPageFormat.mm;
-
-    return pw.SizedBox(
-      width: spreadWidth,
-      height: spreadHeight,
-      child: pw.Stack(
-        children: [
-          // Fond dos + tranche en couleur unie sur toute la largeur (la face,
-          // opaque, est posée par-dessus sa portion à droite).
-          pw.Container(width: spreadWidth, height: spreadHeight, color: cover),
-          if (showSpineTitle)
-            pw.Positioned(
-              left: _a4W,
-              top: 0,
-              child: pw.SizedBox(
-                width: spineWidth,
-                height: spreadHeight,
-                child: pw.Center(
-                  child: pw.Transform.rotateBox(
-                    angle: pi / 2,
-                    child: pw.Text(
-                      displayTitle,
-                      maxLines: 1,
-                      overflow: pw.TextOverflow.clip,
-                      style: pw.TextStyle(
-                        font: pB,
-                        fontSize: 11,
-                        color: PdfColors.white,
-                        letterSpacing: 0.5,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          // Face (1ère de couverture) — identique à l'aperçu, posée à droite.
-          pw.Positioned(
-            left: _a4W + spineWidth,
-            top: 0,
-            child: pw.SizedBox(
-              width: _a4W,
-              height: spreadHeight,
-              child: _coverPageNotebook(
-                notebook: notebook,
-                svgString: svgString,
-                cover: cover,
-                pR: pR,
-                pB: pB,
-                coverPhotoBytes: coverPhotoBytes,
-                yearRange: yearRange,
-                highlights: highlights,
-                customTitle: customTitle,
-                customSubtitle: customSubtitle,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   static pw.Widget _coverPageNotebook({
     required NotebookModel notebook,
     required String? svgString,
@@ -1119,7 +915,7 @@ class BookPdfService {
                 pw.Image(pw.MemoryImage(coverPhotoBytes), fit: pw.BoxFit.cover),
           ),
           pw.Positioned(
-              top: _bleed + 20, right: _bleed + 22, child: folioTag()),
+              top: _safe + 20, right: _safe + 22, child: folioTag()),
           pw.Positioned(
             bottom: 0,
             left: 0,
@@ -1263,7 +1059,7 @@ class BookPdfService {
     return pw.Stack(
       children: [
         pw.SizedBox(width: w, height: h, child: pw.Container(color: cover)),
-        pw.Positioned(top: _bleed + 20, right: _bleed + 22, child: folioTag()),
+        pw.Positioned(top: _safe + 20, right: _safe + 22, child: folioTag()),
         pw.SizedBox(
             width: w, height: h, child: pw.Center(child: centeredContent)),
       ],

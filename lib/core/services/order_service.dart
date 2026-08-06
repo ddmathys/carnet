@@ -36,7 +36,7 @@ class OrderService {
 
   // ── Supprimer une commande (admin) ────────────────────────────────────────
 
-  /// Supprime la commande (ex. après suppression côté Gelato) : le PDF
+  /// Supprime la commande (ex. après suppression côté imprimeur) : le PDF
   /// (best-effort) puis le document Firestore. Réservé à l'admin par les règles.
   ///
   /// Le PDF vit sur R2 (URL stable `…/book-pdf?key=…`) ; les commandes d'avant
@@ -82,60 +82,40 @@ class OrderService {
     await FirebaseFirestore.instance.collection('orders').doc(orderId).update(data);
   }
 
-  // ── Envoyer à Gelato (admin) ──────────────────────────────────────────────
+  // ── Envoyer à l'impression (admin) ────────────────────────────────────────
 
-  /// Crée la commande chez Gelato via le backend. `orderType` = 'draft' par
-  /// défaut (brouillon à valider dans le dashboard Gelato) ou 'order' pour
-  /// commander directement en production. Lève une exception en cas d'échec.
-  static Future<Map<String, dynamic>> sendToGelato(
+  /// Envoie la commande à Prodigi via le backend, en un seul appel (pas de
+  /// brouillon à confirmer comme avec Gelato). Le backend refuse si la
+  /// commande n'est pas encore marquée "payée". `pdfUrl`/`pageCount` : à
+  /// fournir uniquement pour un RENVOI après erreur avec un livre régénéré
+  /// (voir book_generate_screen.dart en mode édition) — le backend plafonne
+  /// alors à 3 tentatives. Lève une exception en cas d'échec.
+  static Future<Map<String, dynamic>> sendToPrint(
     String orderId, {
-    String orderType = 'draft',
+    String? pdfUrl,
+    int? pageCount,
   }) async {
     final data = await BackendClient.postJson(
-      '/api/gelato/order',
-      {'orderId': orderId, 'orderType': orderType},
-      timeout: const Duration(seconds: 30),
-    );
-    if (data == null || data['ok'] != true) {
-      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec Gelato');
-    }
-    return data;
-  }
-
-  // ── Renvoyer après refus (client) ─────────────────────────────────────────
-
-  /// Renvoie DIRECTEMENT en production une commande refusée, avec un livre
-  /// régénéré (`pdfUrl`/`pageCount`). Réservé côté backend au propriétaire de
-  /// la commande, plafonné à 3 tentatives, et à un écart de pages ≤3 par
-  /// rapport à ce qui a déjà été facturé (sinon le backend refuse avec un
-  /// message à transmettre tel quel — pas de repricing automatique).
-  static Future<Map<String, dynamic>> retryGelatoOrder(
-    String orderId, {
-    required String pdfUrl,
-    required int pageCount,
-  }) async {
-    final data = await BackendClient.postJson(
-      '/api/gelato/order',
+      '/api/prodigi/order',
       {
         'orderId': orderId,
-        'orderType': 'order',
-        'pdfUrl': pdfUrl,
-        'pageCount': pageCount,
+        if (pdfUrl != null) 'pdfUrl': pdfUrl,
+        if (pageCount != null) 'pageCount': pageCount,
       },
       timeout: const Duration(seconds: 30),
     );
     if (data == null || data['ok'] != true) {
-      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec Gelato');
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec de l’envoi à l’impression');
     }
     return data;
   }
 
-  /// Relit le vrai statut Gelato d'une commande (admin, ou le client pour la
-  /// sienne) — utile pour un rafraîchissement manuel sans attendre le cron
-  /// quotidien.
-  static Future<Map<String, dynamic>> checkGelatoStatus(String orderId) async {
+  /// Relit le vrai statut d'une commande chez Prodigi (admin, ou le client
+  /// pour la sienne) — utile pour un rafraîchissement manuel sans attendre
+  /// le cron quotidien.
+  static Future<Map<String, dynamic>> checkPrintStatus(String orderId) async {
     final data = await BackendClient.postJson(
-      '/api/gelato/status',
+      '/api/prodigi/status',
       {'orderId': orderId},
       timeout: const Duration(seconds: 20),
     );

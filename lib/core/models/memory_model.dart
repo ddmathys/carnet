@@ -43,7 +43,7 @@ class MemoryModel {
   // Densité par défaut = comportement historique du moteur (4 verticales puis
   // 2 horizontales par page) : un souvenir qui n'y touche jamais rend à
   // l'identique d'avant. bookFeaturedMedia = identifiants stables (clé R2 ou
-  // URL Firebase legacy) des photos affichées en pleine page, max 3.
+  // URL Firebase legacy) des photos affichées en pleine page, nombre illimité.
   final int bookVerticalDensity;
   final int bookHorizontalDensity;
   final List<String> bookFeaturedMedia;

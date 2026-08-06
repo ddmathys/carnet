@@ -5,6 +5,6 @@
     { "source": "/join", "destination": "/api/join" }
   ],
   "crons": [
-    { "path": "/api/gelato/poll", "schedule": "0 8 * * *" }
+    { "path": "/api/prodigi/poll", "schedule": "0 8 * * *" }
   ]
 }

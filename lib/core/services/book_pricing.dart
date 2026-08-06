@@ -1,45 +1,57 @@
 import '../models/memory_model.dart';
 
-/// Tarification du livre imprimé = **coût Gelato tout compris** (impression +
-/// livraison + TVA) **+ une marge**. Objectif : rester compétitif tout en
-/// couvrant l'intégralité du coût.
+/// Tarification du livre imprimé = **coût impression tout compris**
+/// (impression + livraison) **+ une marge**. Objectif : rester compétitif
+/// tout en couvrant l'intégralité du coût.
 ///
-/// Calibré sur une commande réelle Gelato (Photo Book 8×11", juin 2026 :
-/// 68 pages rigide → impression 23.72 + livraison 9.35 + TVA 8% = 35.75 CHF).
-/// Les constantes ci-dessous sont les seuls leviers à ajuster.
+/// Constantes calibrées le 06.08.26 sur de VRAIS appels `POST /v4.0/quotes`
+/// (destinationCountryCode: "CH", shippingMethod: "Standard") — pas juste le
+/// simulateur web, confirmé via la vraie clé API :
+/// - Soft (BOOK-FE-A4-P-SOFT-MHK), devis 40 pages : base 20p = \$10.97,
+///   +\$0.30/page au-delà, livraison \$18.71 (expédié depuis DE), taxe \$0.00.
+/// - Hard (BOOK-FE-A4-P-HARD-G), devis 68 pages : base 24p = \$13.48,
+///   +\$0.25/page au-delà, livraison \$17.49 (expédié depuis NL), taxe \$0.00.
+/// Conversion USD→CHF à ~0.90 (approximatif, à réviser périodiquement — seule
+/// variable non confirmée par l'API). Pas de TVA suisse ajoutée : Prodigi
+/// renvoie `totalTax: 0.00` pour la Suisse — les droits de douane/TVA import
+/// sont à la charge du DESTINATAIRE à la livraison, pas facturés par Prodigi
+/// (différent du modèle Gelato). DOIT rester identique à
+/// backend/lib/pricing.ts.
 class BookPricing {
-  // ── Coût Gelato estimé (leviers) ──────────────────────────────────────────
-  static const double perPage = 0.24; // CHF / page (impression)
-  static const double printBaseHard = 8.50; // surcoût couverture rigide
-  static const double printBaseSoft = 4.50; // surcoût couverture souple
-  static const double shipping = 9.35; // livraison Suisse (Swiss Post Eco)
-  static const double taxRate = 0.08; // TVA Gelato (~8%)
+  static const double _usdToChf = 0.90;
+
+  static const Map<String, double> _basePriceUsd = {'soft': 10.97, 'hard': 13.48};
+  static const Map<String, double> _extraPageUsd = {'soft': 0.30, 'hard': 0.25};
+  static const Map<String, double> _shippingUsd = {'soft': 18.71, 'hard': 17.49};
 
   // ── Marge visée ──────────────────────────────────────────────────────────
   // 20% du coût, avec un PLANCHER absolu de 8 CHF : sur un petit livre (peu
   // de pages), 20% ne représenterait que quelques francs — insuffisant pour
-  // couvrir la validation manuelle de la commande (dashboard Gelato) et les
-  // frais annexes. Le plancher protège ces petites commandes ; au-delà, c'est
-  // le pourcentage qui prend le relais (gros livres = marge plus élevée).
+  // couvrir le suivi de la commande et les frais annexes. Le plancher protège
+  // ces petites commandes ; au-delà, c'est le pourcentage qui prend le relais
+  // (gros livres = marge plus élevée).
   static const double marginRate = 0.20;
   static const double marginFloor = 8.0;
 
-  /// Coût Gelato estimé (impression + livraison + TVA) pour une couverture et
+  /// Coût d'impression estimé (impression + livraison) pour une couverture et
   /// un nombre de pages donnés.
-  static double gelatoCost({required String coverType, required int pages}) {
-    final base = coverType == 'hard' ? printBaseHard : printBaseSoft;
-    final printCost = base + perPage * pages;
-    return (printCost + shipping) * (1 + taxRate);
+  static double printCost({required String coverType, required int pages}) {
+    final min = _minPages[coverType] ?? 24;
+    final extraPages = (pages - min).clamp(0, 1 << 30);
+    final usd = (_basePriceUsd[coverType] ?? _basePriceUsd['hard']!) +
+        (_extraPageUsd[coverType] ?? _extraPageUsd['hard']!) * extraPages +
+        (_shippingUsd[coverType] ?? _shippingUsd['hard']!);
+    return usd * _usdToChf;
   }
 
   /// Marge appliquée sur un coût donné : max(20% du coût, plancher 8 CHF).
   static double marginFor(double cost) =>
       cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
 
-  /// Prix client = coût Gelato + marge, arrondi au 0.50 supérieur (le coût reste
-  /// toujours couvert).
+  /// Prix client = coût d'impression + marge, arrondi au 0.50 supérieur (le
+  /// coût reste toujours couvert).
   static double price({required String coverType, required int pages}) {
-    final cost = gelatoCost(coverType: coverType, pages: pages);
+    final cost = printCost(coverType: coverType, pages: pages);
     final raw = cost + marginFor(cost);
     return (raw * 2).ceilToDouble() / 2;
   }
@@ -64,20 +76,22 @@ class BookPricing {
     return 1 + pages; // + couverture
   }
 
-  /// Nombre de pages réellement imprimé : PAIR, entre 28 et 200 — seule
-  /// valeur acceptée par la création RÉELLE de commande chez Gelato
-  /// (`orderType: order`), reconfirmée le 30.07.26 (un envoi direct à 37
-  /// pages a été rejeté SYNCHRONE avec « Request contains errors », sans
-  /// même atteindre la validation prépresse). La règle n≡1(mod 6), elle,
-  /// n'est exigée qu'À LA PRÉPRESSE (après confirmation manuelle d'un
-  /// brouillon dans le dashboard Gelato) — les deux règles sont
-  /// contradictoires (paire vs impaire) et ne peuvent pas être satisfaites
-  /// par un seul nombre de pages. Voir BookPdfService._gelatoValidPageCount
-  /// pour l'historique complet. Doit rester identique à cette méthode-là.
-  /// C'est sur CETTE base qu'est facturé un livre imprimé.
-  static int printablePages(int rawPages) {
-    var v = rawPages < 28 ? 28 : (rawPages.isOdd ? rawPages + 1 : rawPages);
-    if (v > 200) v = 200;
+  /// Nombre de pages réellement imprimé : PAIR par précaution (règle non
+  /// confirmée comme rejetée par Prodigi — testé le 06.08.26 via de vrais
+  /// devis avec pages impaires, acceptés sans erreur ; peut-être vérifiée
+  /// seulement à la vraie création de commande, non testée pour éviter un
+  /// risque avec la clé live). Bornes de pages, elles, confirmées le 06.08.26
+  /// sur les fiches produit Prodigi : softcover 20-300, hardcover 24-300 (500
+  /// en 150gsm gloss only, non géré ici par simplicité). Voir
+  /// BookPdfService._validPageCount, doit rester identique à cette
+  /// méthode-là. C'est sur CETTE base qu'est facturé un livre imprimé.
+  static const Map<String, int> _minPages = {'soft': 20, 'hard': 24};
+  static const int _maxPages = 300;
+
+  static int printablePages(String coverType, int rawPages) {
+    final min = _minPages[coverType] ?? 24;
+    var v = rawPages < min ? min : (rawPages.isOdd ? rawPages + 1 : rawPages);
+    if (v > _maxPages) v = _maxPages;
     return v;
   }
 

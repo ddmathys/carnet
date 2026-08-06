@@ -134,7 +134,7 @@ class OrderDetailScreen extends StatelessWidget {
               children: [
                 _OrderTimeline(order: order),
                 const SizedBox(height: 16),
-                _GelatoStatusBanner(order: order),
+                _PrintStatusBanner(order: order),
                 const SizedBox(height: 16),
                 _OrderDetailsCard(order: order),
                 const SizedBox(height: 16),
@@ -347,115 +347,32 @@ class _TimelineStep extends StatelessWidget {
   }
 }
 
-/// Bandeau de statut Gelato — visible uniquement quand il y a quelque chose à
-/// dire (refus, renvoi en cours) : sinon caché, pour ne pas encombrer une
-/// commande qui se déroule normalement.
+/// Bandeau de statut impression — visible uniquement quand il y a quelque
+/// chose à dire (erreur, envoi en cours) : sinon caché, pour ne pas encombrer
+/// une commande qui se déroule normalement.
 ///
-/// Le statut vient du cron quotidien (ou d'une vérification admin manuelle) —
-/// jamais de la création de la commande elle-même, qui réussit toujours côté
-/// API même pour un fichier invalide (voir mémoire projet).
-class _GelatoStatusBanner extends StatelessWidget {
+/// Pas de renvoi self-service : contrairement à Gelato, dont le refus
+/// n'apparaissait qu'après coup avec un nombre de pages imprévisible,
+/// l'admin envoie la commande manuellement une fois payée et corrige/relance
+/// depuis la console en cas d'erreur — plus simple, pas de compteur de
+/// tentatives à gérer côté client.
+class _PrintStatusBanner extends StatelessWidget {
   final OrderModel order;
-  const _GelatoStatusBanner({required this.order});
+  const _PrintStatusBanner({required this.order});
 
   @override
   Widget build(BuildContext context) {
-    switch (order.gelatoStatus) {
-      case 'refused':
-        if (order.canRetryGelato) return _refusedRetriable(context);
-        return _blocked('Notre imprimeur refuse toujours ce livre après '
-            'plusieurs essais. Notre équipe reprend la main et te recontacte '
-            'rapidement.');
+    switch (order.prodigiStatus) {
       case 'error':
         return _blocked(
           'Un souci technique est survenu lors de l\'envoi à l\'imprimeur. '
-          'Notre équipe s\'en occupe.',
+          'Notre équipe s\'en occupe et te recontacte rapidement.',
         );
       case 'pending':
         return _pending();
       default:
         return const SizedBox.shrink();
     }
-  }
-
-  Widget _refusedRetriable(BuildContext context) {
-    final left = order.gelatoRetriesLeft;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: AppColors.error.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.error.withOpacity(0.3)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(Icons.error_outline, size: 18, color: AppColors.error),
-              SizedBox(width: 8),
-              Expanded(
-                child: Text('Notre imprimeur n\'a pas accepté ce livre',
-                    style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.error)),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          const Text(
-            'Un souci technique de mise en page — rien de grave, ça se corrige '
-            'en ajustant le livre puis en le renvoyant.',
-            style: TextStyle(
-                fontSize: 13, color: AppColors.textDark, height: 1.4),
-          ),
-          if (order.refusalReason != null &&
-              order.refusalReason!.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.background.withOpacity(0.4),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                order.refusalReason!,
-                style: const TextStyle(
-                    fontSize: 12,
-                    color: AppColors.textMedium,
-                    fontStyle: FontStyle.italic),
-              ),
-            ),
-          ],
-          const SizedBox(height: 12),
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: () => context.push(
-                  '/book/select?tag=${order.notebookId}&editOrder=${order.id}'),
-              icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('Modifier le livre et renvoyer'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.error,
-                foregroundColor: AppColors.white,
-                padding: const EdgeInsets.symmetric(vertical: 12),
-              ),
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            left > 1
-                ? '$left tentatives de renvoi restantes.'
-                : 'Dernière tentative de renvoi automatique.',
-            style: const TextStyle(fontSize: 11, color: AppColors.textMedium),
-          ),
-        ],
-      ),
-    );
   }
 
   Widget _pending() {

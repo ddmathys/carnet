@@ -95,6 +95,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         </p>
         ${paymentRows}
         <p style="margin:14px 0 0;font-size:14px;color:#2d2d2d;">🔖 Référence à indiquer : <strong>${ref}</strong></p>
+        <p style="margin:14px 0 0;font-size:13px;color:#6b5d4f;line-height:1.6;">
+          Vous préférez un autre moyen de paiement ? Écrivez-nous à
+          <a href="mailto:${ADMIN_EMAIL}" style="color:#3A6648;">${ADMIN_EMAIL}</a> et on s'arrange ensemble.
+        </p>
       </td></tr>
     </table>
     <p style="margin:0;font-size:14px;color:#888;line-height:1.6;">

@@ -19,9 +19,9 @@ import '../tags/tag_picker_sheet.dart';
 /// coup), ou cocher les souvenirs un par un. Remplace l'ancien choix de carnets.
 class MemorySelectScreen extends StatefulWidget {
   final String? initialTagId;
-  /// Si renseigné, la sélection sert à corriger une commande existante
-  /// refusée par Gelato plutôt qu'à en créer une nouvelle — transmis tel
-  /// quel à BookGenerateScreen, qui change le comportement de l'étape finale.
+  /// Si renseigné, la sélection sert à corriger une commande existante en
+  /// erreur (admin) plutôt qu'à en créer une nouvelle — transmis tel quel à
+  /// BookGenerateScreen, qui change le comportement de l'étape finale.
   final String? editOrderId;
   const MemorySelectScreen({super.key, this.initialTagId, this.editOrderId});
 

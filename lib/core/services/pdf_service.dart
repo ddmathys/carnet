@@ -17,8 +17,8 @@ class PdfUploadResult {
 ///
 /// Le bucket est privé : l'URL renvoyée n'est pas une URL R2 mais une URL du
 /// backend, permanente et signée, qui redirige vers une URL R2 fraîche à chaque
-/// accès. C'est la seule forme qui convienne à Gelato, dont l'impression peut
-/// survenir bien après la commande — une URL signée aurait expiré.
+/// accès. C'est la seule forme qui convienne à l'imprimeur, dont l'impression
+/// peut survenir bien après la commande — une URL signée aurait expiré.
 class PdfService {
   /// Envoie le PDF sur R2. Retourne sa clé + son URL stable, ou null si échec.
   static Future<PdfUploadResult?> uploadBookPdf(Uint8List bytes) async {

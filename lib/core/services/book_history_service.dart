@@ -80,8 +80,9 @@ class BookHistoryService {
   /// Supprime l'entrée d'historique + le PDF.
   ///
   /// ⚠️ Pour un livre lié à une commande imprimée, le FICHIER est conservé :
-  /// `orders.pdfUrl` pointe sur la même clé R2, et Gelato peut venir chercher
-  /// le PDF des semaines après la commande. Seule l'entrée d'historique part.
+  /// `orders.pdfUrl` pointe sur la même clé R2, et l'imprimeur peut venir
+  /// chercher le PDF des semaines après la commande. Seule l'entrée
+  /// d'historique part.
   ///
   /// `storagePath` porte désormais une clé R2 (`books/{uid}/…`). Les livres
   /// d'avant la bascule ont encore un chemin Firebase : on les supprime là où
