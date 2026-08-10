@@ -1998,6 +1998,46 @@ class _PdfPreviewViewerState extends State<_PdfPreviewViewer> {
   late final PageController _ctrl;
   int _current = 0;
 
+  bool get _isAdmin =>
+      FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
+  bool _checkingProdigi = false;
+  String? _prodigiResultText;
+  String? _prodigiErrorText;
+
+  // Même vérification que dans la console admin (POST /api/prodigi/quote,
+  // gratuit, ne modifie rien) — mais ici pour les DEUX formats d'un coup
+  // (souple et rigide), vu que l'aperçu les affiche déjà côte à côte.
+  Future<void> _verifyProdigi() async {
+    setState(() {
+      _checkingProdigi = true;
+      _prodigiResultText = null;
+      _prodigiErrorText = null;
+    });
+    try {
+      final results = await Future.wait([
+        OrderService.verifyPrintQuote(
+            coverType: 'soft', pageCount: widget.pagesSoft),
+        OrderService.verifyPrintQuote(
+            coverType: 'hard', pageCount: widget.pagesHard),
+      ]);
+      if (!mounted) return;
+      String fmt(Map<String, dynamic> r) {
+        final usd = (r['prodigiCostUsd'] as num?)?.toStringAsFixed(2);
+        return usd != null ? '\$$usd' : 'non lisible';
+      }
+      setState(() {
+        _prodigiResultText =
+            'Coût Prodigi réel — Souple ${fmt(results[0])} · Rigide ${fmt(results[1])}';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() =>
+          _prodigiErrorText = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _checkingProdigi = false);
+    }
+  }
+
   // Cache des pages déjà rastérisées (index → PNG).
   final Map<int, Uint8List> _cache = {};
   final Map<int, Future<Uint8List>> _inflight = {};
@@ -2122,6 +2162,47 @@ class _PdfPreviewViewerState extends State<_PdfPreviewViewer> {
                       height: 1.5),
                 ),
         ),
+        // Vérification du prix/pages contre un vrai devis Prodigi (admin
+        // uniquement — le backend refuse l'appel sinon).
+        if (_isAdmin && !widget.exceedsLimit) ...[
+          const SizedBox(height: 10),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Column(
+              children: [
+                OutlinedButton.icon(
+                  onPressed: _checkingProdigi ? null : _verifyProdigi,
+                  icon: _checkingProdigi
+                      ? const SizedBox(
+                          width: 14, height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.fact_check_outlined, size: 16),
+                  label: const Text('Vérifier chez Prodigi',
+                      style: TextStyle(fontSize: 12.5)),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.amber,
+                    side: const BorderSide(color: AppColors.amber),
+                    minimumSize: const Size(0, 34),
+                  ),
+                ),
+                if (_prodigiResultText != null) ...[
+                  const SizedBox(height: 6),
+                  Text(_prodigiResultText!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppColors.textMedium)),
+                ],
+                if (_prodigiErrorText != null) ...[
+                  const SizedBox(height: 6),
+                  Text(_prodigiErrorText!,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppColors.error)),
+                ],
+              ],
+            ),
+          ),
+        ],
         // CTA
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
