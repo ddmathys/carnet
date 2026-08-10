@@ -89,6 +89,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // final / l'impression.
   Uint8List? _previewPdfBytes;
   int _previewPageCount = 0;
+  int _previewPhotoCount = 0;
 
   late final TextEditingController _titleCtrl;
 
@@ -124,9 +125,17 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       ? _previewPageCount
       : BookPricing.estimatePages(_selectedMemories);
 
-  int get _printedPages => BookPricing.printablePages(_coverType, _pages);
-  double _priceFor(String coverType) =>
-      BookPricing.price(coverType: coverType, pages: _printedPages);
+  int get _printedPages => _printedPagesFor(_coverType);
+  // Le nombre de pages réellement imprimé dépend du format (souple ≥20,
+  // rigide ≥24, tous deux arrondis pair) — calculer séparément pour chaque
+  // couverture, pas seulement celle actuellement sélectionnée à l'écran
+  // (sinon le prix affiché pour l'AUTRE format se basait sur le mauvais
+  // nombre de pages, ex. 22 pages "souple" réutilisé tel quel pour le rigide
+  // qui en exige 24 minimum).
+  int _printedPagesFor(String coverType) =>
+      BookPricing.printablePages(coverType, _pages);
+  double _priceFor(String coverType) => BookPricing.price(
+      coverType: coverType, pages: _printedPagesFor(coverType));
   String _priceLabel(String coverType) =>
       BookPricing.format(_priceFor(coverType));
 
@@ -340,7 +349,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Génère le PDF d'aperçu — mêmes octets que le téléchargement (sans bourrage
   // de pages blanches), pour un aperçu strictement identique au rendu final.
-  Future<({Uint8List bytes, int pageCount})> _buildPreviewPdf() {
+  Future<({Uint8List bytes, int pageCount, int photoCount})> _buildPreviewPdf() {
     final coverColor = _notebook!.coverColor.isNotEmpty
         ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
             radix: 16))
@@ -388,6 +397,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       setState(() {
         _previewPdfBytes = gen.bytes;
         _previewPageCount = gen.pageCount;
+        _previewPhotoCount = gen.photoCount;
         _progress = 1.0;
         _generating = false;
         _showPreview = true;
@@ -902,7 +912,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     return _PdfPreviewViewer(
       pdfBytes: _previewPdfBytes!,
       pageCount: _previewPageCount,
-      printedPages: _printedPages,
+      photoCount: _previewPhotoCount,
+      pagesSoft: _printedPagesFor('soft'),
+      pagesHard: _printedPagesFor('hard'),
       priceSoft: _priceLabel('soft'),
       priceHard: _priceLabel('hard'),
       exceedsLimit: _exceedsPageLimit,
@@ -1194,7 +1206,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               title: 'Couverture souple',
               subtitle: 'Livre 21×28 cm · 5–7 jours',
               price: _priceLabel('soft'),
-              priceSub: '$_printedPages pages',
+              priceSub: '${_printedPagesFor('soft')} pages',
               priceColor: AppColors.amber,
               selected: _coverType == 'soft',
               onTap: _exceedsPageLimit
@@ -1211,7 +1223,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               title: 'Couverture rigide',
               subtitle: 'Livre 21×28 cm · couverture cartonnée',
               price: _priceLabel('hard'),
-              priceSub: '$_printedPages pages',
+              priceSub: '${_printedPagesFor('hard')} pages',
               priceColor: AppColors.amber,
               selected: _coverType == 'hard',
               onTap: _exceedsPageLimit
@@ -1953,7 +1965,12 @@ class _PdfPreviewViewer extends StatefulWidget {
   final int pageCount;
   // Infos pages/prix affichées en lecture seule sur cet écran (mêmes valeurs
   // que l'étape format juste après — juste visibles plus tôt, sans y aller).
-  final int printedPages;
+  // Nombre de pages RÉEL, calculé séparément par format (souple ≥20, rigide
+  // ≥24 — voir _printedPagesFor) : un même livre peut être imprimé sur un
+  // nombre de pages différent selon la couverture choisie.
+  final int photoCount;
+  final int pagesSoft;
+  final int pagesHard;
   final String priceSoft;
   final String priceHard;
   final bool exceedsLimit;
@@ -1963,7 +1980,9 @@ class _PdfPreviewViewer extends StatefulWidget {
   const _PdfPreviewViewer({
     required this.pdfBytes,
     required this.pageCount,
-    required this.printedPages,
+    required this.photoCount,
+    required this.pagesSoft,
+    required this.pagesHard,
     required this.priceSoft,
     required this.priceHard,
     required this.exceedsLimit,
@@ -2079,8 +2098,10 @@ class _PdfPreviewViewerState extends State<_PdfPreviewViewer> {
             ),
           ),
         ),
-        // Pages / prix estimé — mêmes valeurs qu'à l'étape format, visibles
-        // ici sans avoir à y aller.
+        // Photos / pages / prix — mêmes valeurs qu'à l'étape format, visibles
+        // ici sans avoir à y aller. Pages et prix affichés séparément par
+        // format (souple/rigide n'ont pas le même minimum de pages, donc pas
+        // forcément le même nombre de pages imprimées pour ce livre).
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 20),
           child: widget.exceedsLimit
@@ -2091,11 +2112,14 @@ class _PdfPreviewViewerState extends State<_PdfPreviewViewer> {
                   style: TextStyle(color: AppColors.amber, fontSize: 12.5),
                 )
               : Text(
-                  '${widget.printedPages} pages imprimées · Souple '
-                  '${widget.priceSoft} · Rigide ${widget.priceHard}',
+                  '${widget.photoCount} photos\n'
+                  'Souple · ${widget.pagesSoft} pages · ${widget.priceSoft}\n'
+                  'Rigide · ${widget.pagesHard} pages · ${widget.priceHard}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      color: AppColors.textMedium, fontSize: 12.5),
+                      color: AppColors.textMedium,
+                      fontSize: 12.5,
+                      height: 1.5),
                 ),
         ),
         // CTA

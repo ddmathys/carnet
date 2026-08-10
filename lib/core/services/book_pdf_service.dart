@@ -134,7 +134,7 @@ class BookPdfService {
 
   // ── Notebook version (multi-template) ─────────────────────────────────────
 
-  static Future<({Uint8List bytes, int pageCount})> generateForNotebook({
+  static Future<({Uint8List bytes, int pageCount, int photoCount})> generateForNotebook({
     required NotebookModel notebook,
     required Color coverColor,
     required List<MemoryModel> memories,
@@ -169,8 +169,25 @@ class BookPdfService {
     // téléchargement ci-dessous) ; les anciennes photos Firebase passent tel quel.
     final photoEntries = <_PhotoEntry>[];
     final sorted = [...memories]..sort((a, b) => a.date.compareTo(b.date));
-    final resolved =
-        await Future.wait(sorted.map((m) => PhotoService.resolvePhotoUrls(m)));
+    var resolved = await _runBounded(
+        sorted, (m) => PhotoService.resolvePhotoUrls(m), concurrency: 8);
+    // Un souvenir avec des clés média mais 0 URL résolue signale presque
+    // toujours un échec réseau ponctuel de resolvePhotoUrls (timeout, pic de
+    // charge) plutôt qu'un souvenir réellement sans photo — on retente une
+    // fois pour ceux-là avant d'accepter la perte.
+    final toRetry = [
+      for (var i = 0; i < sorted.length; i++)
+        if (resolved[i].isEmpty && sorted[i].mediaKeys.isNotEmpty) i
+    ];
+    if (toRetry.isNotEmpty) {
+      final retried = await _runBounded(
+          toRetry.map((i) => sorted[i]).toList(),
+          (m) => PhotoService.resolvePhotoUrls(m),
+          concurrency: 8);
+      for (var k = 0; k < toRetry.length; k++) {
+        resolved[toRetry[k]] = retried[k];
+      }
+    }
     for (var i = 0; i < sorted.length; i++) {
       // Identifiants stables alignés sur `resolved[i]` — voir rawMediaIdsOf.
       // Repli sur null (pas de rawId) si les longueurs divergent : ça n'arrive
@@ -187,32 +204,41 @@ class BookPdfService {
       }
     }
 
-    // Download all photo bytes in parallel (cover photo included)
+    // Download all photo bytes (cover photo included). Concurrence bornée :
+    // tout lancer d'un coup (ex. 105 photos = 105 requêtes simultanées)
+    // sature le réseau/R2 et fait timeouter une partie des requêtes au
+    // hasard — cause du nombre de photos incohérent d'un essai à l'autre.
     final Map<String, Uint8List> bytesByUrl = {};
     final urlsToFetch = {
       ...photoEntries.map((e) => e.url),
       if (coverPhotoUrl != null) coverPhotoUrl,
     }.toList();
-    Future<void> fetchAll(Iterable<String> urls) =>
-        Future.wait(urls.map((url) async {
-          try {
-            final response = await http
-                .get(Uri.parse(url))
-                .timeout(const Duration(seconds: 20));
-            if (response.statusCode == 200)
-              bytesByUrl[url] = response.bodyBytes;
-          } catch (_) {}
-        }));
+    Future<void> fetchAll(Iterable<String> urls) async {
+      final results = await _runBounded(urls.toList(), (url) async {
+        try {
+          final response = await http
+              .get(Uri.parse(url))
+              .timeout(const Duration(seconds: 20));
+          return response.statusCode == 200 ? response.bodyBytes : null;
+        } catch (_) {
+          return null;
+        }
+      }, concurrency: 10);
+      for (var i = 0; i < results.length; i++) {
+        final bytes = results[i];
+        if (bytes != null) bytesByUrl[urls.elementAt(i)] = bytes;
+      }
+    }
     await fetchAll(urlsToFetch);
-    // Les échecs de téléchargement sont tolérés pour l'aperçu (la photo est
-    // simplement omise, et ça se voit). Pour l'IMPRESSION, un livre incomplet
-    // partirait chez l'imprimeur sans que personne ne le voie : on retente une
-    // fois les manquants, puis on échoue franchement s'il en reste.
+    // Les échecs de téléchargement restants après retry sont tolérés pour
+    // l'aperçu (la photo est simplement omise, et ça se voit). Pour
+    // l'IMPRESSION, un livre incomplet partirait chez l'imprimeur sans que
+    // personne ne le voie : on échoue franchement s'il en reste après retry.
     var missing = urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
-    if (padForPrint && missing.isNotEmpty) {
+    if (missing.isNotEmpty) {
       await fetchAll(missing);
       missing = urlsToFetch.where((u) => !bytesByUrl.containsKey(u)).toList();
-      if (missing.isNotEmpty) {
+      if (missing.isNotEmpty && padForPrint) {
         throw Exception(
             '${missing.length} photo(s) n\'ont pas pu être téléchargées — '
             'vérifie ta connexion et réessaie.');
@@ -550,7 +576,7 @@ class BookPdfService {
     } else {
       bytes = await buildAndSave(null);
     }
-    return (bytes: bytes, pageCount: finalPageCount);
+    return (bytes: bytes, pageCount: finalPageCount, photoCount: successfulPhotos.length);
   }
 
   // Arrondit au nombre de pages valide le plus proche par le haut : PAIR.
@@ -1531,6 +1557,29 @@ class BookPdfService {
         }),
       ],
     );
+  }
+
+  // Exécute `task` sur chaque item avec au plus `concurrency` en vol
+  // simultanément, résultat dans le même ordre que `items`. Tout lancer
+  // d'un coup (Future.wait naïf) sur 100+ items sature le réseau/le
+  // backend et fait timeouter une partie des requêtes au hasard.
+  static Future<List<R>> _runBounded<T, R>(
+    List<T> items,
+    Future<R> Function(T item) task, {
+    required int concurrency,
+  }) async {
+    final results = List<R?>.filled(items.length, null);
+    var next = 0;
+    Future<void> worker() async {
+      while (true) {
+        final i = next++;
+        if (i >= items.length) return;
+        results[i] = await task(items[i]);
+      }
+    }
+    await Future.wait(List.generate(
+        min(concurrency, items.length), (_) => worker()));
+    return results.cast<R>();
   }
 }
 

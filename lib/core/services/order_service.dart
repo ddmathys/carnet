@@ -110,6 +110,29 @@ class OrderService {
     return data;
   }
 
+  /// Vérifie notre prix/nombre de pages contre un vrai devis Prodigi (admin,
+  /// gratuit, ne modifie rien) — pour confirmer avant l'envoi réel que
+  /// book_pricing.dart n'a pas divergé du tarif Prodigi actuel.
+  static Future<Map<String, dynamic>> verifyPrintQuote({
+    required String coverType,
+    required int pageCount,
+    String? country,
+  }) async {
+    final data = await BackendClient.postJson(
+      '/api/prodigi/quote',
+      {
+        'coverType': coverType,
+        'pageCount': pageCount,
+        if (country != null) 'country': country,
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec du devis Prodigi');
+    }
+    return data;
+  }
+
   /// Relit le vrai statut d'une commande chez Prodigi (admin, ou le client
   /// pour la sienne) — utile pour un rafraîchissement manuel sans attendre
   /// le cron quotidien.

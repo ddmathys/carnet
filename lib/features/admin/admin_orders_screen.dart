@@ -163,6 +163,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
   bool _downloadingPdf = false;
   bool _sendingToPrint = false;
   bool _checkingStatus = false;
+  bool _checkingQuote = false;
   bool _deleting = false;
   late String _selectedStatus;
   late final TextEditingController _noteCtrl;
@@ -238,6 +239,56 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
       ));
     } finally {
       if (mounted) setState(() => _checkingStatus = false);
+    }
+  }
+
+  // Vérifie notre prix/pages contre un vrai devis Prodigi (gratuit, ne
+  // modifie rien) — à faire avant l'envoi réel, surtout sur une première
+  // commande jamais testée en conditions live.
+  Future<void> _checkQuote() async {
+    final o = widget.order;
+    final pageCount = o.pageCount;
+    if (pageCount == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        backgroundColor: AppColors.error,
+        content: Text('Pas de pageCount sur cette commande — regénère le PDF.'),
+      ));
+      return;
+    }
+    setState(() => _checkingQuote = true);
+    try {
+      final res = await OrderService.verifyPrintQuote(
+        coverType: o.coverType,
+        pageCount: pageCount,
+        country: o.country,
+      );
+      if (!mounted) return;
+      final localPages = res['localPrintedPages'];
+      final localChf = (res['localPriceChf'] as num?)?.toStringAsFixed(2);
+      final prodigiUsd = (res['prodigiCostUsd'] as num?)?.toStringAsFixed(2);
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Devis Prodigi (réel)'),
+          content: Text(
+            'Notre calcul : $localPages pages · CHF $localChf\n'
+            'Coût Prodigi (devis live) : ${prodigiUsd != null ? '\$$prodigiUsd' : 'non lisible dans la réponse'}\n\n'
+            '${prodigiUsd == null ? 'Le format de réponse Prodigi n\'a pas pu être lu automatiquement — regarde les logs Vercel pour le JSON brut si besoin.' : 'Compare ce coût USD à nos constantes dans book_pricing.dart pour voir si la marge est toujours correcte.'}',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('OK')),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        backgroundColor: AppColors.error,
+        content: Text(e.toString().replaceFirst('Exception: ', '')),
+      ));
+    } finally {
+      if (mounted) setState(() => _checkingQuote = false);
     }
   }
 
@@ -499,6 +550,10 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
         ],
         // Premier envoi : bouton direct, pas de PDF à corriger.
         if (o.prodigiOrderId == null) ...[
+          if (o.pageCount != null) ...[
+            _quoteButton(),
+            const SizedBox(height: 8),
+          ],
           _printButton(enabled: canSend, label: 'Envoyer à l\'impression'),
           if (!canSend) ...[
             const SizedBox(height: 6),
@@ -558,6 +613,25 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                     fontSize: 11, color: AppColors.textMedium)),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _quoteButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: OutlinedButton.icon(
+        onPressed: _checkingQuote ? null : _checkQuote,
+        icon: _checkingQuote
+            ? const SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.fact_check_outlined, size: 16),
+        label: const Text('Vérifier le devis chez Prodigi'),
+        style: OutlinedButton.styleFrom(
+          foregroundColor: AppColors.amber,
+          side: const BorderSide(color: AppColors.amber),
+        ),
       ),
     );
   }

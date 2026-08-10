@@ -4,6 +4,7 @@ import { requireAuth } from '../../lib/verify'
 import { db } from '../../lib/firebase'
 import { ADMIN_EMAIL } from '../../lib/resend'
 import { refreshProdigiOrderStatus, notifyAdminOfError, PRODIGI_API_URL } from '../../lib/prodigi'
+import { computePrice, printablePages, type CoverType } from '../../lib/pricing'
 
 // Route dynamique regroupant les endpoints Prodigi en UNE seule fonction
 // serverless (le plan Hobby de Vercel plafonne à 12 fonctions). URLs :
@@ -13,6 +14,8 @@ import { refreshProdigiOrderStatus, notifyAdminOfError, PRODIGI_API_URL } from '
 //                               création directe en un POST /v4.0/orders)
 //   POST /api/prodigi/status → relit le statut réel d'une commande
 //   GET  /api/prodigi/poll   → balaie les commandes en attente (cron only)
+//   POST /api/prodigi/quote  → vérifie pages/prix contre un vrai devis Prodigi
+//                               (admin, gratuit, ne modifie rien)
 //
 // Pas d'endpoint de calcul de tranche de couverture : confirmé le 06.08.26
 // (doc technique Prodigi) qu'un seul PDF plat suffit — page 1 = couverture,
@@ -231,6 +234,124 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// Vérifie NOTRE nombre de pages / prix contre un vrai devis Prodigi
+// (POST /v4.0/quotes — gratuit, ne facture/fabrique rien). Sert à confirmer,
+// avant d'envoyer une commande réelle à l'impression, que book_pricing.dart
+// (formule calibrée le 06.08.26 sur 2 devis ponctuels) n'a pas divergé du
+// tarif Prodigi actuel. Admin uniquement (même si un devis est gratuit, ça
+// reste un appel direct à la clé live). Ne modifie rien en base.
+async function handleQuote(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+
+  const user = await requireAuth(req, res)
+  if (!user) return
+  if (user.email !== ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Accès refusé' })
+  }
+
+  const apiKey = process.env.PRODIGI_API_KEY
+  if (!apiKey) {
+    return res
+      .status(503)
+      .json({ error: 'Prodigi non configuré (PRODIGI_API_KEY manquante)' })
+  }
+
+  const { coverType, pageCount, country } = (req.body ?? {}) as {
+    coverType?: string
+    pageCount?: number
+    country?: string
+  }
+  if (coverType !== 'soft' && coverType !== 'hard') {
+    return res.status(400).json({ error: 'coverType doit être "soft" ou "hard"' })
+  }
+  if (!Number.isFinite(pageCount) || (pageCount as number) <= 0) {
+    return res.status(400).json({ error: 'pageCount invalide' })
+  }
+
+  const { sku } = skuFor(coverType)
+  if (!sku) {
+    return res.status(503).json({
+      error: `SKU Prodigi manquant (env PRODIGI_SKU_${coverType === 'hard' ? 'HARD' : 'SOFT'})`,
+    })
+  }
+
+  // Même règle de pagination que pour une vraie commande (pair, bornes
+  // produit) — c'est CE nombre-là, pas le brut, qui sera facturé/imprimé.
+  const localPrintedPages = printablePages(coverType as CoverType, pageCount as number)
+  const localPriceChf = computePrice(coverType as CoverType, pageCount as number)
+
+  const payload = {
+    shippingMethod: 'Standard',
+    destinationCountryCode: countryToIso(country ?? 'Suisse'),
+    // USD pour comparer directement aux constantes calibrées dans
+    // lib/pricing.ts (elles-mêmes en USD) — la conversion CHF est ensuite
+    // faite localement des deux côtés avec le même taux, donc un écart révèle
+    // un vrai changement de tarif Prodigi, pas juste le taux de change.
+    currencyCode: 'USD',
+    items: [
+      {
+        sku,
+        copies: 1,
+        sizing: 'fillPrintArea',
+        assets: [{ printArea: 'default', pageCount: localPrintedPages }],
+      },
+    ],
+  }
+
+  try {
+    const prodigiRes = await fetch(`${PRODIGI_API_URL}/quotes`, {
+      method: 'POST',
+      headers: { 'X-API-Key': apiKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const raw = await prodigiRes.text()
+    let data: any = null
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      /* réponse non-JSON — on garde raw pour diagnostic */
+    }
+
+    if (!prodigiRes.ok) {
+      return res.status(502).json({
+        error: 'Devis Prodigi refusé',
+        detail: formatProdigiFailures(data, raw).slice(0, 500),
+      })
+    }
+
+    // Forme de réponse non confirmée aussi précisément que pour /orders
+    // (jamais parsée en code avant ce jour, seulement lue à la main le
+    // 06.08.26) — parsing défensif, plusieurs noms de champ possibles, et on
+    // renvoie toujours le JSON brut pour vérification humaine en cas de doute.
+    const quote = data?.quotes?.[0] ?? data?.quote ?? null
+    const itemsUsd = Number(
+      quote?.costSummary?.items?.amount ?? quote?.costSummary?.items ?? NaN
+    )
+    const shippingUsd = Number(
+      quote?.costSummary?.shipping?.amount ?? quote?.costSummary?.shipping ?? NaN
+    )
+    const taxUsd = Number(
+      quote?.costSummary?.tax?.amount ?? quote?.costSummary?.totalTax?.amount ?? 0
+    )
+    const prodigiCostUsd =
+      Number.isFinite(itemsUsd) && Number.isFinite(shippingUsd)
+        ? itemsUsd + shippingUsd + (Number.isFinite(taxUsd) ? taxUsd : 0)
+        : null
+
+    return res.status(200).json({
+      ok: true,
+      localPrintedPages,
+      localPriceChf,
+      prodigiCostUsd,
+      prodigiRaw: data ?? raw.slice(0, 2000),
+    })
+  } catch (e) {
+    return res.status(502).json({ error: `Appel Prodigi échoué : ${e}` })
+  }
+}
+
 // Relit le statut réel d'une commande chez Prodigi (admin, ou le propriétaire
 // pour suivre sa propre commande).
 async function handleStatus(req: VercelRequest, res: VercelResponse) {
@@ -302,6 +423,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'order') return handleOrder(req, res)
   if (action === 'status') return handleStatus(req, res)
   if (action === 'poll') return handlePoll(req, res)
+  if (action === 'quote') return handleQuote(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }
