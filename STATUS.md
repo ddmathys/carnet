@@ -12,7 +12,21 @@ vidéos, et les deux mélangées. L'appli s'ouvre directement sur le formulaire
 de souvenir, médias déjà attachés — plus besoin de passer par « Importer des
 médias » et de retrouver les fichiers à la main.
 
+**Raccourcis par tag** (ajout du 15.08) : Carnet est aussi déclaré comme
+*Sharing Shortcut*, ce qui le rend éligible à la **rangée de suggestions** tout
+en haut du menu de partage — et surtout, chaque raccourci vise un tag précis
+(« Ajouter à Léa »), donc le partage tombe directement dans le bon carnet, tag
+déjà coché. Les raccourcis sont republiés à chaque démarrage depuis les tags
+réels de l'utilisateur (tags « enfant » en tête, 4 maximum). Android reste
+maître du classement : c'est l'épinglage manuel de la cible, dans le menu de
+partage, qui garantit la première place.
+
 Comment ça marche :
+- `res/xml/shortcuts.xml` + `MainActivity.publishShareShortcuts` — le
+  `<share-target>` déclare ce que Carnet sait recevoir, les raccourcis eux-mêmes
+  sont publiés à chaud (`ShortcutManagerCompat`) puisque les tags ne sont connus
+  qu'une fois l'utilisateur connecté. Le partage reçu porte alors
+  `EXTRA_SHORTCUT_ID`, d'où l'id du tag à pré-cocher.
 - `AndroidManifest.xml` — deux `intent-filter` : `SEND` (un média) et
   `SEND_MULTIPLE` (plusieurs). Le second accepte aussi le type générique
   `*/*`, sinon Carnet n'apparaîtrait pas pour une sélection mixte

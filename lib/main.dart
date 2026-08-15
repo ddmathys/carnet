@@ -180,7 +180,11 @@ class _BloomAppState extends State<BloomApp> {
       // `push` (et pas `go`) : on empile par-dessus l'écran en cours, ce qui
       // crée bien un nouveau formulaire même si l'utilisateur en avait déjà un
       // d'ouvert, et le retour ramène là où il était.
-      _router.push('/memory/new?shared=1');
+      // Partage passé par un raccourci « Ajouter à … » → tag pré-coché.
+      final tagId = SharedMediaService.pendingTagId;
+      _router.push(
+        '/memory/new?shared=1${tagId != null ? '&tag=$tagId' : ''}',
+      );
     });
   }
 

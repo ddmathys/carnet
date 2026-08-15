@@ -8,6 +8,9 @@ import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.webkit.MimeTypeMap
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
@@ -37,6 +40,12 @@ class MainActivity : FlutterActivity() {
         private const val EVENT_CHANNEL = "ch.gravendev.bloom/shared_media_events"
         private const val CACHE_DIR = "shared_media"
         private const val LOG_TAG = "CarnetSharedMedia"
+        // Doit correspondre au <category> de res/xml/shortcuts.xml : c'est ce
+        // qui relie un raccourci publié à chaud au share-target du manifeste.
+        private const val SHARE_CATEGORY = "ch.gravendev.bloom.category.SOUVENIR"
+        private const val SHORTCUT_PREFIX = "tag_"
+        // Android n'en affiche qu'une poignée ; au-delà, on encombre pour rien.
+        private const val MAX_SHORTCUTS = 4
         // Les copies servent le temps de créer le souvenir : au-delà, c'est du
         // déchet (partage abandonné, appli tuée) qu'on purge au partage suivant.
         private const val MAX_AGE_MS = 24L * 60L * 60L * 1000L
@@ -50,6 +59,8 @@ class MainActivity : FlutterActivity() {
     private var pendingUris: List<Uri> = emptyList()
     // Médias déjà copiés mais arrivés avant que Flutter n'écoute (rare).
     private val pendingItems = mutableListOf<Map<String, String>>()
+    // Tag visé quand le partage est passé par un raccourci (« Ajouter à Léa »).
+    private var pendingTagId: String? = null
     private var eventSink: EventChannel.EventSink? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -58,6 +69,7 @@ class MainActivity : FlutterActivity() {
         // Intent de lancement : on note les URIs tout de suite (aucune écriture
         // disque ici), la copie n'aura lieu que si Flutter les demande.
         pendingUris = extractUris(intent)
+        pendingTagId = shortcutTagId(intent)
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
@@ -65,16 +77,30 @@ class MainActivity : FlutterActivity() {
                     "getInitialSharedMedia" -> {
                         val uris = pendingUris
                         val already = pendingItems.toList()
+                        val tagId = pendingTagId
                         pendingUris = emptyList()
                         pendingItems.clear()
+                        pendingTagId = null
                         if (uris.isEmpty() && already.isEmpty()) {
-                            result.success(emptyList<Map<String, String>>())
+                            result.success(payload(null, emptyList()))
                         } else {
                             ioExecutor.execute {
                                 val items = already + copyToCache(uris)
-                                mainHandler.post { result.success(items) }
+                                mainHandler.post { result.success(payload(tagId, items)) }
                             }
                         }
+                    }
+                    // Un raccourci par tag, republié à chaque démarrage : les
+                    // libellés suivent les tags de l'utilisateur.
+                    "publishShareShortcuts" -> {
+                        val raw = call.arguments as? List<*> ?: emptyList<Any?>()
+                        val tags = raw.mapNotNull { entry ->
+                            val map = entry as? Map<*, *> ?: return@mapNotNull null
+                            val id = map["id"] as? String ?: return@mapNotNull null
+                            val label = map["label"] as? String ?: return@mapNotNull null
+                            id to label
+                        }
+                        result.success(publishShareShortcuts(tags))
                     }
                     else -> result.notImplemented()
                 }
@@ -98,21 +124,27 @@ class MainActivity : FlutterActivity() {
         setIntent(intent)
         val uris = extractUris(intent)
         if (uris.isEmpty()) return
+        val tagId = shortcutTagId(intent)
         ioExecutor.execute {
             val items = copyToCache(uris)
             if (items.isEmpty()) return@execute
             mainHandler.post {
                 val sink = eventSink
                 if (sink != null) {
-                    sink.success(items)
+                    sink.success(payload(tagId, items))
                 } else {
                     // Flutter n'écoute pas encore : le prochain
                     // `getInitialSharedMedia` les récupérera.
                     pendingItems.addAll(items)
+                    pendingTagId = tagId
                 }
             }
         }
     }
+
+    /** Enveloppe commune aux deux canaux : le tag visé + les médias reçus. */
+    private fun payload(tagId: String?, items: List<Map<String, String>>): Map<String, Any?> =
+        mapOf("tagId" to tagId, "items" to items)
 
     override fun onDestroy() {
         ioExecutor.shutdown()
@@ -159,6 +191,59 @@ class MainActivity : FlutterActivity() {
         } else {
             intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM)
         }) ?: emptyList()
+
+    // ── Raccourcis de partage (rangée de suggestions) ───────────────────────
+
+    /**
+     * Publie un raccourci par tag (« Ajouter à Léa »), ce qui rend Carnet
+     * éligible à la rangée du haut du menu de partage et permet de tomber
+     * directement dans le bon tag.
+     *
+     * Republié à chaque démarrage : `setDynamicShortcuts` remplace la liste
+     * entière, donc un tag renommé ou supprimé disparaît tout seul.
+     * Retourne le nombre de raccourcis effectivement publiés.
+     */
+    private fun publishShareShortcuts(tags: List<Pair<String, String>>): Int {
+        val limit = minOf(MAX_SHORTCUTS, ShortcutManagerCompat.getMaxShortcutCountPerActivity(this))
+        if (limit <= 0) return 0
+        val icon = IconCompat.createWithResource(this, R.mipmap.ic_launcher)
+
+        val shortcuts = tags.mapNotNull { (rawId, rawLabel) ->
+            val id = rawId.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            val label = rawLabel.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            ShortcutInfoCompat.Builder(this, SHORTCUT_PREFIX + id)
+                .setShortLabel(label)
+                .setLongLabel("Ajouter à $label")
+                .setIcon(icon)
+                .setCategories(setOf(SHARE_CATEGORY))
+                // Indispensable : sans `longLived`, Android ne garde pas le
+                // raccourci comme cible de partage une fois qu'il est retiré
+                // de la liste dynamique.
+                .setLongLived(true)
+                .setIntent(Intent(this, MainActivity::class.java).setAction(Intent.ACTION_VIEW))
+                .build()
+        }.take(limit)
+
+        return try {
+            ShortcutManagerCompat.setDynamicShortcuts(this, shortcuts)
+            shortcuts.size
+        } catch (error: Exception) {
+            // Quota constructeur dépassé, ROM capricieuse : le partage normal
+            // continue de marcher, seule la rangée de suggestions y perd.
+            Log.w(LOG_TAG, "Raccourcis de partage non publiés", error)
+            0
+        }
+    }
+
+    /**
+     * Le partage est-il passé par un raccourci « Ajouter à … » ? Si oui, on
+     * renvoie l'id du tag visé, qui sera pré-coché dans le formulaire.
+     */
+    private fun shortcutTagId(intent: Intent?): String? {
+        val id = intent?.getStringExtra(ShortcutManagerCompat.EXTRA_SHORTCUT_ID) ?: return null
+        if (!id.startsWith(SHORTCUT_PREFIX)) return null
+        return id.removePrefix(SHORTCUT_PREFIX).takeIf { it.isNotBlank() }
+    }
 
     // ── Copie vers le cache de l'appli ──────────────────────────────────────
 
