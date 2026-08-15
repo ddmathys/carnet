@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/services/media_migration_service.dart';
 import '../../core/services/migration_service.dart';
+import '../../core/services/shared_media_service.dart';
 import '../../core/services/tag_migration_service.dart';
 import '../../core/services/tag_service.dart';
 import '../../core/services/user_service.dart';
@@ -53,6 +54,13 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       // le démarrage : la migration reprend là où elle s'est arrêtée).
       MediaMigrationService.runInBackground();
       if (!mounted) return;
+      // Appli ouverte depuis « Partager » (Google Photos, galerie…) : on va
+      // droit au formulaire de souvenir, les médias reçus déjà attachés.
+      if (await SharedMediaService.hasPending()) {
+        if (!mounted) return;
+        context.go('/memory/new?shared=1');
+        return;
+      }
       context.go('/home');
     } else {
       // Non connecté → l'onboarding (le livre, la voix, les générations,

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -7,6 +8,7 @@ import 'package:app_links/app_links.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'core/services/shared_media_service.dart';
 import 'core/services/tag_service.dart';
 import 'firebase_options.dart';
 import 'core/theme/app_theme.dart';
@@ -40,6 +42,11 @@ void main() async {
     picker.useAndroidPhotoPicker = true;
   }
 
+  // Partage entrant : « Partager » depuis Google Photos et consorts. On amorce
+  // l'écoute avant le premier écran, sans l'attendre (la copie des fichiers peut
+  // durer sur une grosse vidéo — c'est le splash qui patiente).
+  SharedMediaService.init();
+
   runApp(const ProviderScope(child: BloomApp()));
 }
 
@@ -66,6 +73,9 @@ final _router = GoRouter(
       path: '/memory/new',
       builder: (_, state) => MemoryCreateScreen(
         startImport: state.uri.queryParameters['import'] == '1',
+        // `shared=1` : ouvert depuis le partage Android, les médias reçus sont
+        // récupérés auprès de SharedMediaService.
+        startShared: state.uri.queryParameters['shared'] == '1',
         initialTagId: state.uri.queryParameters['tag'],
       ),
     ),
@@ -144,11 +154,34 @@ class BloomApp extends StatefulWidget {
 class _BloomAppState extends State<BloomApp> {
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _linkSub;
+  StreamSubscription<List<SharedMediaItem>>? _sharedMediaSub;
 
   @override
   void initState() {
     super.initState();
     _initDeepLinks();
+    _initSharedMedia();
+  }
+
+  /// Partage reçu alors que l'appli est déjà ouverte : on saute directement au
+  /// formulaire de souvenir, médias attachés. (Le cas « appli fermée » est géré
+  /// par le splash, qui connaît l'état de connexion avant de router.)
+  void _initSharedMedia() {
+    _sharedMediaSub = SharedMediaService.stream.listen((items) {
+      if (items.isEmpty) return;
+      if (FirebaseAuth.instance.currentUser == null) {
+        _messengerKey.currentState?.showSnackBar(
+          const SnackBar(
+            content: Text('Connecte-toi à Carnet, puis repartage tes médias.'),
+          ),
+        );
+        return;
+      }
+      // `push` (et pas `go`) : on empile par-dessus l'écran en cours, ce qui
+      // crée bien un nouveau formulaire même si l'utilisateur en avait déjà un
+      // d'ouvert, et le retour ramène là où il était.
+      _router.push('/memory/new?shared=1');
+    });
   }
 
   Future<void> _initDeepLinks() async {
@@ -186,6 +219,7 @@ class _BloomAppState extends State<BloomApp> {
   @override
   void dispose() {
     _linkSub?.cancel();
+    _sharedMediaSub?.cancel();
     super.dispose();
   }
 

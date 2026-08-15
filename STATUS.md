@@ -4,6 +4,47 @@ Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
 ---
 
+## 📥 Partage entrant Android — « Partager → Carnet »
+
+Depuis Google Photos, la galerie ou n'importe quelle appli, « Partager »
+propose maintenant **Carnet** : une ou plusieurs photos, une ou plusieurs
+vidéos, et les deux mélangées. L'appli s'ouvre directement sur le formulaire
+de souvenir, médias déjà attachés — plus besoin de passer par « Importer des
+médias » et de retrouver les fichiers à la main.
+
+Comment ça marche :
+- `AndroidManifest.xml` — deux `intent-filter` : `SEND` (un média) et
+  `SEND_MULTIPLE` (plusieurs). Le second accepte aussi le type générique
+  `*/*`, sinon Carnet n'apparaîtrait pas pour une sélection mixte
+  photos + vidéos ; le tri est fait à la réception.
+- `MainActivity.kt` — Android ne prête les URIs `content://` qu'un instant :
+  chaque média est **recopié** dans `cache/shared_media/` (hors thread
+  principal), avec son vrai type MIME lu par le `ContentResolver`. Les copies
+  de plus de 24 h sont purgées au partage suivant.
+- `shared_media_service.dart` — met les médias reçus de côté ; le splash
+  (appli fermée) et `BloomApp` (appli déjà ouverte) routent vers
+  `/memory/new?shared=1`.
+- `memory_create_screen.dart` — `_ingestSharedMedia()` attache la fournée en
+  réutilisant le pipeline de l'import galerie (`_ingestMedia`) : quotas,
+  EXIF date + lieu de la première photo, cap de durée vidéo. Rien ne change
+  côté enregistrement / upload R2.
+
+À tester sur un vrai téléphone (le partage ne s'observe pas en émulateur
+Photos) : une photo seule, 5–10 photos d'un coup, une vidéo, une sélection
+mixte — appli fermée **et** appli déjà ouverte au premier plan.
+
+**Pas fait — iOS** : recevoir un partage sur iPhone demande une *Share
+Extension* (cible native à ajouter dans Xcode, app group partagé). Le service
+Dart est déjà neutre sur iOS (aucun canal appelé), il n'y a que la partie
+native à écrire le jour où l'iOS sortira.
+
+**À noter** : le nom de l'appli dans le manifeste est encore `Folio`. Les
+`intent-filter` portent un `android:label="Carnet"` pour que le menu de
+partage affiche bien « Carnet » — à aligner avec le nom du lanceur quand la
+question du nom sera tranchée.
+
+---
+
 ## ⚡ REPRISE — 22.07.2026 : vraies causes des rejets Gelato, navigation commande
 
 Commits `3747459` → `258ff9f` sur `master`, **poussés**. Backend `gelato/[action].ts`

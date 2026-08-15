@@ -32,6 +32,31 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="carnet" android:host="join"/>
             </intent-filter>
+
+            <!-- Partage entrant, UN média : depuis Google Photos ou la galerie,
+                 « Partager » propose Carnet, qui ouvre le formulaire de souvenir
+                 avec la photo ou la vidéo déjà attachée.
+                 Le `label` est ce qui s'affiche dans le menu de partage
+                 d'Android (sans lui, ce serait le nom de l'appli, « Folio »). -->
+            <intent-filter android:label="Carnet">
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+                <data android:mimeType="video/*"/>
+            </intent-filter>
+
+            <!-- Partage entrant, PLUSIEURS médias en une fois. Une sélection
+                 mixte (photos + vidéos) est souvent envoyée avec le type
+                 générique */* : sans cette ligne, Carnet n'apparaîtrait pas dans
+                 le menu de partage de ces sélections-là. Ce qui n'est ni image
+                 ni vidéo est écarté à la réception (MainActivity.copyToCache). -->
+            <intent-filter android:label="Carnet">
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="image/*"/>
+                <data android:mimeType="video/*"/>
+                <data android:mimeType="*/*"/>
+            </intent-filter>
         </activity>
         <meta-data
             android:name="flutterEmbedding"

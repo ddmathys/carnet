@@ -15,6 +15,7 @@ import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
+import '../../core/services/shared_media_service.dart';
 import '../../core/services/space_service.dart';
 import '../../core/services/tag_service.dart';
 import '../../core/services/video_service.dart';
@@ -33,6 +34,10 @@ class MemoryCreateScreen extends StatefulWidget {
   // choix galerie / appareil photo / caméra, puis l'utilisateur complète le
   // formulaire.
   final bool startImport;
+  // Flux « partage entrant » : l'écran a été ouvert depuis le menu Partager
+  // d'Android (Google Photos, galerie…). Les médias reçus sont attachés
+  // d'emblée, sans passer par le sélecteur.
+  final bool startShared;
   // Souvenir créé depuis un tag (ex. depuis la page d'un tag) → tag pré-coché.
   final String? initialTagId;
 
@@ -40,6 +45,7 @@ class MemoryCreateScreen extends StatefulWidget {
     super.key,
     this.memoryId,
     this.startImport = false,
+    this.startShared = false,
     this.initialTagId,
   });
 
@@ -180,7 +186,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _syncAutoTags();
     });
 
-    if (widget.startImport) {
+    // Partage entrant : les médias sont déjà là, on les attache directement.
+    // Sinon, arrivée depuis « Importer des médias » : on ouvre le sélecteur.
+    if (widget.startShared) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _ingestSharedMedia();
+      });
+    } else if (widget.startImport) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _showMediaSourceSheet();
       });
@@ -808,28 +820,66 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           photoFiles.add(File(x.path));
         }
       }
-
-      // 1) Photos — quota global photos, puis EXIF (date + lieu) de la 1ʳᵉ.
-      if (photoFiles.isNotEmpty) {
-        final uid = FirebaseAuth.instance.currentUser?.uid;
-        bool photoOk = true;
-        if (uid != null) {
-          final q = await QuotaService.canAddPhotos(
-              uid, adding: _localPhotos.length + photoFiles.length);
-          photoOk = q.allowed;
-        }
-        if (photoOk) {
-          if (mounted) setState(() => _localPhotos.addAll(photoFiles));
-          await _applyExifFromPhoto(photoFiles.first);
-        } else if (mounted) {
-          _showQuotaDialog();
-        }
-      }
-
-      // 2) Vidéos — plafond souvenir + quota + durée.
-      await _ingestVideoPaths(videoPaths);
+      await _ingestMedia(photoFiles: photoFiles, videoPaths: videoPaths);
     } catch (_) {
       if (mounted) _showSnack('Impossible d\'accéder aux médias');
+    } finally {
+      if (mounted) setState(() => _preparingVideo = false);
+    }
+  }
+
+  /// Attache une fournée de médias déjà triés au souvenir en cours : photos
+  /// (quota global + EXIF de la première) puis vidéos (plafond du souvenir,
+  /// quota, durée). Point de passage commun à l'import galerie et au partage
+  /// entrant — chaque média garde ensuite son flux d'enregistrement d'origine.
+  Future<void> _ingestMedia({
+    required List<File> photoFiles,
+    required List<String> videoPaths,
+  }) async {
+    // 1) Photos — quota global photos, puis EXIF (date + lieu) de la 1ʳᵉ.
+    if (photoFiles.isNotEmpty) {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      bool photoOk = true;
+      if (uid != null) {
+        final q = await QuotaService.canAddPhotos(
+            uid, adding: _localPhotos.length + photoFiles.length);
+        photoOk = q.allowed;
+      }
+      if (photoOk) {
+        if (mounted) setState(() => _localPhotos.addAll(photoFiles));
+        await _applyExifFromPhoto(photoFiles.first);
+      } else if (mounted) {
+        _showQuotaDialog();
+      }
+    }
+
+    // 2) Vidéos — plafond souvenir + quota + durée.
+    await _ingestVideoPaths(videoPaths);
+  }
+
+  /// Partage entrant : récupère les photos / vidéos envoyées à Carnet depuis
+  /// une autre appli et les attache au souvenir en cours de création. La file
+  /// est vidée à la lecture, donc un même partage n'est jamais ingéré deux fois.
+  Future<void> _ingestSharedMedia() async {
+    final shared = SharedMediaService.takePending();
+    if (shared.isEmpty) return;
+
+    setState(() => _preparingVideo = true);
+    try {
+      final photoFiles = <File>[];
+      final videoPaths = <String>[];
+      for (final item in shared) {
+        // Le type MIME vient d'Android (ContentResolver), pas de l'extension :
+        // c'est la source fiable pour trancher photo / vidéo.
+        if (item.isVideo) {
+          videoPaths.add(item.path);
+        } else {
+          photoFiles.add(File(item.path));
+        }
+      }
+      await _ingestMedia(photoFiles: photoFiles, videoPaths: videoPaths);
+    } catch (_) {
+      if (mounted) _showSnack('Impossible de récupérer les médias partagés');
     } finally {
       if (mounted) setState(() => _preparingVideo = false);
     }
