@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Raccourcis de partage (« Sharing Shortcuts ») : ce qui rend Carnet éligible
+    à la RANGÉE DU HAUT du menu de partage d'Android, celle des suggestions —
+    au lieu d'être noyé dans la liste des applis en dessous.
+
+    Le `<share-target>` décrit ce que Carnet sait recevoir. Les raccourcis
+    eux-mêmes (un par tag : « Ajouter à Léa », « Ajouter à Vacances ») sont
+    publiés à chaud au démarrage par MainActivity.publishShareShortcuts, parce
+    que les tags de l'utilisateur ne sont connus qu'une fois connecté.
+
+    Android reste maître du classement : déclarer tout ceci rend éligible à la
+    rangée du haut, ça ne garantit pas la première place. Épingler la cible
+    dans le menu de partage reste le seul moyen sûr de la figer en tête.
+-->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <share-target android:targetClass="ch.gravendev.bloom.MainActivity">
+        <data android:mimeType="image/*" />
+        <data android:mimeType="video/*" />
+        <category android:name="ch.gravendev.bloom.category.SOUVENIR" />
+    </share-target>
+</shortcuts>

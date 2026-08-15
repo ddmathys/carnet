@@ -53,12 +53,19 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       // Médias restés sur Firebase Storage → R2, en tâche de fond (sans bloquer
       // le démarrage : la migration reprend là où elle s'est arrêtée).
       MediaMigrationService.runInBackground();
+      // Raccourcis « Ajouter à … » du menu de partage, rafraîchis à chaque
+      // démarrage (sans bloquer : c'est du confort, pas du chemin critique).
+      _refreshShareShortcuts();
       if (!mounted) return;
       // Appli ouverte depuis « Partager » (Google Photos, galerie…) : on va
-      // droit au formulaire de souvenir, les médias reçus déjà attachés.
+      // droit au formulaire de souvenir, les médias reçus déjà attachés. Si le
+      // partage est passé par un raccourci de tag, ce tag est pré-coché.
       if (await SharedMediaService.hasPending()) {
         if (!mounted) return;
-        context.go('/memory/new?shared=1');
+        final tagId = SharedMediaService.pendingTagId;
+        context.go(
+          '/memory/new?shared=1${tagId != null ? '&tag=$tagId' : ''}',
+        );
         return;
       }
       context.go('/home');
@@ -66,6 +73,24 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       // Non connecté → l'onboarding (le livre, la voix, les générations,
       // la collection), qui mène ensuite à la création de compte / connexion.
       context.go('/welcome');
+    }
+  }
+
+  /// Un raccourci de partage par tag, les tags « enfant » d'abord (ce sont eux
+  /// qu'on vise le plus souvent), puis les autres par ordre alphabétique.
+  /// Android n'en affiche qu'une poignée, le tri compte donc autant que la liste.
+  Future<void> _refreshShareShortcuts() async {
+    try {
+      final tags = await TagService.visibleTags();
+      final ordered = [
+        ...tags.where((t) => t.isChild),
+        ...tags.where((t) => !t.isChild),
+      ];
+      await SharedMediaService.publishShortcuts(
+        [for (final t in ordered) (id: t.id, label: t.label)],
+      );
+    } catch (_) {
+      // Pas de raccourcis : le partage classique marche toujours.
     }
   }
 

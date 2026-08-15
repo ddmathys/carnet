@@ -74,4 +74,7 @@ flutter {
 
 dependencies {
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:2.1.0"
+    // ShortcutManagerCompat : les raccourcis de partage (« Ajouter à Léa ») de
+    // la rangée de suggestions. Version compatible compileSdk 34+.
+    implementation "androidx.core:core-ktx:1.13.1"
 }
