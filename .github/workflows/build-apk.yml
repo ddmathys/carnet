@@ -30,10 +30,19 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Version FIGÉE, et pas « la dernière stable ». Le 15.08.2026, le canal
+      # stable est passé en 3.47.0, qui a transformé en ERREURS bloquantes ce
+      # qui n'était encore que des avertissements en 3.44.9 : Gradle < 8.14,
+      # AGP < 8.11.1, Kotlin < 2.2.20. Résultat, le build APK ne passait plus
+      # du tout — sans qu'une seule ligne du projet ait bougé.
+      # Remonter cette version demande de mettre à jour Gradle + AGP + Kotlin
+      # ensemble, et de retester un APK réel avant de le publier : à faire
+      # posément, pas au milieu d'une livraison.
       - name: Installer Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: stable
+          flutter-version: '3.44.9'
 
       # Clé de signature fixe (keystore PKCS12) injectée depuis les secrets.
       - name: Restaurer le keystore de signature
