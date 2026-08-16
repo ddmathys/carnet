@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/services/media_migration_service.dart';
 import '../../core/services/migration_service.dart';
+import '../../core/services/notification_service.dart';
 import '../../core/services/shared_media_service.dart';
 import '../../core/services/tag_migration_service.dart';
 import '../../core/services/tag_service.dart';
@@ -56,6 +57,9 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       // Raccourcis « Ajouter à … » du menu de partage, rafraîchis à chaque
       // démarrage (sans bloquer : c'est du confort, pas du chemin critique).
       _refreshShareShortcuts();
+      // Jeton de notification : il peut changer tout seul, on le remet à jour
+      // pour ceux qui ont déjà accepté. N'affiche aucune demande.
+      NotificationService.syncOnLogin();
       if (!mounted) return;
       // Appli ouverte depuis « Partager » (Google Photos, galerie…) : on va
       // droit au formulaire de souvenir, les médias reçus déjà attachés. Si le
@@ -66,6 +70,14 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         context.go(
           '/memory/new?shared=1${tagId != null ? '&tag=$tagId' : ''}',
         );
+        return;
+      }
+      // Appli ouverte en tapant une notification « souvenir du jour » : on va
+      // droit au souvenir en question.
+      final memoryId = await NotificationService.initialMemoryId();
+      if (!mounted) return;
+      if (memoryId != null) {
+        context.go('/memory/$memoryId');
         return;
       }
       context.go('/home');

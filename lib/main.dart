@@ -8,6 +8,7 @@ import 'package:app_links/app_links.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'core/services/notification_service.dart';
 import 'core/services/shared_media_service.dart';
 import 'core/services/tag_service.dart';
 import 'firebase_options.dart';
@@ -155,12 +156,18 @@ class _BloomAppState extends State<BloomApp> {
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _linkSub;
   StreamSubscription<List<SharedMediaItem>>? _sharedMediaSub;
+  StreamSubscription? _notificationTapSub;
 
   @override
   void initState() {
     super.initState();
     _initDeepLinks();
     _initSharedMedia();
+    // Notification « souvenir du jour » tapée appli déjà lancée → on ouvre le
+    // souvenir. (Appli fermée : c'est le splash qui s'en charge.)
+    _notificationTapSub = NotificationService.listenTaps(
+      (memoryId) => _router.push('/memory/$memoryId'),
+    );
   }
 
   /// Partage reçu alors que l'appli est déjà ouverte : on saute directement au
@@ -224,6 +231,7 @@ class _BloomAppState extends State<BloomApp> {
   void dispose() {
     _linkSub?.cancel();
     _sharedMediaSub?.cancel();
+    _notificationTapSub?.cancel();
     super.dispose();
   }
 

@@ -1,9 +1,12 @@
 package ch.gravendev.bloom
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.content.ClipData
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
@@ -44,6 +47,10 @@ class MainActivity : FlutterActivity() {
         // qui relie un raccourci publié à chaud au share-target du manifeste.
         private const val SHARE_CATEGORY = "ch.gravendev.bloom.category.SOUVENIR"
         private const val SHORTCUT_PREFIX = "tag_"
+        // Canal des notifications « souvenir du jour ». Même id que le
+        // default_notification_channel_id du manifeste et que le channelId
+        // envoyé par le backend.
+        private const val NOTIFICATION_CHANNEL_ID = "souvenirs"
         // Android n'en affiche qu'une poignée ; au-delà, on encombre pour rien.
         private const val MAX_SHORTCUTS = 4
         // Les copies servent le temps de créer le souvenir : au-delà, c'est du
@@ -62,6 +69,30 @@ class MainActivity : FlutterActivity() {
     // Tag visé quand le partage est passé par un raccourci (« Ajouter à Léa »).
     private var pendingTagId: String? = null
     private var eventSink: EventChannel.EventSink? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        createNotificationChannel()
+    }
+
+    /**
+     * Crée le canal « Souvenirs » (Android 8+). Sans lui, les push arrivés
+     * appli fermée atterrissent dans un canal générique sans nom, que
+     * l'utilisateur ne peut pas régler proprement dans les paramètres système.
+     * L'appel est idempotent : recréer un canal existant ne fait rien.
+     */
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+        val channel = NotificationChannel(
+            NOTIFICATION_CHANNEL_ID,
+            "Souvenirs",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Une photo de ton carnet, de temps en temps."
+        }
+        val manager = getSystemService(NotificationManager::class.java)
+        manager?.createNotificationChannel(channel)
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
