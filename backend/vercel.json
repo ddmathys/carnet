@@ -5,6 +5,7 @@
     { "source": "/join", "destination": "/api/join" }
   ],
   "crons": [
-    { "path": "/api/prodigi/poll", "schedule": "0 8 * * *" }
+    { "path": "/api/prodigi/poll", "schedule": "0 8 * * *" },
+    { "path": "/api/notify/cron", "schedule": "0 7 * * *" }
   ]
 }

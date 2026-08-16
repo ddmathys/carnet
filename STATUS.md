@@ -4,6 +4,52 @@ Note de reprise : où on en est, ce qui reste à faire, et le plan.
 
 ---
 
+## 🔔 Notification « souvenir du jour »
+
+Une photo du carnet ressortie au hasard, façon Google Photos, avec l'image
+dans la notification. Taper dessus ouvre le souvenir. Priorité aux
+**anniversaires** (même jour / même mois, une année précédente) : c'est ce qui
+fait « il y a 3 ans, jour pour jour » plutôt qu'un tirage quelconque ; à
+défaut, tirage au hasard parmi les souvenirs qui ont une photo.
+
+**L'envoi vient du backend, pas du téléphone** : cron Vercel quotidien
+`/api/notify/cron` (7h UTC = 9h l'été, 8h l'hiver), donc la notification
+arrive même si l'appli n'a pas été ouverte depuis des semaines. Réglage
+utilisateur dans le profil : **jamais / chaque jour / une fois par semaine**
+(l'hebdomadaire part le dimanche).
+
+- `backend/api/notify/[action].ts` — `cron` (balayage + envoi) et `test`
+  (`?uid=…`, envoi immédiat pour diagnostiquer). Les deux protégés par
+  `CRON_SECRET`. Les jetons FCM morts sont retirés du document utilisateur au
+  passage.
+- `lib/core/services/notification_service.dart` — autorisation système, jeton
+  de l'appareil (`users/{uid}.fcmTokens`, une liste : téléphone + tablette),
+  fréquence (`users/{uid}.notifyFrequency`), ouverture du souvenir au tap.
+- Profil : le choix de fréquence. Création de compte : une explication AVANT
+  la demande système (Android 13+ et iOS ne la posent qu'**une fois** — refusée,
+  il faut passer par les réglages du téléphone).
+- Déconnexion : le jeton de l'appareil est retiré du compte quitté.
+
+**Deux pièges contournés, à ne pas réintroduire :**
+1. `where(userId) + orderBy(...)` sur `memories` exige un **index composite**,
+   que ce projet ne déclare nulle part (même raison qui fait trier côté client
+   dans `memory_query_service`). Le cron requête donc **sans `orderBy`** — en
+   ajouter un le ferait échouer en `FAILED_PRECONDITION`, en silence, tous les
+   matins.
+2. Le plan Hobby de Vercel plafonne à **12 fonctions** et le backend y était
+   pile. `notebook/invite` + `notebook/join` ont été fusionnés en
+   `notebook/[action].ts` (URLs inchangées) pour libérer la place.
+
+**À faire avant que ça marche** : `CRON_SECRET` doit exister dans les env
+Vercel (il y est déjà pour le cron Prodigi) et le backend doit être redéployé.
+
+**Limites connues** : au-delà de 500 souvenirs, seuls les 500 renvoyés par
+Firestore peuvent sortir (il faudrait un champ aléatoire par souvenir, donc une
+migration). Pas d'icône de notification monochrome dédiée : Android retombe sur
+l'icône de l'appli. Notification non affichée si l'appli est au premier plan.
+
+---
+
 ## 📥 Partage entrant Android — « Partager → Carnet »
 
 Depuis Google Photos, la galerie ou n'importe quelle appli, « Partager »
