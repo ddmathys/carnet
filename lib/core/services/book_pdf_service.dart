@@ -9,6 +9,7 @@ import '../models/notebook_model.dart';
 import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
+import '../data/growth_data.dart';
 import 'photo_service.dart';
 import '../utils/date_precision.dart';
 
@@ -38,9 +39,6 @@ class BookPdfService {
 
   static PdfColor _toPdf(Color c) =>
       PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0);
-
-  static PdfColor _toPdfWithAlpha(Color c, double alpha) =>
-      PdfColor(c.red / 255.0, c.green / 255.0, c.blue / 255.0, alpha);
 
   static Future<Uint8List> generate({
     required ChildModel child,
@@ -109,7 +107,6 @@ class BookPdfService {
             child: child,
             milestones: growthMilestones,
             cover: pdfCover,
-            coverFlutter: coverColor,
             pB: playfairB,
             dm: dmSans,
             pageNum: totalPages,
@@ -145,9 +142,15 @@ class BookPdfService {
     String backendUrl = '',
     bool padForPrint = false,
     bool excludeCoverPhotoFromBook = false,
-    // 'soft' | 'hard' — détermine le produit imprimeur interrogé pour la
-    // largeur exacte de couverture wraparound. Non requis si padForPrint == false.
+    // 'soft' | 'hard' | 'layflat' — détermine le produit imprimeur interrogé
+    // pour la largeur exacte de couverture wraparound. Non requis si
+    // padForPrint == false.
     String coverType = 'soft',
+    // Chapitre croissance (courbe OMS) : null = comportement auto historique
+    // (affiché dès que ≥2 mesures existent) ; true/false permet à l'utilisateur
+    // de forcer l'affichage/masquage explicitement — mais jamais affiché sans
+    // au moins 2 mesures, quel que soit ce paramètre.
+    bool? includeGrowthChapter,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -455,7 +458,9 @@ class BookPdfService {
               heightCm: m.heightCm,
             ))
         .toList();
-    final hasGrowth = notebook.type == 'enfant' && growthMilestones.length >= 2;
+    final hasEnoughGrowthData =
+        notebook.type == 'enfant' && growthMilestones.length >= 2;
+    final hasGrowth = hasEnoughGrowthData && (includeGrowthChapter ?? true);
     final childForGrowth = ChildModel(
       id: notebook.id,
       parentId: '',
@@ -543,7 +548,6 @@ class BookPdfService {
             child: childForGrowth,
             milestones: growthMilestones,
             cover: pdfCover,
-            coverFlutter: coverColor,
             pB: playfairB,
             dm: dmSans,
             pageNum: 1 + photoPages.length + textOnlyMemories.length + 1,
@@ -1385,7 +1389,6 @@ class BookPdfService {
     required ChildModel child,
     required List<MilestoneModel> milestones,
     required PdfColor cover,
-    required Color coverFlutter,
     required pw.Font pB,
     required pw.Font dm,
     required int pageNum,
@@ -1429,11 +1432,11 @@ class BookPdfService {
                 pw.Expanded(
                   child: _measureColumn(
                     label: 'Taille (cm)',
+                    isWeight: false,
                     measures: heights,
                     getValue: (m) => m.heightCm!,
                     formatVal: (v) => '${v.toStringAsFixed(0)} cm',
                     cover: cover,
-                    coverFlutter: coverFlutter,
                     child: child,
                     pB: pB,
                     dm: dm,
@@ -1445,11 +1448,11 @@ class BookPdfService {
                 pw.Expanded(
                   child: _measureColumn(
                     label: 'Poids (kg)',
+                    isWeight: true,
                     measures: weights,
                     getValue: (m) => m.weightKg!,
                     formatVal: (v) => '${v.toStringAsFixed(1)} kg',
                     cover: cover,
-                    coverFlutter: coverFlutter,
                     child: child,
                     pB: pB,
                     dm: dm,
@@ -1471,22 +1474,115 @@ class BookPdfService {
     );
   }
 
+  // Porte le même calcul d'échelle que growth_screen.dart::_MultiPointChart
+  // (fl_chart, écran in-app) pour que le graphe imprimé corresponde à celui
+  // que le parent a déjà vu dans l'app.
+  static pw.Widget _growthChart({
+    required ChildModel child,
+    required bool isWeight,
+    required List<MilestoneModel> measures,
+    required double Function(MilestoneModel) getValue,
+    required PdfColor cover,
+    required pw.Font dm,
+  }) {
+    final gender = child.gender;
+    final birth = child.birthDate;
+    final refData = getGrowthData(gender: gender, isWeight: isWeight);
+
+    final childPoints = measures.map((m) {
+          final ageM = ((m.date.year - birth.year) * 12 +
+                  m.date.month -
+                  birth.month)
+              .toDouble()
+              .clamp(0.0, double.infinity);
+          return pw.PointChartValue(ageM, getValue(m));
+        }).toList()
+      ..sort((a, b) => a.x.compareTo(b.x));
+
+    final maxChildAge =
+        childPoints.isEmpty ? 24.0 : childPoints.map((p) => p.x).reduce(max);
+    final maxX = (maxChildAge * 1.05).ceilToDouble().clamp(12.0, 1000.0);
+
+    final refYs = [...refData.map((p) => p.p3), ...refData.map((p) => p.p97)];
+    final allYs = [...refYs, ...childPoints.map((p) => p.y)];
+    final rawMinY = allYs.reduce(min);
+    final rawMaxY = allYs.reduce(max);
+    final yPad = (rawMaxY - rawMinY) * 0.08;
+    final dynMinY = max(0.0, rawMinY - yPad);
+    final dynMaxY = rawMaxY + yPad;
+    final yRange = dynMaxY - dynMinY;
+    final yInterval = yRange <= 10
+        ? 1.0
+        : yRange <= 20
+            ? 2.0
+            : yRange <= 50
+                ? 5.0
+                : 10.0;
+    final xInterval = maxX <= 12
+        ? 2.0
+        : maxX <= 24
+            ? 3.0
+            : maxX <= 48
+                ? 6.0
+                : 12.0;
+
+    List<double> ticks(double from, double to, double step) {
+      final n = ((to - from) / step).ceil();
+      return List.generate(n + 1, (i) => from + i * step);
+    }
+
+    pw.LineDataSet ref(List<GrowthPoint> pts, double Function(GrowthPoint) y,
+            {required double width}) =>
+        pw.LineDataSet(
+          data: pts.map((p) => pw.PointChartValue(p.month.toDouble(), y(p))).toList(),
+          color: PdfColors.grey400,
+          drawPoints: false,
+          lineWidth: width,
+        );
+
+    return pw.Chart(
+      grid: pw.CartesianGrid(
+        xAxis: pw.FixedAxis<double>(
+          ticks(0, maxX, xInterval),
+          format: (v) => '${v.toInt()}m',
+          textStyle: pw.TextStyle(font: dm, fontSize: 6, color: _textMedium),
+          divisions: true,
+          divisionsColor: PdfColors.grey300,
+        ),
+        yAxis: pw.FixedAxis<double>(
+          ticks(dynMinY, dynMaxY, yInterval),
+          format: (v) => v.toStringAsFixed(isWeight ? 1 : 0),
+          textStyle: pw.TextStyle(font: dm, fontSize: 6, color: _textMedium),
+          divisions: true,
+          divisionsColor: PdfColors.grey300,
+        ),
+      ),
+      datasets: [
+        ref(refData, (p) => p.p97, width: 0.75),
+        ref(refData, (p) => p.p50, width: 1),
+        ref(refData, (p) => p.p3, width: 0.75),
+        pw.LineDataSet(
+          data: childPoints,
+          color: cover,
+          drawPoints: true,
+          pointSize: 2,
+          lineWidth: 1.5,
+        ),
+      ],
+    );
+  }
+
   static pw.Widget _measureColumn({
     required String label,
+    required bool isWeight,
     required List<MilestoneModel> measures,
     required double Function(MilestoneModel) getValue,
     required String Function(double) formatVal,
     required PdfColor cover,
-    required Color coverFlutter,
     required ChildModel child,
     required pw.Font pB,
     required pw.Font dm,
   }) {
-    final values = measures.map(getValue).toList();
-    final minVal = values.reduce(min);
-    final maxVal = values.reduce(max);
-    final range = maxVal - minVal;
-
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
@@ -1494,31 +1590,25 @@ class BookPdfService {
             style: pw.TextStyle(font: pB, fontSize: 10, color: _textDark)),
         pw.SizedBox(height: 8),
 
-        // Bar chart
+        // Vraie courbe OMS (P3/P50/P97, mêmes données que l'écran in-app,
+        // voir getGrowthData) + la courbe de l'enfant par-dessus — même
+        // algorithme d'échelle que growth_screen.dart::_MultiPointChart pour
+        // que le PDF corresponde visuellement à l'app.
         pw.SizedBox(
-          height: 64,
-          child: pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.end,
-            children: measures.asMap().entries.map((e) {
-              final i = e.key;
-              final val = getValue(e.value);
-              final normalized = range > 0 ? (val - minVal) / range : 1.0;
-              final barH = 10.0 + normalized * 54.0;
-              final isLatest = i == measures.length - 1;
-              return pw.Expanded(
-                child: pw.Padding(
-                  padding: const pw.EdgeInsets.symmetric(horizontal: 1),
-                  child: pw.Container(
-                    height: barH,
-                    color: isLatest
-                        ? cover
-                        : _toPdfWithAlpha(
-                            coverFlutter, 0.25 + normalized * 0.45),
-                  ),
-                ),
-              );
-            }).toList(),
+          height: 100,
+          child: _growthChart(
+            child: child,
+            isWeight: isWeight,
+            measures: measures,
+            getValue: getValue,
+            cover: cover,
+            dm: dm,
           ),
+        ),
+        pw.SizedBox(height: 4),
+        pw.Text(
+          'Repères OMS P3–P97 en gris',
+          style: pw.TextStyle(font: dm, fontSize: 6, color: _textMedium),
         ),
 
         pw.SizedBox(height: 10),

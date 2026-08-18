@@ -69,7 +69,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
   bool _showPreview = false;
-  String _coverType = 'soft'; // 'soft' ou 'hard'
+  String _coverType = 'soft'; // 'soft', 'hard' ou 'layflat'
+  // Chapitre croissance (courbe OMS) : coché par défaut dès que le livre a
+  // assez de données pour l'afficher (voir _hasGrowthData), décochable.
+  bool _includeGrowthChapter = true;
   bool _generating = false;
   double _progress = 0.0;
   int _msgIndex = 0;
@@ -116,6 +119,18 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   List<MemoryModel> get _selectedMemories =>
       _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();
+
+  // Même seuil que BookPdfService::hasEnoughGrowthData (≥2 mesures taille ou
+  // poids) — sert à savoir si la case "chapitre croissance" a un sens à
+  // afficher pour ce livre.
+  bool get _hasGrowthData =>
+      _notebook?.type == 'enfant' &&
+      _selectedMemories
+              .where((m) =>
+                  m.type == 'taille_poids' &&
+                  (m.heightCm != null || m.weightKg != null))
+              .length >=
+          2;
 
   // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
   // avant l'étape format) ; sinon estimation. Pour l'imprimé, le prix se base
@@ -367,6 +382,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
       backendUrl: AppConfig.backendUrl,
+      includeGrowthChapter: _hasGrowthData ? _includeGrowthChapter : null,
     ).timeout(const Duration(seconds: 180));
   }
 
@@ -530,6 +546,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         backendUrl: AppConfig.backendUrl,
         padForPrint: true, // pages valides imprimeur (pair, ≥24)
         coverType: _coverType, // largeur exacte de couverture wraparound
+        includeGrowthChapter: _hasGrowthData ? _includeGrowthChapter : null,
       );
       final pdfBytes = gen.bytes;
       final pageCount = gen.pageCount;
@@ -810,6 +827,29 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ),
             ),
           ),
+          if (_hasGrowthData) ...[
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () => setState(
+                  () => _includeGrowthChapter = !_includeGrowthChapter),
+              child: Row(
+                children: [
+                  Checkbox(
+                    value: _includeGrowthChapter,
+                    activeColor: AppColors.sage,
+                    onChanged: (v) =>
+                        setState(() => _includeGrowthChapter = v ?? true),
+                  ),
+                  const Expanded(
+                    child: Text(
+                      'Inclure le chapitre croissance (courbe taille/poids OMS)',
+                      style: TextStyle(color: AppColors.textDark, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 14),
 
           // Action principale : génère l'aperçu du livre (d'où le nom).
