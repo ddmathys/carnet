@@ -22,6 +22,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   // Notifications « souvenir du jour ».
   NotifyFrequency _notifyFrequency = NotifyFrequency.none;
   bool _notifyLoading = true;
+  bool _sendingTest = false;
 
   @override
   void initState() {
@@ -62,6 +63,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
           duration: Duration(seconds: 5),
         ),
       );
+    }
+  }
+
+  // Envoi immédiat, pour vérifier tout de suite plutôt que d'attendre le
+  // cron quotidien (7h UTC) — surtout utile juste après avoir activé les
+  // notifications, ou après une mise à jour du backend.
+  Future<void> _sendTestNow() async {
+    if (_sendingTest) return;
+    setState(() => _sendingTest = true);
+    try {
+      await NotificationService.sendNow();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Notification envoyée — regarde ton téléphone.')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _sendingTest = false);
     }
   }
 
@@ -286,6 +311,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ? null
                           : () => _setNotifyFrequency(frequency),
                     ),
+                  if (_notifyFrequency != NotifyFrequency.none) ...[
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: _sendingTest ? null : _sendTestNow,
+                        icon: _sendingTest
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.send_outlined, size: 16),
+                        label: const Text('Envoyer maintenant (test)'),
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),

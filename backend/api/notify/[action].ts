@@ -1,13 +1,18 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { FieldValue } from 'firebase-admin/firestore'
+import { requireAuth } from '../../lib/verify'
 import { db, messaging } from '../../lib/firebase'
 import { presignGet } from '../../lib/r2'
 
 // « Souvenir du jour » : la notification qui ressort une photo au hasard, façon
 // Google Photos. URLs :
-//   GET /api/notify/cron → balaie les utilisateurs abonnés et envoie (cron only)
-//   GET /api/notify/test → même chose pour UN utilisateur, envoi immédiat
-//                          (diagnostic, protégé par CRON_SECRET aussi)
+//   GET  /api/notify/cron     → balaie les utilisateurs abonnés et envoie (cron only)
+//   GET  /api/notify/test     → même chose pour UN utilisateur, envoi immédiat
+//                               (diagnostic admin, protégé par CRON_SECRET)
+//   POST /api/notify/send-now → même chose pour SOI-MÊME (bouton "Envoyer
+//                               maintenant" du profil), protégé par le token
+//                               Firebase de l'utilisateur — pas de CRON_SECRET
+//                               côté client.
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
 // plafonne à 12 fonctions serverless.
@@ -247,11 +252,44 @@ async function handleTest(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, memoryId: memory.id, ...result })
 }
 
+/** Envoi immédiat à SOI-MÊME (bouton "Envoyer maintenant" du profil, auth
+ * Firebase normale — pas de CRON_SECRET côté client). */
+async function handleSendNow(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const user = await requireAuth(req, res)
+  if (!user) return
+
+  const userSnap = await db.collection('users').doc(user.uid).get()
+  const tokens: string[] = (userSnap.data()?.fcmTokens ?? []).filter(
+    (t: unknown) => typeof t === 'string' && t
+  )
+  if (tokens.length === 0) {
+    return res.status(400).json({
+      error: 'Aucun appareil enregistré — active les notifications d\'abord.',
+    })
+  }
+
+  const now = new Date()
+  const memory = await pickMemory(user.uid, now)
+  if (!memory) {
+    return res.status(404).json({ error: 'Aucun souvenir avec photo à envoyer' })
+  }
+
+  const result = await sendToUser(user.uid, tokens, memory, now)
+  await db
+    .collection('users')
+    .doc(user.uid)
+    .update({ notifyLastSentAt: FieldValue.serverTimestamp() })
+    .catch(() => {})
+  return res.status(200).json({ ok: true, memoryId: memory.id, ...result })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
   if (action === 'cron') return handleCron(req, res)
   if (action === 'test') return handleTest(req, res)
+  if (action === 'send-now') return handleSendNow(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

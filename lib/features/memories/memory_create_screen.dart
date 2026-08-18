@@ -1082,6 +1082,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         break;
       case 'taille_poids':
         if (_measurementMissing) missing.add('taille ou poids');
+        if (_childTag == null) missing.add('tag enfant');
         break;
       case 'anecdote':
       case null:
@@ -1124,7 +1125,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       case 'mouvement':
         return _selectedSubType != null;
       case 'taille_poids':
-        return !_measurementMissing;
+        return !_measurementMissing && _childTag != null;
       case 'anecdote':
       case null:
         // Description facultative → titre + lieu + date suffisent.
@@ -2094,10 +2095,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _FormCard(children: [
             _SectionTitle('📊 MESURES', error: _measurementMissing),
             const SizedBox(height: 4),
-            const Text(
-              'Ajoute le tag de ton enfant dans « Tags » ci-dessous pour que '
-              'cette mesure alimente sa courbe de croissance.',
-              style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+            Text(
+              _childTag == null
+                  ? 'Le tag de ton enfant est obligatoire ici (section « Tags » '
+                      'ci-dessous) — c\'est lui qui relie cette mesure à sa '
+                      'courbe de croissance.'
+                  : 'Cette mesure alimentera la courbe de ${_childTag!.label}.',
+              style: TextStyle(
+                color: _childTag == null ? AppColors.error : AppColors.textMedium,
+                fontSize: 12,
+              ),
             ),
             const SizedBox(height: 12),
             Row(

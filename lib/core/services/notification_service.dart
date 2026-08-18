@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'backend_client.dart';
 
 /// À quelle fréquence l'utilisateur veut recevoir son « souvenir du jour ».
 enum NotifyFrequency { none, daily, weekly }
@@ -109,6 +110,18 @@ class NotificationService {
       return true;
     } catch (_) {
       return false;
+    }
+  }
+
+  /// Déclenche un envoi immédiat à soi-même (bouton "Envoyer maintenant" du
+  /// profil) — sert à vérifier tout de suite que ça marche plutôt que
+  /// d'attendre le cron quotidien (7h UTC). Lève une exception avec le
+  /// message d'erreur du backend en cas d'échec (aucun appareil enregistré,
+  /// aucun souvenir avec photo…).
+  static Future<void> sendNow() async {
+    final data = await BackendClient.postJson('/api/notify/send-now', {});
+    if (data == null || data['ok'] != true) {
+      throw Exception('Envoi impossible — vérifie que les notifications sont activées.');
     }
   }
 
