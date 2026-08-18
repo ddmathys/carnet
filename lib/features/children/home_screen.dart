@@ -54,6 +54,13 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Map<String, MemoryModel> get _memoriesById => {..._sharedById, ..._mineById};
 
+  // Raccourci direct vers /growth/:tagId — sans ça, la courbe de croissance
+  // n'était atteignable qu'en filtrant "Mes souvenirs" sur UN SEUL tag
+  // enfant pour faire apparaître une icône dans l'appbar (très peu
+  // découvrable, cause fréquente de "je ne trouve pas où saisir la taille").
+  List<TagModel> get _childTags =>
+      [..._myTags, ..._sharedTags].where((t) => t.isChild).toList();
+
   @override
   void initState() {
     super.initState();
@@ -192,6 +199,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           SliverToBoxAdapter(child: _filterBar(context)),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
+        ],
+
+        // 3b) Courbe de croissance — un raccourci direct par tag enfant.
+        if (_childTags.isNotEmpty) ...[
+          _sectionHeader('Croissance', ''),
+          SliverToBoxAdapter(child: _growthShortcuts(context)),
         ],
 
         // 4) Les livres déjà faits (PDF générés et livres commandés).
@@ -396,6 +409,45 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
         );
       },
+    );
+  }
+
+  Widget _growthShortcuts(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 0, 22, 6),
+      child: Column(
+        children: [
+          for (final tag in _childTags)
+            GestureDetector(
+              onTap: () => context.push('/growth/${tag.id}'),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.surface,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppColors.border, width: 0.5),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.show_chart, color: AppColors.sage),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text('Courbe de croissance · ${tag.label}',
+                          style: const TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textDark)),
+                    ),
+                    const Icon(Icons.chevron_right,
+                        color: AppColors.softGray, size: 20),
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
     );
   }
 
