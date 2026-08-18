@@ -132,6 +132,61 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               .length >=
           2;
 
+  // Photo la plus proche de chaque anniversaire (±30j), pour les mettre en
+  // avant en pleine page (bookFeaturedMedia) sans repasser par un template
+  // PDF dédié — voir _applyMilestoneSuggestions.
+  List<({String label, MemoryModel memory, String rawId})>
+      get _milestoneSuggestions {
+    final birth = _notebook?.birthdate;
+    if (birth == null || _notebook?.type != 'enfant') return const [];
+    final anniversaries = {
+      '1 an': birth.add(const Duration(days: 365)),
+      '2 ans': birth.add(const Duration(days: 730)),
+    };
+    final result = <({String label, MemoryModel memory, String rawId})>[];
+    for (final entry in anniversaries.entries) {
+      MemoryModel? best;
+      String? bestRawId;
+      int? bestDiff;
+      for (final m in _selectedMemories) {
+        final rawIds = rawMediaIdsOf(m);
+        if (rawIds.isEmpty) continue;
+        final diff = m.date.difference(entry.value).inDays.abs();
+        if (diff > 30) continue;
+        if (bestDiff == null || diff < bestDiff) {
+          bestDiff = diff;
+          best = m;
+          bestRawId = rawIds.first;
+        }
+      }
+      if (best != null && bestRawId != null) {
+        result.add((label: entry.key, memory: best, rawId: bestRawId));
+      }
+    }
+    return result;
+  }
+
+  // Applique la suggestion en pré-remplissant bookFeaturedMedia du souvenir
+  // choisi — seulement si ce souvenir n'a ENCORE aucune photo "en grand"
+  // définie, pour ne jamais écraser un réglage déjà fait par l'utilisateur
+  // (ici ou dans un livre précédent). Best-effort, silencieux en cas d'échec.
+  Future<void> _applyMilestoneSuggestions() async {
+    for (final s in _milestoneSuggestions) {
+      if (s.memory.bookFeaturedMedia.isNotEmpty) continue;
+      try {
+        final updated = s.memory.copyWith(bookFeaturedMedia: [s.rawId]);
+        await FirebaseFirestore.instance
+            .collection('memories')
+            .doc(s.memory.id)
+            .update({'bookFeaturedMedia': [s.rawId]});
+        if (mounted) _applyMemoryLayoutUpdate(updated);
+      } catch (_) {
+        // Pas grave : l'utilisateur peut toujours choisir manuellement via
+        // le réglage de mise en page du souvenir.
+      }
+    }
+  }
+
   // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
   // avant l'étape format) ; sinon estimation. Pour l'imprimé, le prix se base
   // sur les pages réellement imprimées (bourrage pair, 24–300 —
@@ -300,6 +355,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Résout les URLs de photos (R2 signé + Firebase) pour peupler le
       // sélecteur de couverture, y compris pour les souvenirs sur R2.
       _resolvePhotos(allMemories);
+      // Photos "1 an"/"2 ans" : suggestion auto (silencieuse, non bloquante).
+      _applyMilestoneSuggestions();
       // Admin : pré-remplit l'adresse de livraison (étape 2) avec celle de la
       // dernière commande, pour ne plus jamais avoir à la ressaisir.
       if (_isAdmin) _loadLastAddress();
@@ -849,6 +906,51 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 ],
               ),
             ),
+          ],
+          if (_milestoneSuggestions.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            for (final s in _milestoneSuggestions)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: SizedBox(
+                        width: 36,
+                        height: 36,
+                        child: _photoUrlsByMemory[s.memory.id]?.isNotEmpty ==
+                                true
+                            ? CachedNetworkImage(
+                                imageUrl: _photoUrlsByMemory[s.memory.id]!.first,
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) =>
+                                    Container(color: AppColors.softGray),
+                              )
+                            : Container(color: AppColors.softGray),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text('Photo « ${s.label} » mise en avant',
+                          style: const TextStyle(
+                              color: AppColors.textDark, fontSize: 13)),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        final updated = await showModalBottomSheet<MemoryModel>(
+                          context: context,
+                          isScrollControlled: true,
+                          backgroundColor: Colors.transparent,
+                          builder: (_) => _MemoryLayoutSheet(memory: s.memory),
+                        );
+                        if (updated != null) _applyMemoryLayoutUpdate(updated);
+                      },
+                      child: const Text('Changer'),
+                    ),
+                  ],
+                ),
+              ),
           ],
           const SizedBox(height: 14),
 
