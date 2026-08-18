@@ -391,9 +391,25 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
     // Génère le vrai PDF → aperçu WYSIWYG (rastérisé page par page).
     try {
+      // Combien de photos on s'attend à voir dans le livre, calculé AVANT
+      // toute tentative de téléchargement — sert de référence pour détecter
+      // un échec de téléchargement massif (voir garde-fou ci-dessous).
+      final expectedPhotos = _allPhotoUrls.length;
       final gen = await _buildPreviewPdf();
       if (!mounted) return;
       _progressTimer?.cancel();
+      // L'aperçu tolère silencieusement les photos manquantes (une par une,
+      // c'est voulu), mais un échec massif (réseau coupé, throttle R2…) ne
+      // doit jamais se présenter comme un livre généré avec succès — sans ce
+      // garde-fou, on affichait déjà « 0 photos » comme un aperçu normal.
+      if (expectedPhotos > 0 && gen.photoCount < expectedPhotos * 0.5) {
+        setState(() => _generating = false);
+        _showSnack(
+          'Échec du téléchargement des photos (${gen.photoCount}/$expectedPhotos) — '
+          'vérifie ta connexion et réessaie.',
+        );
+        return;
+      }
       setState(() {
         _previewPdfBytes = gen.bytes;
         _previewPageCount = gen.pageCount;
