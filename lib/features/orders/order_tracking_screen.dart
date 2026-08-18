@@ -356,13 +356,38 @@ class _TimelineStep extends StatelessWidget {
 /// l'admin envoie la commande manuellement une fois payée et corrige/relance
 /// depuis la console en cas d'erreur — plus simple, pas de compteur de
 /// tentatives à gérer côté client.
-class _PrintStatusBanner extends StatelessWidget {
+class _PrintStatusBanner extends StatefulWidget {
   final OrderModel order;
   const _PrintStatusBanner({required this.order});
 
   @override
+  State<_PrintStatusBanner> createState() => _PrintStatusBannerState();
+}
+
+class _PrintStatusBannerState extends State<_PrintStatusBanner> {
+  bool _checking = false;
+
+  // Le statut "pending" ne se rafraîchit tout seul qu'une fois par jour (cron
+  // /api/prodigi/poll) — sans bouton, l'écran affiche le même spinner pendant
+  // des heures sans que le client puisse savoir si c'est normal ou bloqué.
+  Future<void> _checkNow() async {
+    setState(() => _checking = true);
+    try {
+      await OrderService.checkPrintStatus(widget.order.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Vérification impossible : $e')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    switch (order.prodigiStatus) {
+    switch (widget.order.prodigiStatus) {
       case 'error':
         return _blocked(
           'Un souci technique est survenu lors de l\'envoi à l\'imprimeur. '
@@ -384,19 +409,43 @@ class _PrintStatusBanner extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.sage.withOpacity(0.3)),
       ),
-      child: const Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            width: 16,
-            height: 16,
-            child:
-                CircularProgressIndicator(strokeWidth: 2, color: AppColors.sage),
+          const Row(
+            children: [
+              SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: AppColors.sage),
+              ),
+              SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Vérification en cours chez l\'imprimeur…',
+                  style: TextStyle(fontSize: 13, color: AppColors.textDark),
+                ),
+              ),
+            ],
           ),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'Vérification en cours chez l\'imprimeur…',
-              style: TextStyle(fontSize: 13, color: AppColors.textDark),
+          const SizedBox(height: 4),
+          Text(
+            'Ce statut se met à jour automatiquement une fois par jour — '
+            'tu peux forcer une vérification tout de suite.',
+            style: TextStyle(fontSize: 11.5, color: AppColors.textMedium),
+          ),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _checking ? null : _checkNow,
+              child: _checking
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Vérifier maintenant'),
             ),
           ),
         ],
