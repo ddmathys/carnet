@@ -294,7 +294,6 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
       {
         sku,
         copies: 1,
-        sizing: 'fillPrintArea',
         assets: [{ printArea: 'default', pageCount: localPrintedPages }],
       },
     ],
