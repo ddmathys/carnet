@@ -2079,8 +2079,26 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          TextButton.icon(
+            onPressed: () => setState(() => _selectedCategory = 'anecdote'),
+            icon: const Icon(Icons.arrow_back,
+                size: 16, color: AppColors.textMedium),
+            label: const Text(
+              'Revenir à un souvenir normal',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 13),
+            ),
+            style: TextButton.styleFrom(
+                padding: EdgeInsets.zero, minimumSize: Size.zero),
+          ),
+          const SizedBox(height: 10),
           _FormCard(children: [
             _SectionTitle('📊 MESURES', error: _measurementMissing),
+            const SizedBox(height: 4),
+            const Text(
+              'Ajoute le tag de ton enfant dans « Tags » ci-dessous pour que '
+              'cette mesure alimente sa courbe de croissance.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+            ),
             const SizedBox(height: 12),
             Row(
               children: [
@@ -2202,7 +2220,24 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               onChanged: (_) => setState(() {}),
             ),
           ]),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
+          // Rien à voir avec le titre/la description : c'est un aiguillage
+          // vers l'autre formulaire (_buildTaillePoidsForm), pas un champ de
+          // ce souvenir-ci. La mesure devient un souvenir à part entière
+          // (type taille_poids) — pas des champs ajoutés à celui-ci — pour
+          // ne pas l'exclure du rendu photo normal du livre.
+          TextButton.icon(
+            onPressed: () => setState(() => _selectedCategory = 'taille_poids'),
+            icon: const Icon(Icons.monitor_weight_outlined,
+                size: 16, color: AppColors.sage),
+            label: const Text(
+              'Ajouter une mesure de croissance (taille/poids)',
+              style: TextStyle(color: AppColors.sage, fontSize: 13),
+            ),
+            style: TextButton.styleFrom(
+                padding: EdgeInsets.zero, minimumSize: Size.zero),
+          ),
+          const SizedBox(height: 4),
           _FormCard(children: [
             _buildDateSection(),
             const SizedBox(height: 18),
