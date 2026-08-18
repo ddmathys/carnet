@@ -45,23 +45,31 @@ function countryToIso(c: string): string {
   return 'CH'
 }
 
-// SKU à définir dans les env Vercel (PRODIGI_SKU_SOFT / PRODIGI_SKU_HARD).
-// Confirmé le 06.08.26 (fiches produit Prodigi, A4 portrait, 21×29.7cm =
-// vrai ISO A4) :
+// SKU à définir dans les env Vercel (PRODIGI_SKU_SOFT / PRODIGI_SKU_HARD /
+// PRODIGI_SKU_LAYFLAT). Confirmé le 06.08.26 (fiches produit Prodigi, A4
+// portrait, 21×29.7cm = vrai ISO A4) :
 // - Soft : `BOOK-FE-A4-P-SOFT-MHK` (mat 120gsm, dès $10.98/20p, expédié DE)
 //   ou `BOOK-FE-A4-P-SOFT-G` (gloss 150gsm, moins cher, $8.50 annoncé) —
 //   20-300 pages.
 // - Hard : `BOOK-FE-A4-P-HARD-G` (gloss 200gsm + finition mate, dès
 //   $13.58/24p, expédié NL) — 24-300 pages (500 en 150gsm gloss only).
-// Livraison CH confirmée sur ces deux SKU (via simulateur prix Prodigi),
+// - Layflat : `BOOK-FE-A4-P-LF-G` (confirmé sur le catalogue Prodigi le
+//   18.08.26, même trim A4 portrait que soft/hard, dès $28.50/18p, fabriqué
+//   EU) — 18-122 pages, reliure qui s'ouvre à plat (pas de gouttière au
+//   centre des doubles pages).
+// Livraison CH confirmée sur soft/hard (via simulateur prix Prodigi),
 // méthodes Budget/Standard seules disponibles pour CH (même prix) —
 // StandardPlus/Express/Overnight indisponibles. Frais de douane à la charge
 // du destinataire (non inclus dans le prix Prodigi, TVA import CH ~8.1% à
 // prévoir séparément) — à mentionner au client si pas déjà fait ailleurs.
-function skuFor(coverType: string): { sku?: string; isHard: boolean } {
-  const isHard = coverType === 'hard'
-  const sku = isHard ? process.env.PRODIGI_SKU_HARD : process.env.PRODIGI_SKU_SOFT
-  return { sku, isHard }
+const SKU_ENV_NAME: Record<CoverType, string> = {
+  soft: 'PRODIGI_SKU_SOFT',
+  hard: 'PRODIGI_SKU_HARD',
+  layflat: 'PRODIGI_SKU_LAYFLAT',
+}
+function skuFor(coverType: CoverType): { sku?: string; envName: string } {
+  const envName = SKU_ENV_NAME[coverType]
+  return { sku: process.env[envName], envName }
 }
 
 // Forme confirmée en sandbox le 06.08.26 pour un rejet SYNCHRONE (400) de
@@ -153,11 +161,11 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Commande sans PDF (pdfUrl manquant)' })
   }
 
-  const { sku, isHard } = skuFor(o.coverType)
+  const orderCoverType: CoverType =
+    o.coverType === 'hard' || o.coverType === 'layflat' ? o.coverType : 'soft'
+  const { sku, envName } = skuFor(orderCoverType)
   if (!sku) {
-    return res.status(503).json({
-      error: `SKU Prodigi manquant (env PRODIGI_SKU_${isHard ? 'HARD' : 'SOFT'})`,
-    })
+    return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
   }
 
   const payload = {
@@ -258,23 +266,22 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
       .json({ error: 'Prodigi non configuré (PRODIGI_API_KEY manquante)' })
   }
 
-  const { coverType, pageCount, country } = (req.body ?? {}) as {
+  const { coverType, pageCount, country, shippingMethod } = (req.body ?? {}) as {
     coverType?: string
     pageCount?: number
     country?: string
+    shippingMethod?: string
   }
-  if (coverType !== 'soft' && coverType !== 'hard') {
-    return res.status(400).json({ error: 'coverType doit être "soft" ou "hard"' })
+  if (coverType !== 'soft' && coverType !== 'hard' && coverType !== 'layflat') {
+    return res.status(400).json({ error: 'coverType doit être "soft", "hard" ou "layflat"' })
   }
   if (!Number.isFinite(pageCount) || (pageCount as number) <= 0) {
     return res.status(400).json({ error: 'pageCount invalide' })
   }
 
-  const { sku } = skuFor(coverType)
+  const { sku, envName } = skuFor(coverType)
   if (!sku) {
-    return res.status(503).json({
-      error: `SKU Prodigi manquant (env PRODIGI_SKU_${coverType === 'hard' ? 'HARD' : 'SOFT'})`,
-    })
+    return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
   }
 
   // Même règle de pagination que pour une vraie commande (pair, bornes
@@ -283,7 +290,9 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
   const localPriceChf = computePrice(coverType as CoverType, pageCount as number)
 
   const payload = {
-    shippingMethod: 'Standard',
+    // Comparaison de méthode d'envoi (débogage prix admin) — 'Standard' par
+    // défaut, override possible via le body pour comparer avec 'Budget'.
+    shippingMethod: shippingMethod ?? 'Standard',
     destinationCountryCode: countryToIso(country ?? 'Suisse'),
     // USD pour comparer directement aux constantes calibrées dans
     // lib/pricing.ts (elles-mêmes en USD) — la conversion CHF est ensuite

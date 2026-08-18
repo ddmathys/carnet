@@ -145,6 +145,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // sans tronquer du contenu réel — d'où le blocage plutôt qu'un simple
   // avertissement.
   bool get _exceedsPageLimit => _pages > 300;
+  // Le layflat a une borne produit bien plus basse (122 pages) que soft/hard
+  // (300) — un livre qui passe pour ces deux-là peut dépasser layflat seul.
+  bool get _exceedsLayflatLimit => _pages > BookPricing.maxPages('layflat');
   // Pages blanches ajoutées en fin de livre pour atteindre le minimum
   // imprimeur (24, pair) — 0 si le livre dépasse déjà cette cible, ou s'il
   // dépasse la limite haute (auquel cas aucun bourrage n'est appliqué).
@@ -1249,6 +1252,26 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
           ),
           const SizedBox(height: 12),
+          Opacity(
+            opacity: (_exceedsPageLimit || _exceedsLayflatLimit) ? 0.45 : 1.0,
+            child: _FormatCard(
+              emoji: '📘',
+              title: 'Layflat',
+              subtitle: 'Livre A4 · pages qui s\'ouvrent bien à plat',
+              price: _priceLabel('layflat'),
+              priceSub: '${_printedPagesFor('layflat')} pages',
+              priceColor: AppColors.amber,
+              selected: _coverType == 'layflat',
+              onTap: _exceedsPageLimit
+                  ? () => _showSnack(
+                      'Retire des souvenirs pour repasser sous 200 pages avant de choisir ce format.')
+                  : _exceedsLayflatLimit
+                      ? () => _showSnack(
+                          'Le layflat est limité à ${BookPricing.maxPages('layflat')} pages — retire des souvenirs ou choisis souple/rigide.')
+                      : () => setState(() => _coverType = 'layflat'),
+            ),
+          ),
+          const SizedBox(height: 12),
           // Bouton info : grille tarifaire selon le nombre de pages.
           Center(
             child: TextButton.icon(
@@ -1265,7 +1288,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _buildPageCountNotice(),
           const SizedBox(height: 32),
           ElevatedButton(
-            onPressed: _exceedsPageLimit
+            onPressed: (_exceedsPageLimit ||
+                    (_coverType == 'layflat' && _exceedsLayflatLimit))
                 ? null
                 : () => setState(() => _step = 2),
             child: Text('Continuer · ${_priceLabel(_coverType)}'),

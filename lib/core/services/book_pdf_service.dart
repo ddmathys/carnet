@@ -592,12 +592,18 @@ class BookPdfService {
   // fiches produit Prodigi : softcover 20-300, hardcover 24-300 (500 en
   // 150gsm gloss only, non géré ici par simplicité). Doit rester identique à
   // BookPricing.printablePages.
-  static const Map<String, int> _minValidPages = {'soft': 20, 'hard': 24};
+  static const Map<String, int> _minValidPages = {
+    'soft': 20, 'hard': 24, 'layflat': 18,
+  };
+  static const Map<String, int> _maxValidPages = {
+    'soft': 300, 'hard': 300, 'layflat': 122,
+  };
 
   static int _validPageCount(String coverType, int n) {
     final min = _minValidPages[coverType] ?? 24;
     var v = n < min ? min : (n.isOdd ? n + 1 : n);
-    if (v > 300) v = 300;
+    final max = _maxValidPages[coverType] ?? 300;
+    if (v > max) v = max;
     return v;
   }
 

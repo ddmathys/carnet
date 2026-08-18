@@ -20,9 +20,18 @@ import '../models/memory_model.dart';
 class BookPricing {
   static const double _usdToChf = 0.90;
 
-  static const Map<String, double> _basePriceUsd = {'soft': 10.97, 'hard': 13.48};
-  static const Map<String, double> _extraPageUsd = {'soft': 0.30, 'hard': 0.25};
-  static const Map<String, double> _shippingUsd = {'soft': 18.71, 'hard': 17.49};
+  // Layflat (BOOK-FE-A4-P-LF-G) : calibré le 18.08.26 sur de vrais devis
+  // Prodigi (voir backend/lib/pricing.ts pour le détail du calcul) — base
+  // 18p = \$24.31, +\$0.49/page, livraison \$18.75 (DE). 18-122 pages.
+  static const Map<String, double> _basePriceUsd = {
+    'soft': 10.97, 'hard': 13.48, 'layflat': 24.31,
+  };
+  static const Map<String, double> _extraPageUsd = {
+    'soft': 0.30, 'hard': 0.25, 'layflat': 0.49,
+  };
+  static const Map<String, double> _shippingUsd = {
+    'soft': 18.71, 'hard': 17.49, 'layflat': 18.75,
+  };
 
   // ── Marge visée ──────────────────────────────────────────────────────────
   // 20% du coût, avec un PLANCHER absolu de 8 CHF : sur un petit livre (peu
@@ -85,13 +94,17 @@ class BookPricing {
   /// en 150gsm gloss only, non géré ici par simplicité). Voir
   /// BookPdfService._validPageCount, doit rester identique à cette
   /// méthode-là. C'est sur CETTE base qu'est facturé un livre imprimé.
-  static const Map<String, int> _minPages = {'soft': 20, 'hard': 24};
-  static const int _maxPages = 300;
+  static const Map<String, int> _minPages = {'soft': 20, 'hard': 24, 'layflat': 18};
+  static const Map<String, int> _maxPages = {'soft': 300, 'hard': 300, 'layflat': 122};
+
+  /// Nombre de pages maximum accepté par ce format (borne produit Prodigi).
+  static int maxPages(String coverType) => _maxPages[coverType] ?? 300;
 
   static int printablePages(String coverType, int rawPages) {
     final min = _minPages[coverType] ?? 24;
     var v = rawPages < min ? min : (rawPages.isOdd ? rawPages + 1 : rawPages);
-    if (v > _maxPages) v = _maxPages;
+    final max = _maxPages[coverType] ?? 300;
+    if (v > max) v = max;
     return v;
   }
 

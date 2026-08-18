@@ -1,20 +1,25 @@
+import 'dart:io';
 import 'dart:math' show min, max;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/data/growth_data.dart';
 import '../../core/services/memory_query_service.dart';
+import '../../core/services/photo_service.dart';
 import '../../core/services/space_service.dart';
 import '../../core/services/tag_service.dart';
 import '../../core/utils/date_precision.dart';
 import '../../core/widgets/date_mask_field.dart';
+import '../tags/tag_picker_sheet.dart';
 
 // Animaux disponibles en asset SVG (companion du carnet). Repli sur « bear ».
 const _animalAssets = {'bear', 'dino', 'fox', 'mouse', 'penguin', 'rabbit'};
@@ -701,19 +706,30 @@ class _MeasurementList extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Container(
-                    width: 42,
-                    height: 42,
-                    decoration: BoxDecoration(
-                      color: isLatest ? AppColors.sage : AppColors.cream,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      showWeight ? Icons.monitor_weight_outlined : Icons.height,
-                      color: isLatest ? Colors.white : AppColors.softGray,
-                      size: 20,
-                    ),
-                  ),
+                  m.mediaKeys.isNotEmpty
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(21),
+                          child: SizedBox(
+                            width: 42,
+                            height: 42,
+                            child: _MeasurePhoto(memory: m),
+                          ),
+                        )
+                      : Container(
+                          width: 42,
+                          height: 42,
+                          decoration: BoxDecoration(
+                            color: isLatest ? AppColors.sage : AppColors.cream,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            showWeight
+                                ? Icons.monitor_weight_outlined
+                                : Icons.height,
+                            color: isLatest ? Colors.white : AppColors.softGray,
+                            size: 20,
+                          ),
+                        ),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -767,6 +783,29 @@ class _MeasurementList extends StatelessWidget {
 }
 
 // ─── Bouton ajout de mesure ─────────────────────────────────────────────────────
+
+// Vignette photo d'une mesure (résout la clé R2 à la demande).
+class _MeasurePhoto extends StatelessWidget {
+  final MemoryModel memory;
+  const _MeasurePhoto({required this.memory});
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<List<String>>(
+      future: PhotoService.resolvePhotoUrls(memory),
+      builder: (_, snap) {
+        final url = (snap.data?.isNotEmpty ?? false) ? snap.data!.first : null;
+        if (url == null) return Container(color: AppColors.cream);
+        return CachedNetworkImage(
+          imageUrl: url,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => Container(color: AppColors.cream),
+          errorWidget: (_, __, ___) => Container(color: AppColors.cream),
+        );
+      },
+    );
+  }
+}
 
 class _AddMeasureButton extends StatelessWidget {
   final NotebookModel notebook;
@@ -849,6 +888,20 @@ class _MeasureSheetState extends State<_MeasureSheet> {
   final _heightCtrl = TextEditingController();
   final _weightCtrl = TextEditingController();
   DateTime _date = DateTime.now();
+  final _picker = ImagePicker();
+
+  // Photo (une seule) : soit une nouvelle photo locale à uploader, soit la
+  // photo déjà associée à la mesure (édition) résolue en URL affichable.
+  File? _localPhoto;
+  String? _existingPhotoKey;
+  String? _existingPhotoUrl;
+  bool _photoRemoved = false;
+
+  // Tags : la mesure porte toujours le tag enfant lui-même (comme avant),
+  // plus d'éventuels tags additionnels choisis ici (même sélecteur que
+  // partout ailleurs dans l'app).
+  Set<String> _selectedTagLabels = {};
+  List<TagModel> _allTags = [];
 
   bool get _isChild => widget.notebook.type == 'enfant';
   bool get _isEditing => widget.editing != null;
@@ -857,6 +910,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
   void initState() {
     super.initState();
     final e = widget.editing;
+    _selectedTagLabels = {widget.notebook.title};
     if (e != null) {
       if (e.heightCm != null) _heightCtrl.text = e.heightCm!.toStringAsFixed(0);
       if (e.weightKg != null) _weightCtrl.text = e.weightKg!.toStringAsFixed(1);
@@ -867,7 +921,19 @@ class _MeasureSheetState extends State<_MeasureSheet> {
       final looksAuto =
           RegExp(r'^[\d.,\s•×xcmkg]*$', caseSensitive: false).hasMatch(raw);
       if (raw.isNotEmpty && !looksAuto) _commentCtrl.text = raw;
+      if (e.tagLabels.isNotEmpty) _selectedTagLabels = e.tagLabels.toSet();
+      if (e.mediaKeys.isNotEmpty) {
+        _existingPhotoKey = e.mediaKeys.first;
+        PhotoService.resolvePhotoUrls(e).then((urls) {
+          if (mounted && urls.isNotEmpty) {
+            setState(() => _existingPhotoUrl = urls.first);
+          }
+        });
+      }
     }
+    TagService.visibleTags().then((tags) {
+      if (mounted) setState(() => _allTags = tags);
+    });
   }
 
   @override
@@ -876,6 +942,38 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     _heightCtrl.dispose();
     _weightCtrl.dispose();
     super.dispose();
+  }
+
+  Future<void> _pickPhoto() async {
+    final picked = await _picker.pickImage(
+        source: ImageSource.gallery, imageQuality: 80, maxWidth: 1920);
+    if (picked != null && mounted) {
+      setState(() {
+        _localPhoto = File(picked.path);
+        _photoRemoved = false;
+      });
+    }
+  }
+
+  void _removePhoto() {
+    setState(() {
+      _localPhoto = null;
+      _existingPhotoUrl = null;
+      _photoRemoved = true;
+    });
+  }
+
+  Future<void> _openTagPicker() async {
+    final result = await showTagPickerSheet(
+      context,
+      tags: _allTags,
+      initialLabels: _selectedTagLabels,
+      allowCreate: true,
+      title: 'Tags',
+    );
+    if (result == null || !mounted) return;
+    // Le tag de l'enfant reste toujours présent, même si décoché ici.
+    setState(() => _selectedTagLabels = {widget.notebook.title, ...result});
   }
 
   bool get _canSave {
@@ -900,17 +998,41 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     setState(() => _saving = true);
     final col = FirebaseFirestore.instance.collection('memories');
     // Le « carnet » reçu ici est celui synthétisé depuis le tag : son id EST
-    // l'id du tag. La mesure est donc un souvenir tagué, rattaché à l'espace.
+    // l'id du tag. La mesure porte toujours ce tag, plus d'éventuels tags
+    // additionnels choisis dans le sélecteur.
     final tagId = widget.notebook.id;
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final spaceId = await SpaceService.ensureSpaceId() ?? '';
+
+    final tagIds = <String>[tagId];
+    final tagLabels = <String>[widget.notebook.title];
+    for (final label in _selectedTagLabels) {
+      if (label == widget.notebook.title) continue;
+      final tag = await TagService.ensureTag(label, kind: TagService.inferKind(label));
+      if (tag == null || tagIds.contains(tag.id)) continue;
+      tagIds.add(tag.id);
+      tagLabels.add(tag.label);
+    }
     final allTags = await TagService.visibleTags();
+    final sharedWith = TagService.sharedUidsFor(tagIds, allTags, uid);
+
+    String? newPhotoKey;
+    if (_localPhoto != null) {
+      newPhotoKey =
+          await PhotoService.uploadMemoryPhotoToR2(photo: _localPhoto!, notebookId: spaceId);
+    }
+    final mediaKeys = newPhotoKey != null
+        ? [newPhotoKey]
+        : (_photoRemoved
+            ? const <String>[]
+            : (_existingPhotoKey != null ? [_existingPhotoKey!] : const <String>[]));
+
     final data = {
       'notebookId': spaceId,
       'userId': uid,
-      'tagIds': [tagId],
-      'tagLabels': [widget.notebook.title],
-      'sharedWith': TagService.sharedUidsFor([tagId], allTags, uid),
+      'tagIds': tagIds,
+      'tagLabels': tagLabels,
+      'sharedWith': sharedWith,
       'type': 'taille_poids',
       'subType': null,
       'date': Timestamp.fromDate(_date),
@@ -920,6 +1042,7 @@ class _MeasureSheetState extends State<_MeasureSheet> {
       'aiNarration': null,
       'photoUrl': null,
       'mediaUrls': <String>[],
+      'mediaKeys': mediaKeys,
       'weightKg': weightKg,
       'heightCm': heightCm,
     };
@@ -1100,6 +1223,10 @@ class _MeasureSheetState extends State<_MeasureSheet> {
             contentPadding: const EdgeInsets.all(16),
           ),
         ),
+        const SizedBox(height: 18),
+        _buildPhotoTile(),
+        const SizedBox(height: 18),
+        _buildTagsSection(),
         const SizedBox(height: 24),
         ElevatedButton(
           onPressed: (_canSave && !_saving) ? _save : null,
@@ -1140,6 +1267,111 @@ class _MeasureSheetState extends State<_MeasureSheet> {
                 style: TextStyle(color: AppColors.error)),
           ),
         ],
+      ],
+    );
+  }
+
+  Widget _buildPhotoTile() {
+    final hasPhoto = _localPhoto != null || _existingPhotoUrl != null;
+    return GestureDetector(
+      onTap: _pickPhoto,
+      child: Container(
+        height: 120,
+        decoration: BoxDecoration(
+          color: AppColors.cream,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.border),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: hasPhoto
+            ? Stack(
+                fit: StackFit.expand,
+                children: [
+                  _localPhoto != null
+                      ? Image.file(_localPhoto!, fit: BoxFit.cover)
+                      : CachedNetworkImage(
+                          imageUrl: _existingPhotoUrl!, fit: BoxFit.cover),
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: GestureDetector(
+                      onTap: _removePhoto,
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.55),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.close,
+                            color: Colors.white, size: 16),
+                      ),
+                    ),
+                  ),
+                ],
+              )
+            : Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.add_a_photo_outlined,
+                        color: AppColors.sage, size: 22),
+                    const SizedBox(height: 6),
+                    Text('Ajouter une photo (optionnel)',
+                        style: TextStyle(
+                            fontSize: 12.5, color: AppColors.textMedium)),
+                  ],
+                ),
+              ),
+      ),
+    );
+  }
+
+  Widget _buildTagsSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text('Tags',
+            style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 14,
+                color: AppColors.textDark)),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 7,
+          runSpacing: 7,
+          children: [
+            for (final label in _selectedTagLabels)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: AppColors.sageTint,
+                  borderRadius: BorderRadius.circular(50),
+                ),
+                child: Text(label,
+                    style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.sageDark,
+                        fontWeight: FontWeight.w600)),
+              ),
+            GestureDetector(
+              onTap: _openTagPicker,
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(50),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: const Text('+ Ajouter',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.textMedium,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
       ],
     );
   }
