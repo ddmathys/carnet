@@ -99,7 +99,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   int? _audioDurationMs;
   DateTime? _recordStartedAt;
 
-  // Vidéos souvenir (jusqu'à maxVideosPerMemory clips, stockées sur R2).
+  // Vidéos souvenir (nombre libre, stockées sur R2).
   final List<String> _localVideoPaths = []; // nouvelles vidéos non uploadées
   final List<int?> _localVideoDurations = []; // parallèle à _localVideoPaths
   final List<String> _existingVideoKeys = []; // clés R2 conservées (édition)
@@ -108,8 +108,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool _preparingVideo = false; // sélection/contrôle de durée en cours
   // Durée max par clip. Chargée en async au démarrage.
   int _videoDurationCapSec = QuotaService.videoDurationSec;
-  // Nombre max de vidéos par souvenir, chargé en async au démarrage.
-  int _maxVideosPerMemory = QuotaService.maxVideosPerMemory;
 
   // Step 1: form
   String? _selectedCategory;
@@ -140,18 +138,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     _loadVideoDurationCap();
   }
 
-  // Récupère la durée max par clip et le nombre max de vidéos par souvenir.
+  // Récupère la durée max par clip.
   Future<void> _loadVideoDurationCap() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
     final cap = await QuotaService.getVideoDurationLimitSec(uid);
-    final maxPerMemory = await QuotaService.getMaxVideosPerMemory(uid);
-    if (mounted) {
-      setState(() {
-        _videoDurationCapSec = cap;
-        _maxVideosPerMemory = maxPerMemory;
-      });
-    }
+    if (mounted) setState(() => _videoDurationCapSec = cap);
   }
 
   @override
@@ -644,7 +636,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   int get _videoCount => _existingVideoKeys.length + _localVideoPaths.length;
   bool get _hasVideo => _videoCount > 0;
-  bool get _canAddVideo => _videoCount < _maxVideosPerMemory;
 
   // Durée max par clip en texte lisible (ex. « 10 min », « 2 min », « 90 s »).
   String get _videoDurationLabel => _videoDurationCapSec % 60 == 0
@@ -652,22 +643,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       : '$_videoDurationCapSec s';
 
   Future<void> _pickVideo(ImageSource source) async {
-    // Limite par souvenir (gratuit) — au-delà, on informe et on bloque.
-    if (!_canAddVideo) {
-      _showSnack('Maximum $_maxVideosPerMemory vidéos par souvenir.');
-      return;
-    }
-    // Quota global, en comptant les vidéos déjà ajoutées localement dans ce
-    // souvenir.
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid != null) {
-      final q = await QuotaService.canAddVideos(
-          uid, adding: _localVideoPaths.length + 1);
-      if (!q.allowed) {
-        if (mounted) _showVideoQuotaDialog();
-        return;
-      }
-    }
     setState(() => _preparingVideo = true);
     try {
       final picked = await _picker.pickVideo(
@@ -735,37 +710,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         p.endsWith('.hevc');
   }
 
-  /// Ingère une liste de chemins vidéo : plafond par souvenir, quota global et
-  /// cap de durée. Ce qui est refusé est signalé sans bloquer le reste. Utilisé
-  /// par l'import unifié galerie.
+  /// Ingère une liste de chemins vidéo : seul le cap de durée filtre. Ce qui
+  /// est refusé est signalé sans bloquer le reste. Utilisé par l'import unifié
+  /// galerie.
   Future<void> _ingestVideoPaths(List<String> paths) async {
     if (paths.isEmpty) return;
-    final remaining = _maxVideosPerMemory - _videoCount;
-    if (remaining <= 0) {
-      _showSnack('Maximum $_maxVideosPerMemory vidéos par souvenir.');
-      return;
-    }
-    // Vidéos au-delà du plafond du souvenir → ignorées.
-    final ignoredForLimit =
-        paths.length > remaining ? paths.length - remaining : 0;
-    final toConsider = paths.take(remaining).toList();
 
-    final uid = FirebaseAuth.instance.currentUser?.uid;
     final accepted = <String>[];
     final acceptedDurations = <int?>[];
     int tooLong = 0;
-    bool quotaHit = false;
 
-    for (final path in toConsider) {
-      // Quota global, réévalué à chaque ajout.
-      if (uid != null) {
-        final q = await QuotaService.canAddVideos(
-            uid, adding: _localVideoPaths.length + accepted.length + 1);
-        if (!q.allowed) {
-          quotaHit = true;
-          break;
-        }
-      }
+    for (final path in paths) {
       final durMs = await VideoService.probeDurationMs(File(path));
       if (durMs != null &&
           durMs > (_videoDurationCapSec + 5) * 1000) {
@@ -782,20 +737,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _localVideoDurations.addAll(acceptedDurations);
     });
 
-    if (quotaHit) {
-      _showVideoQuotaDialog();
-      return;
-    }
-    final notes = <String>[];
     if (tooLong > 0) {
-      notes.add('$tooLong trop longue${tooLong > 1 ? 's' : ''} '
-          '(max $_videoDurationLabel)');
+      _showSnack('Ignoré : $tooLong trop longue${tooLong > 1 ? 's' : ''} '
+          '(max $_videoDurationLabel).');
     }
-    if (ignoredForLimit > 0) {
-      notes.add('$ignoredForLimit au-delà de '
-          '$_maxVideosPerMemory vidéos');
-    }
-    if (notes.isNotEmpty) _showSnack('Ignoré : ${notes.join(' · ')}.');
   }
 
   /// Import unifié depuis la galerie : photos ET vidéos en une seule sélection
@@ -929,25 +874,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       for (final p in _localVideoPaths) FullscreenMedia.videoFile(p),
     ];
     MediaFullscreenViewer.open(context, items: items, initialIndex: index);
-  }
-
-  void _showVideoQuotaDialog() {
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Limite de vidéos atteinte'),
-        content: Text(
-          'Tu as atteint la limite de ${QuotaService.videoLimit} vidéos.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Compris'),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showAudioQuotaDialog() {
@@ -2526,7 +2452,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle('🎬 VIDÉOS · OPTIONNEL · $_maxVideosPerMemory MAX'),
+        const _SectionTitle('🎬 VIDÉOS · OPTIONNEL'),
         const SizedBox(height: 8),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -2569,7 +2495,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Jusqu\'à $_maxVideosPerMemory vidéos de $_videoDurationLabel. '
+          'Autant de vidéos que tu veux, $_videoDurationLabel chacune max. '
           'Un QR code dans le livre mène à toutes les vidéos du souvenir.',
           style: const TextStyle(color: AppColors.softGray, fontSize: 12),
         ),

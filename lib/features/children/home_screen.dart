@@ -30,7 +30,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   QuotaStatus? _quota;
-  QuotaStatus? _videoQuota;
+  int? _videoCount;
   QuotaStatus? _audioQuota;
 
   List<TagModel> _myTags = [];
@@ -142,16 +142,18 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadQuota() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final results = await Future.wait([
-      QuotaService.checkQuota(uid),
-      QuotaService.checkVideoQuota(uid),
-      QuotaService.checkAudioQuota(uid),
-    ]);
+    // Les vidéos n'ont plus de plafond : on n'en compte que le total.
+    final photoFuture = QuotaService.checkQuota(uid);
+    final videoFuture = QuotaService.countUserVideos(uid);
+    final audioFuture = QuotaService.checkAudioQuota(uid);
+    final photo = await photoFuture;
+    final videos = await videoFuture;
+    final audio = await audioFuture;
     if (mounted) {
       setState(() {
-        _quota = results[0];
-        _videoQuota = results[1];
-        _audioQuota = results[2];
+        _quota = photo;
+        _videoCount = videos;
+        _audioQuota = audio;
       });
     }
   }
@@ -471,7 +473,7 @@ class _HomeScreenState extends State<HomeScreen> {
       isScrollControlled: true,
       builder: (_) => _MonEspaceSheet(
         quota: _quota,
-        videoQuota: _videoQuota,
+        videoCount: _videoCount,
         audioQuota: _audioQuota,
       ),
     );
@@ -819,11 +821,11 @@ class _StackedPagesMark extends StatelessWidget {
 
 class _MonEspaceSheet extends StatelessWidget {
   final QuotaStatus? quota;
-  final QuotaStatus? videoQuota;
+  final int? videoCount;
   final QuotaStatus? audioQuota;
   const _MonEspaceSheet({
     required this.quota,
-    required this.videoQuota,
+    required this.videoCount,
     required this.audioQuota,
   });
 
@@ -858,9 +860,9 @@ class _MonEspaceSheet extends StatelessWidget {
                     fontWeight: FontWeight.w600,
                     color: AppColors.textDark)),
             const SizedBox(height: 16),
-            _GaugeRow(label: '🖼 Photos', quota: quota),
-            _GaugeRow(label: '🎬 Vidéos', quota: videoQuota),
-            _GaugeRow(label: '🎙 Vocaux', quota: audioQuota),
+            _GaugeRow(label: '🖼 Photos', count: quota?.current),
+            _GaugeRow(label: '🎬 Vidéos', count: videoCount),
+            _GaugeRow(label: '🎙 Vocaux', count: audioQuota?.current),
           ],
         ),
       ),
@@ -872,12 +874,12 @@ class _MonEspaceSheet extends StatelessWidget {
 /// a plus de palier à approcher, la limite n'a aucun intérêt pour l'utilisateur.
 class _GaugeRow extends StatelessWidget {
   final String label;
-  final QuotaStatus? quota;
-  const _GaugeRow({required this.label, required this.quota});
+  final int? count;
+  const _GaugeRow({required this.label, required this.count});
 
   @override
   Widget build(BuildContext context) {
-    final count = quota?.current ?? 0;
+    final value = count ?? 0;
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Row(
@@ -888,7 +890,7 @@ class _GaugeRow extends StatelessWidget {
                   fontSize: 13.5,
                   color: AppColors.textDark,
                   fontWeight: FontWeight.w500)),
-          Text('$count',
+          Text('$value',
               style: const TextStyle(
                   fontWeight: FontWeight.w600, color: AppColors.textDark)),
         ],

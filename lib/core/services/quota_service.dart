@@ -8,16 +8,9 @@ class QuotaService {
   static const int photoLimit = 15000;
   static const int photoHardLimit = 15000;
 
-  // Vidéos souvenir : 150 clips de 10 min max chacun.
-  // Estimation stockage : 150 clips × jusqu'à 10 min (~90 Mo) ≈ 13,5 Go max
-  // par utilisateur.
-  static const int videoLimit = 150;
+  // Vidéos souvenir : aucun plafond de nombre, ni global ni par souvenir.
+  // Seule la durée d'un clip reste bornée (voir videoDurationSec).
   static const int videoDurationSec = 600; // 10 min
-  // Pas de plafond propre par souvenir : borné par le quota global ci-dessus.
-  static const int maxVideosPerMemory = videoLimit;
-
-  static Future<int> getMaxVideosPerMemory(String userId) async =>
-      maxVideosPerMemory;
 
   static const int audioLimit = 150;
 
@@ -82,8 +75,6 @@ class QuotaService {
     return (allowed: count + adding <= hardLimit, current: count, limit: hardLimit);
   }
 
-  static Future<int> getVideoLimit(String userId) async => videoLimit;
-
   /// Durée max par clip (secondes). Le plafond évite des fichiers énormes qui
   /// échouent à l'upload (l'app charge tout le fichier en mémoire, cf.
   /// VideoService).
@@ -125,23 +116,6 @@ class QuotaService {
     } catch (_) {
       return 0;
     }
-  }
-
-  /// Peut-on ajouter [adding] vidéo(s) ?
-  static Future<({bool allowed, int current, int limit})> canAddVideos(
-    String userId, {
-    int adding = 1,
-  }) async {
-    final limit = await getVideoLimit(userId);
-    final count = await countUserVideos(userId);
-    return (allowed: count + adding <= limit, current: count, limit: limit);
-  }
-
-  // Compteur d'avancement vidéo (pour l'accueil), même forme que les photos.
-  static Future<QuotaStatus> checkVideoQuota(String userId) async {
-    final limit = await getVideoLimit(userId);
-    final count = await countUserVideos(userId);
-    return QuotaStatus(current: count, limit: limit);
   }
 
   static Future<int> getAudioLimit(String userId) async => audioLimit;
