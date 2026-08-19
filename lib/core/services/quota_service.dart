@@ -8,10 +8,10 @@ class QuotaService {
   static const int photoLimit = 15000;
   static const int photoHardLimit = 15000;
 
-  // Vidéos souvenir : 150 clips de 10 min max chacun.
-  // Estimation stockage : 150 clips × jusqu'à 10 min (~90 Mo) ≈ 13,5 Go max
+  // Vidéos souvenir : 300 clips de 10 min max chacun.
+  // Estimation stockage : 300 clips × jusqu'à 10 min (~90 Mo) ≈ 27 Go max
   // par utilisateur.
-  static const int videoLimit = 150;
+  static const int videoLimit = 300;
   static const int videoDurationSec = 600; // 10 min
   // Pas de plafond propre par souvenir : borné par le quota global ci-dessus.
   static const int maxVideosPerMemory = videoLimit;
