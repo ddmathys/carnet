@@ -23,6 +23,7 @@ import 'pdf_viewer_screen.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/tag_service.dart';
+import '../milestones/widgets/growth_multi_chart.dart';
 
 /// Génération d'un livre à partir d'une sélection de SOUVENIRS (plus d'un
 /// carnet) : ils viennent d'un tag, d'un choix manuel, ou des deux.
@@ -131,6 +132,20 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   (m.heightCm != null || m.weightKg != null))
               .length >=
           2;
+
+  // Texte du bandeau "Souvenirs inclus" — les mesures taille/poids ne sont
+  // jamais comptées comme des souvenirs (voir _MemorySelectionSheet), le
+  // chapitre croissance est mentionné à part quand il s'applique.
+  String get _memorySelectionSummary {
+    final total = _memories.where((m) => m.type != 'taille_poids').length;
+    final selected =
+        _selectedMemories.where((m) => m.type != 'taille_poids').length;
+    final base = selected == total
+        ? 'Tous les souvenirs inclus ($total)'
+        : '$selected souvenir${selected != 1 ? 's' : ''} sur $total inclus';
+    if (!_hasGrowthData || !_includeGrowthChapter) return base;
+    return '$base + courbe de croissance';
+  }
 
   // Photo la plus proche de chaque anniversaire (±30j), pour les mettre en
   // avant en pleine page (bookFeaturedMedia) sans repasser par un template
@@ -865,9 +880,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
-                      _selectedMemoryIds.length == _memories.length
-                          ? 'Tous les souvenirs inclus (${_memories.length})'
-                          : '${_selectedMemoryIds.length} souvenir${_selectedMemoryIds.length != 1 ? 's' : ''} sur ${_memories.length} inclus',
+                      _memorySelectionSummary,
                       style: const TextStyle(
                           color: AppColors.textDark, fontSize: 13),
                     ),
@@ -884,29 +897,6 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ),
             ),
           ),
-          if (_hasGrowthData) ...[
-            const SizedBox(height: 10),
-            GestureDetector(
-              onTap: () => setState(
-                  () => _includeGrowthChapter = !_includeGrowthChapter),
-              child: Row(
-                children: [
-                  Checkbox(
-                    value: _includeGrowthChapter,
-                    activeColor: AppColors.sage,
-                    onChanged: (v) =>
-                        setState(() => _includeGrowthChapter = v ?? true),
-                  ),
-                  const Expanded(
-                    child: Text(
-                      'Inclure le chapitre croissance (courbe taille/poids OMS)',
-                      style: TextStyle(color: AppColors.textDark, fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
           if (_milestoneSuggestions.isNotEmpty) ...[
             const SizedBox(height: 10),
             for (final s in _milestoneSuggestions)
@@ -1590,6 +1580,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   bool _memoriesChangedInSheet = false;
 
   Future<void> _openMemorySelection() async {
+    final growthBefore = _includeGrowthChapter;
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1597,6 +1588,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       builder: (_) => _MemorySelectionSheet(
         memories: _memories,
         selectedIds: _selectedMemoryIds,
+        notebook: _notebook,
+        hasGrowthData: _hasGrowthData,
+        includeGrowthChapter: _includeGrowthChapter,
+        onGrowthChapterChanged: (v) =>
+            setState(() => _includeGrowthChapter = v),
         onChanged: (ids) => setState(() {
           _selectedMemoryIds = ids;
           // Reset cover photo if it no longer belongs to selected memories
@@ -1608,7 +1604,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         onMemoryUpdated: _applyMemoryLayoutUpdate,
       ),
     );
-    if (_memoriesChangedInSheet) {
+    if (_memoriesChangedInSheet || growthBefore != _includeGrowthChapter) {
       _memoriesChangedInSheet = false;
       await _generate();
     }
@@ -2470,12 +2466,26 @@ class _MemorySelectionSheet extends StatefulWidget {
   final Set<String> selectedIds;
   final ValueChanged<Set<String>> onChanged;
   final ValueChanged<MemoryModel> onMemoryUpdated;
+  // Chapitre croissance : représenté ici comme une carte à part (pas une
+  // ligne « souvenir » comme les autres — voir _visibleMemories) puisqu'il ne
+  // correspond à aucun souvenir individuel mais à une page récap générée à
+  // partir de TOUTES les mesures taille/poids.
+  final bool hasGrowthData;
+  final bool includeGrowthChapter;
+  final ValueChanged<bool> onGrowthChapterChanged;
+  // Nécessaire pour prévisualiser la courbe (genre, date de naissance) — voir
+  // GrowthMultiChart, qui rend la MÊME courbe que la page Croissance.
+  final NotebookModel? notebook;
 
   const _MemorySelectionSheet({
     required this.memories,
     required this.selectedIds,
     required this.onChanged,
     required this.onMemoryUpdated,
+    required this.hasGrowthData,
+    required this.includeGrowthChapter,
+    required this.onGrowthChapterChanged,
+    required this.notebook,
   });
 
   @override
@@ -2484,6 +2494,7 @@ class _MemorySelectionSheet extends StatefulWidget {
 
 class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   late Set<String> _local;
+  late bool _growthIncluded;
   // Souvenirs patchés localement après ajout de photos (mediaKeys à jour) —
   // widget.memories n'est reçu qu'une fois à l'ouverture de la sheet, donc on
   // superpose ces versions pour que le compteur/bouton "Mise en page" reflètent
@@ -2495,10 +2506,31 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   void initState() {
     super.initState();
     _local = Set.from(widget.selectedIds);
+    _growthIncluded = widget.includeGrowthChapter;
+  }
+
+  // Les mesures taille/poids ne sont pas des souvenirs qu'on coche/décoche
+  // une par une ici — seule la carte "Courbe de croissance" (globale)
+  // représente ce chapitre. Elles restent dans `_local` (jamais retirées par
+  // « Tout cocher/décocher », qui n'agit que sur cette liste visible) pour
+  // continuer d'alimenter la courbe même si l'utilisateur ne les voit jamais.
+  List<MemoryModel> get _visibleMemories =>
+      widget.memories.where((m) => m.type != 'taille_poids').toList();
+
+  List<MemoryModel> get _growthMeasures =>
+      widget.memories.where((m) => m.type == 'taille_poids').toList();
+
+  // Aperçu : montre la taille par défaut, le poids seulement si c'est la
+  // mesure la mieux renseignée (plus de points) — évite un aperçu vide si le
+  // parent n'a saisi que le poids.
+  bool get _growthShowWeight {
+    final heights = _growthMeasures.where((m) => m.heightCm != null).length;
+    final weights = _growthMeasures.where((m) => m.weightKg != null).length;
+    return weights > heights;
   }
 
   MemoryModel _memoryAt(int i) {
-    final m = widget.memories[i];
+    final m = _visibleMemories[i];
     return _patched[m.id] ?? m;
   }
 
@@ -2636,6 +2668,14 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
     return n;
   }
 
+  // Nombre de souvenirs VISIBLES cochés — exclut les mesures taille/poids
+  // (jamais montrées ici, cf. _visibleMemories), pour que le compteur affiché
+  // corresponde à ce que l'utilisateur voit et coche dans cette liste.
+  int get _visibleSelectedCount {
+    final visibleIds = _visibleMemories.map((m) => m.id).toSet();
+    return _local.where(visibleIds.contains).length;
+  }
+
   @override
   Widget build(BuildContext context) {
     return DraggableScrollableSheet(
@@ -2678,14 +2718,18 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                     style: TextButton.styleFrom(
                         padding: EdgeInsets.zero, minimumSize: Size.zero),
                     onPressed: () => setState(() {
-                      if (_local.length == widget.memories.length) {
-                        _local.clear();
+                      final visibleIds =
+                          _visibleMemories.map((m) => m.id).toSet();
+                      if (visibleIds.every(_local.contains)) {
+                        _local.removeAll(visibleIds);
                       } else {
-                        _local = widget.memories.map((m) => m.id).toSet();
+                        _local.addAll(visibleIds);
                       }
                     }),
                     child: Text(
-                      _local.length == widget.memories.length
+                      _visibleMemories.isNotEmpty &&
+                              _visibleMemories
+                                  .every((m) => _local.contains(m.id))
                           ? 'Tout décocher'
                           : 'Tout cocher',
                       style:
@@ -2696,11 +2740,100 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
               ),
             ),
             const Divider(height: 1, color: Color(0xFFEEEBE3)),
+            if (widget.hasGrowthData) ...[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(10),
+                  onTap: () =>
+                      setState(() => _growthIncluded = !_growthIncluded),
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.sageTint,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: _growthIncluded
+                                ? AppColors.sage
+                                : AppColors.surface,
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(
+                              color: _growthIncluded
+                                  ? AppColors.sage
+                                  : const Color(0xFFCCC8BE),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: _growthIncluded
+                              ? const Icon(Icons.check,
+                                  size: 14, color: Colors.white)
+                              : null,
+                        ),
+                        const SizedBox(width: 12),
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: 84,
+                            height: 56,
+                            color: AppColors.surface,
+                            padding: const EdgeInsets.all(4),
+                            child: widget.notebook != null &&
+                                    _growthMeasures.isNotEmpty
+                                ? GrowthMultiChart(
+                                    notebook: widget.notebook!,
+                                    measures: _growthMeasures,
+                                    showWeight: _growthShowWeight,
+                                    compact: true,
+                                    chartHeight: 48,
+                                  )
+                                : const Icon(Icons.show_chart_rounded,
+                                    color: AppColors.sage, size: 22),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Courbe de croissance',
+                                style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.textDark),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Générée depuis tes mesures de la page '
+                                'Croissance — occupe une pleine page A4 dans '
+                                'le livre.',
+                                style: TextStyle(
+                                    fontSize: 11.5,
+                                    color: AppColors.textMedium,
+                                    height: 1.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
             // Memory list
             Expanded(
               child: ListView.builder(
                 controller: ctrl,
-                itemCount: widget.memories.length,
+                itemCount: _visibleMemories.length,
                 itemBuilder: (_, i) {
                   final m = _memoryAt(i);
                   final selected = _local.contains(m.id);
@@ -2929,7 +3062,7 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
               child: Column(
                 children: [
                   Text(
-                    '${_local.length} souvenir${_local.length != 1 ? 's' : ''} · $_photoCount photo${_photoCount != 1 ? 's' : ''}',
+                    '$_visibleSelectedCount souvenir${_visibleSelectedCount != 1 ? 's' : ''} · $_photoCount photo${_photoCount != 1 ? 's' : ''}',
                     style: const TextStyle(
                         color: AppColors.textMedium, fontSize: 13),
                   ),
@@ -2937,14 +3070,15 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _local.isEmpty
+                      onPressed: _visibleSelectedCount == 0 && !_growthIncluded
                           ? null
                           : () {
                               widget.onChanged(Set.from(_local));
+                              widget.onGrowthChapterChanged(_growthIncluded);
                               Navigator.pop(context);
                             },
                       child: Text(
-                          'Confirmer (${_local.length}/${widget.memories.length})'),
+                          'Confirmer ($_visibleSelectedCount/${_visibleMemories.length})'),
                     ),
                   ),
                 ],

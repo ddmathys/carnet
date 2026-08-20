@@ -2055,6 +2055,51 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
+  /// Sélecteur explicite de l'enfant concerné par la mesure — plus rapide
+  /// qu'aller chercher son tag dans la section « Tags » générique, et évite
+  /// d'en sélectionner deux par erreur (un seul tag enfant a de sens ici).
+  Widget _buildChildSelector() {
+    final childTags = _allTags.where((t) => t.isChild).toList();
+    if (childTags.isEmpty) {
+      return Text(
+        'Crée d\'abord un tag enfant (bouton "+" dans Mes tags) pour pouvoir '
+        'relier une mesure à sa courbe de croissance.',
+        style: TextStyle(color: AppColors.error, fontSize: 12),
+      );
+    }
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final t in childTags)
+          ChoiceChip(
+            label: Text(t.label),
+            selected: _childTag?.id == t.id,
+            onSelected: (_) => setState(() {
+              _tagLabels.removeWhere(
+                  (l) => _allTags.any((x) => x.isChild && x.label == l));
+              _tagLabels.add(t.label);
+            }),
+            selectedColor: AppColors.sage,
+            backgroundColor: AppColors.background,
+            labelStyle: TextStyle(
+              fontSize: 12,
+              color:
+                  _childTag?.id == t.id ? Colors.white : AppColors.textDark,
+              fontWeight: FontWeight.w600,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(50),
+              side: BorderSide(
+                  color: _childTag?.id == t.id
+                      ? AppColors.sage
+                      : AppColors.border),
+            ),
+          ),
+      ],
+    );
+  }
+
   Widget _buildTaillePoidsForm() {
     final weightVal =
         double.tryParse(_weightController.text.replaceAll(',', '.'));
@@ -2097,15 +2142,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             const SizedBox(height: 4),
             Text(
               _childTag == null
-                  ? 'Le tag de ton enfant est obligatoire ici (section « Tags » '
-                      'ci-dessous) — c\'est lui qui relie cette mesure à sa '
-                      'courbe de croissance.'
+                  ? 'Choisis l\'enfant concerné — c\'est lui qui relie cette '
+                      'mesure à sa courbe de croissance.'
                   : 'Cette mesure alimentera la courbe de ${_childTag!.label}.',
               style: TextStyle(
                 color: _childTag == null ? AppColors.error : AppColors.textMedium,
                 fontSize: 12,
               ),
             ),
+            const SizedBox(height: 10),
+            _buildChildSelector(),
             const SizedBox(height: 12),
             Row(
               children: [

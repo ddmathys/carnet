@@ -141,7 +141,11 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           if (!snap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-          final all = snap.data!;
+          // Les mesures taille/poids ne sont pas des souvenirs comme les
+          // autres : elles se saisissent et se consultent uniquement depuis
+          // la page croissance (/growth/:tagId), pas ici.
+          final all =
+              snap.data!.where((m) => m.type != 'taille_poids').toList();
           final selected = _selectedTags;
           final tagFiltered =
               all.where((m) => memoryMatchesTags(m, selected)).toList();
