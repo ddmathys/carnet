@@ -121,10 +121,32 @@ class _PosterSelectScreenState extends State<PosterSelectScreen> {
   Future<void> _onRowTap(MemoryModel m) async {
     final urls = await PhotoService.resolvePhotoUrls(m);
     if (!mounted || urls.isEmpty) return;
-    if (urls.length == 1) {
-      setState(() => _togglePhoto(m.id, 0));
-      return;
+
+    // Premier tap sur ce souvenir : TOUTES ses photos sont ajoutées par
+    // défaut (dans la limite du plafond global) — l'utilisateur en retire
+    // ensuite s'il en veut moins, plutôt que de partir d'une sélection vide.
+    final alreadyTouched = _selected.any((e) => e.memoryId == m.id);
+    if (!alreadyTouched) {
+      var capped = false;
+      setState(() {
+        for (var i = 0; i < urls.length; i++) {
+          if (_selected.length >= posterMaxPhotos) {
+            capped = true;
+            break;
+          }
+          _selected.add((memoryId: m.id, photoIndex: i));
+        }
+      });
+      if (capped) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'Plafond de $posterMaxPhotos photos atteint — seules les premières de ce souvenir ont été ajoutées.'),
+        ));
+      }
     }
+
+    if (urls.length == 1) return; // rien à revoir/retirer, une seule photo.
+
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -441,15 +463,38 @@ class _MemoryPhotosSheet extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title,
-                    style: const TextStyle(
-                        fontFamily: 'PlayfairDisplay',
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.textDark)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(title,
+                          style: const TextStyle(
+                              fontFamily: 'PlayfairDisplay',
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textDark)),
+                    ),
+                    Builder(builder: (context) {
+                      final allSelected =
+                          List.generate(urls.length, (i) => i).every(isSelected);
+                      return TextButton(
+                        onPressed: () {
+                          for (var i = 0; i < urls.length; i++) {
+                            if (isSelected(i) == allSelected) onToggle(i);
+                          }
+                          setModalState(() {});
+                        },
+                        child: Text(allSelected ? 'Tout retirer' : 'Tout ajouter',
+                            style: const TextStyle(
+                                color: AppColors.sageDark,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12.5)),
+                      );
+                    }),
+                  ],
+                ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Tape une ou plusieurs photos à inclure dans le tirage.',
+                  'Toutes les photos sont ajoutées par défaut — décoche celles que tu ne veux pas garder.',
                   style: TextStyle(fontSize: 12.5, color: AppColors.textMedium),
                 ),
                 const SizedBox(height: 14),
