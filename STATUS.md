@@ -1,6 +1,117 @@
-# État du projet — point du 16 juin 2026
+# État du projet — point du 20 août 2026
 
 Note de reprise : où on en est, ce qui reste à faire, et le plan.
+
+---
+
+## 🌱 Mesures taille/poids hors des souvenirs + chapitre croissance multi-enfant (20.08.2026)
+
+Commits `c1b0b4f` → `bbdd75d` sur `master`, **poussés et build CI vérifiés OK**
+(APK publié sur `dmathys.dev/download/carnet.apk` à chaque étape, versions
+1.3.0 → 1.3.1 → 1.4.0). Session menée entièrement en dialogue avec l'utilisateur,
+plusieurs allers-retours car la première implémentation ne couvrait pas tous
+les écrans concernés — détail ci-dessous pour ne pas retomber dans le même trou.
+
+### Point de départ
+David ne voulait plus voir les mesures taille/poids (`type: 'taille_poids'`)
+apparaître comme des souvenirs normaux dans les listes — seule la page
+Croissance (`/growth/:tagId`) devait pouvoir les créer/afficher/modifier. Mais
+il voulait quand même pouvoir **inclure la courbe de croissance dans un livre**,
+en pleine page A4, générée depuis les vraies données.
+
+### 1. Saisie taille/poids : uniquement via la page Croissance, MAIS avec
+   possibilité de créer un enfant à la volée
+- `memory_create_screen.dart` : le bouton "Ajouter une mesure de croissance"
+  (réintroduit le 18.08, commit `d87b077`) a été retiré puis... **remis** après
+  clarification de David (il voulait pouvoir déclencher la saisie depuis
+  l'écran normal, avec un sélecteur d'enfant explicite plutôt que le rappel
+  texte vers la section Tags générique).
+- Nouveau `_buildChildSelector()` : chips "Enfant" (un par tag `kind: enfant`)
+  + chip **"+ Ajouter un enfant"**.
+- Nouveau `TagService.createChildTag({label, birthdate, gender})` — jusqu'ici
+  **aucune UI ne permettait de créer un tag enfant avec date de naissance**
+  (seule la migration des anciens carnets enfant l'écrivait). Sans date de
+  naissance, aucune courbe n'est calculable (âge en mois). Sheet dédiée
+  `_AddChildSheet` (nom, `DateMaskField` pour la date, chips genre) — les
+  trois champs sont obligatoires.
+- Les mesures existantes restent filtrées (`type != 'taille_poids'`) de :
+  `memories_list_screen.dart` (liste générale "souvenirs"), et — **oubli de
+  la première passe, corrigé ensuite** — `memory_select_screen.dart` (écran
+  "Choisir les souvenirs", `/book/select`, la VRAIE première étape de
+  création d'un livre, atteinte par le CTA générique "Créer un livre" du
+  dashboard **sans filtre de tag** = le chemin le plus emprunté). Un bug
+  corrigé dans un seul de ces écrans doit être répliqué dans l'autre — ce
+  sont deux écrans indépendants, pas un seul composant partagé.
+
+### 2. Chapitre croissance : passé de "un seul enfant" à "un par enfant"
+Le chapitre croissance dépendait de `notebook.type == 'enfant'`, donc
+n'apparaissait QUE si le livre était filtré sur le tag d'un seul enfant —
+jamais via le flux généraliste "Créer un livre" (le plus utilisé), et jamais
+pour un compte avec plusieurs enfants (Léa + Nathan simultanément).
+
+- `book_pdf_service.dart::generateForNotebook` : le paramètre
+  `includeGrowthChapter: bool?` est devenu `growthChildren: List<TagModel>`
+  (les tags enfant à couvrir). Le service groupe lui-même les mesures
+  taille/poids de `memories` par enfant (via `MemoryModel.tagIds.contains(
+  childTag.id)` — chaque mesure porte toujours son tag enfant en premier,
+  posé par `growth_screen.dart` à la création) et émet **une page A4 par
+  enfant** ayant ≥2 mesures, à la fin du livre (`_growthPage`, inchangé sur
+  le fond, juste appelé en boucle).
+- `book_generate_screen.dart` : nouvelle liste `_allTags` (chargée via
+  `TagService.visibleTags()` dans `_loadData`), getter `_growthGroups`
+  (regroupe `_selectedMemories` par enfant), `_excludedGrowthChildIds`
+  (remplace l'ancien bool `_includeGrowthChapter`). La sheet "Souvenirs à
+  inclure" affiche **une carte par enfant** ("Courbe de croissance — Léa",
+  "Courbe de croissance — Nathan"), cochable indépendamment.
+- `memory_select_screen.dart` : mêmes cartes ajoutées ici aussi (nouveau
+  widget `_GrowthCard`), puisque c'est l'écran réellement utilisé en premier.
+  `_continue()` transmet les ids des mesures des enfants NON décochés en plus
+  des souvenirs cochés normalement.
+- Widget de courbe partagé : `lib/features/milestones/widgets/
+  growth_multi_chart.dart` (`GrowthMultiChart`, extrait de l'ancien
+  `_MultiPointChart` privé de `growth_screen.dart` pour être réutilisable) —
+  mode `compact` pour les aperçus miniatures dans les cartes. Toute évolution
+  visuelle de LA courbe (page Croissance in-app + aperçus livre) passe par ce
+  seul fichier désormais.
+
+### 3. Photos WhatsApp invisibles dans le sélecteur — PAS un bug Carnet
+David a signalé ne voir que ses propres photos, pas celles reçues sur
+WhatsApp, en ouvrant le sélecteur galerie. Vérifié dans le code
+(`memory_create_screen.dart::_pickMediaFromGallery`) : **aucun filtre
+appliqué**, le picker système Android (`pickMultipleMedia`,
+`useAndroidPhotoPicker = true`, décision du 04.08 de ne pas y toucher —
+risque de régression vidéo) montre tout ce que MediaStore a indexé. Cause
+quasi certaine : réglage WhatsApp **"Visibilité des médias"** (par
+discussion ou global) désactivé chez lui → la photo reçue n'est jamais
+sauvegardée dans la galerie du téléphone, donc invisible dans TOUTE appli,
+pas spécifique à Carnet. **Aucun changement de code fait** — David va
+vérifier ce réglage de son côté. Si ça persiste malgré un réglage WhatsApp
+correct, ce sera le prochain point à creuser (peut-être repasser sur le
+sélecteur galerie classique malgré le risque vidéo déjà identifié).
+
+### Convention de version + livraison (rodée cette session)
+Bump manuel du champ `version:` de `pubspec.yaml` (MINEUR uniquement, sur
+demande explicite — le build number réel vient de `github.run_number`, pas du
+suffixe `+N`). Sur "pousse et envoie-moi par mail" : push `master` →
+surveiller le run `Build APK` via l'API GitHub publique (pas de `gh` CLI sur
+cette machine, repo public donc pas besoin de token) → à `completed`/
+`success`, vérifier `Last-Modified` de `dmathys.dev/download/carnet.apk` →
+mail (Gmail MCP) à `david.mathys24@gmail.com` avec lien + résumé. Build
+typique : ~12-15 min.
+
+### Reste à faire / à vérifier
+- **Tester sur device** : créer un livre depuis "Créer un livre" (dashboard,
+  sans filtre) avec Léa ET Nathan ayant des mesures → vérifier que les DEUX
+  cartes "Courbe de croissance" apparaissent et que le PDF contient bien 2
+  pages distinctes si les deux sont cochées.
+- Vérifier que le sélecteur "+ Ajouter un enfant" fonctionne bien de bout en
+  bout (création du tag, mesure sauvegardée, apparition sur la page
+  Croissance).
+- David doit vérifier le réglage WhatsApp "Visibilité des médias" — revenir
+  dessus si le problème persiste après vérification.
+- Dette pas traitée aujourd'hui (déjà connue) : `book_generate_screen.dart`
+  et `memory_create_screen.dart` restent des fichiers géants — pas découpés,
+  hors scope de cette session.
 
 ---
 
