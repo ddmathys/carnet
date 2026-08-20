@@ -1,8 +1,11 @@
-/// Templates de collage pour le poster (produit "Art print with hanger").
-/// Volontairement un petit catalogue fixe (pas d'éditeur libre) — voir le
-/// plan `eager-pondering-pony.md` §2. Choisi par `buildPosterLayout` selon
-/// le nombre de photos et le nombre de photos marquées "en vedette".
+/// Templates de collage pour le tirage à accrocher. 1 à 4 photos : gabarits
+/// fixes avec une photo "en vedette" possible. 5 photos et au-delà : grille
+/// qui s'adapte automatiquement au nombre exact de photos (voir
+/// `_adaptiveGridTiles`) — pas de palier fixe ni de plafond de design, voir
+/// `posterMaxPhotos` pour le seul plafond restant (pratique, pas visuel).
 library;
+
+import 'dart:math' show sqrt;
 
 enum PosterOrientation { portrait, landscape }
 
@@ -28,9 +31,12 @@ class PosterLayout {
   });
 }
 
-/// Cap dur : au-delà, pas de nouveau template — la sélection doit être
-/// bloquée en amont (voir poster_select_screen.dart).
-const int posterMaxPhotos = 6;
+/// Plafond pratique (pas un choix de design) : au-delà, une grille de photos
+/// devient illisible et le téléchargement/traitement de toutes les images à
+/// chaque étape (aperçu, contrôle qualité, PDF) devient lourd. En dessous de
+/// ce nombre, la grille (voir `_gridLayout`) s'adapte automatiquement à
+/// n'importe quel nombre de photos — pas de palier fixe comme avant.
+const int posterMaxPhotos = 20;
 
 /// Construit la disposition pour `photoCount` photos, `featured` étant
 /// l'ensemble des INDEX (dans la liste de photos) marqués "en vedette".
@@ -117,32 +123,36 @@ PosterLayout buildPosterLayout(int photoCount, Set<int> featured) {
     );
   }
 
-  // 5-6 photos : grille égale, la mise en avant est ignorée (message dédié
-  // côté UI — voir poster_generate_screen.dart).
-  if (photoCount == 5) {
-    return const PosterLayout(
-      tiles: [
-        PosterTile(0, 0, 1 / 3, 0.5, TileRole.small),
-        PosterTile(1 / 3, 0, 1 / 3, 0.5, TileRole.small),
-        PosterTile(2 / 3, 0, 1 / 3, 0.5, TileRole.small),
-        PosterTile(0, 0.5, 0.5, 0.5, TileRole.small),
-        PosterTile(0.5, 0.5, 0.5, 0.5, TileRole.small),
-      ],
-      orientation: PosterOrientation.portrait,
-      templateName: 'gridSmall',
-    );
-  }
-
-  return const PosterLayout(
-    tiles: [
-      PosterTile(0, 0, 1 / 3, 0.5, TileRole.small),
-      PosterTile(1 / 3, 0, 1 / 3, 0.5, TileRole.small),
-      PosterTile(2 / 3, 0, 1 / 3, 0.5, TileRole.small),
-      PosterTile(0, 0.5, 1 / 3, 0.5, TileRole.small),
-      PosterTile(1 / 3, 0.5, 1 / 3, 0.5, TileRole.small),
-      PosterTile(2 / 3, 0.5, 1 / 3, 0.5, TileRole.small),
-    ],
+  // 5 photos et au-delà : grille qui s'adapte au nombre exact de photos
+  // (pas de palier fixe) — la mise en avant est ignorée (message dédié côté
+  // UI, voir poster_generate_screen.dart). Plus il y a de photos, plus
+  // chaque case est petite — ce qui, via PosterQualityService, débloque
+  // souvent des formats plus grands qu'une seule photo plein cadre ne le
+  // permettrait (chaque case demande moins de pixels).
+  return PosterLayout(
+    tiles: _adaptiveGridTiles(photoCount),
     orientation: PosterOrientation.portrait,
     templateName: 'gridSmall',
   );
+}
+
+/// Grille égale adaptée à `n` photos : colonnes = ⌈√n⌉, lignes = ⌈n/colonnes⌉,
+/// la dernière ligne (éventuellement incomplète) répartit SES cases sur toute
+/// la largeur plutôt que de laisser un trou. Se réduit exactement aux anciens
+/// gabarits fixes pour n=5 (3+2) et n=6 (3×2) — généralisé à tout n>4.
+List<PosterTile> _adaptiveGridTiles(int n) {
+  final cols = sqrt(n).ceil();
+  final rows = (n / cols).ceil();
+  final tiles = <PosterTile>[];
+  var remaining = n;
+  for (var row = 0; row < rows; row++) {
+    final itemsInRow = remaining < cols ? remaining : cols;
+    final tileW = 1 / itemsInRow;
+    final tileH = 1 / rows;
+    for (var col = 0; col < itemsInRow; col++) {
+      tiles.add(PosterTile(col * tileW, row * tileH, tileW, tileH, TileRole.small));
+    }
+    remaining -= itemsInRow;
+  }
+  return tiles;
 }

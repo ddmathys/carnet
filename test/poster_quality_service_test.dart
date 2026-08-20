@@ -50,6 +50,33 @@ void main() {
       expect(buildPosterLayout(6, {}).tiles.length, 6);
       expect(buildPosterLayout(6, {}).templateName, 'gridSmall');
     });
+
+    test('grille adaptative : une case par photo, quel que soit n (pas de plafond de design)', () {
+      for (final n in [7, 8, 9, 12, 16, posterMaxPhotos]) {
+        final l = buildPosterLayout(n, {});
+        expect(l.tiles.length, n, reason: 'n=$n');
+        // Chaque ligne doit couvrir exactement toute la largeur (pas de trou).
+        final rows = <double, double>{}; // y -> somme des largeurs
+        for (final t in l.tiles) {
+          rows[t.y] = (rows[t.y] ?? 0) + t.w;
+        }
+        for (final sumW in rows.values) {
+          expect(sumW, closeTo(1.0, 1e-9), reason: 'n=$n');
+        }
+        // Les hauteurs de ligne couvrent exactement toute la hauteur.
+        final rowHeights = l.tiles.map((t) => t.h).toSet();
+        expect(rowHeights.length, 1, reason: 'n=$n : toutes les lignes ont la même hauteur');
+        expect(1.0 / rowHeights.first, closeTo(rows.length, 1e-9), reason: 'n=$n');
+      }
+    });
+
+    test('9 photos → grille carrée parfaite 3×3', () {
+      final l = buildPosterLayout(9, {});
+      for (final t in l.tiles) {
+        expect(t.w, closeTo(1 / 3, 1e-9));
+        expect(t.h, closeTo(1 / 3, 1e-9));
+      }
+    });
   });
 
   group('PosterQualityService.evaluate', () {
