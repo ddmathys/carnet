@@ -11,6 +11,7 @@ import '../../core/services/photo_service.dart';
 import '../../core/services/tag_service.dart';
 import '../../core/services/video_service.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
+import '../milestones/widgets/growth_multi_chart.dart';
 import '../tags/tag_picker_sheet.dart';
 
 /// Choix des souvenirs qui composeront le livre.
@@ -33,6 +34,9 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
   /// Filtre par tags (multi-sélection, même sélecteur que le dashboard).
   final Set<String> _filterLabels = {};
   final Set<String> _selected = {};
+  // Enfants dont la carte "Courbe de croissance" a été décochée — par défaut
+  // (absent d'ici) toute courbe disponible est incluse. Voir _growthGroups.
+  final Set<String> _excludedGrowthChildIds = {};
   List<TagModel> _tags = [];
   List<MemoryModel> _all = [];
   StreamSubscription? _tagsSub;
@@ -93,6 +97,30 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
       .where((m) => memoryMatchesTags(m, _selectedTags))
       .toList();
 
+  // Mesures taille/poids visibles, groupées par enfant (via le tagId enfant
+  // présent dans `tagIds` de la mesure) — un groupe par enfant ayant ≥2
+  // mesures, chacun devenant une carte "Courbe de croissance" sélectionnable.
+  List<({TagModel child, List<MemoryModel> measures})> get _growthGroups {
+    final childTags = _tags.where((t) => t.isChild).toList();
+    final byChildId = <String, List<MemoryModel>>{};
+    for (final m in _growthVisible) {
+      final childId = m.tagIds.firstWhere(
+        (id) => childTags.any((c) => c.id == id),
+        orElse: () => '',
+      );
+      if (childId.isEmpty) continue;
+      byChildId.putIfAbsent(childId, () => []).add(m);
+    }
+    return [
+      for (final entry in byChildId.entries)
+        if (entry.value.length >= 2)
+          (
+            child: childTags.firstWhere((c) => c.id == entry.key),
+            measures: entry.value,
+          ),
+    ];
+  }
+
   Future<void> _openFilter() async {
     final result = await showTagPickerSheet(
       context,
@@ -110,6 +138,32 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
         ..clear()
         ..addAll(_visible.map((m) => m.id));
     });
+  }
+
+  /// Une carte par enfant ayant assez de mesures — voir _growthGroups.
+  /// Cochée par défaut, alimente le chapitre croissance du livre (une pleine
+  /// page A4 par enfant retenu) sans jamais lister les mesures individuelles.
+  Widget _buildGrowthCards() {
+    final groups = _growthGroups;
+    if (groups.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        children: [
+          for (final g in groups)
+            _GrowthCard(
+              child: g.child,
+              measures: g.measures,
+              selected: !_excludedGrowthChildIds.contains(g.child.id),
+              onTap: () => setState(() {
+                if (!_excludedGrowthChildIds.remove(g.child.id)) {
+                  _excludedGrowthChildIds.add(g.child.id);
+                }
+              }),
+            ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -141,6 +195,7 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
           : Column(
               children: [
                 _buildFilterBar(),
+                _buildGrowthCards(),
                 if (visible.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 2, 12, 0),
@@ -243,10 +298,16 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
   }
 
   void _continue() {
-    // Les mesures taille/poids ne sont jamais cochées ici (invisibles dans
-    // cette liste), mais doivent quand même accompagner le livre pour
-    // alimenter le chapitre croissance — cf. _growthVisible.
-    final ids = {..._selected, ..._growthVisible.map((m) => m.id)}.join(',');
+    // Les mesures taille/poids ne sont jamais cochées une par une (invisibles
+    // dans la liste), mais accompagnent le livre par groupe entier (carte
+    // "Courbe de croissance" par enfant, cf. _growthGroups) pour alimenter
+    // le chapitre croissance de chaque enfant retenu.
+    final growthIds = <String>{
+      for (final g in _growthGroups)
+        if (!_excludedGrowthChildIds.contains(g.child.id))
+          for (final m in g.measures) m.id,
+    };
+    final ids = {..._selected, ...growthIds}.join(',');
     // Un seul tag coché → il donne le titre et la couleur de la couverture.
     final sole = _selectedTags.length == 1 ? _selectedTags.first : null;
     final tag = sole != null ? '&tag=${sole.id}' : '';
@@ -520,6 +581,99 @@ class _MemoryRow extends StatelessWidget {
                       ],
                     ),
                   ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Carte "Courbe de croissance" d'un enfant — représente le groupe complet de
+/// ses mesures taille/poids (jamais listées individuellement, cf.
+/// _MemoryRow) : cocher/décocher inclut ou exclut sa page récap du livre.
+class _GrowthCard extends StatelessWidget {
+  final TagModel child;
+  final List<MemoryModel> measures;
+  final bool selected;
+  final VoidCallback onTap;
+  const _GrowthCard({
+    required this.child,
+    required this.measures,
+    required this.selected,
+    required this.onTap,
+  });
+
+  // Montre la taille par défaut, le poids seulement si c'est la mesure la
+  // mieux renseignée (plus de points) — évite un aperçu vide si le parent
+  // n'a saisi que le poids.
+  bool get _showWeight {
+    final heights = measures.where((m) => m.heightCm != null).length;
+    final weights = measures.where((m) => m.weightKg != null).length;
+    return weights > heights;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: selected ? AppColors.sageDark : AppColors.border,
+            width: selected ? 1.2 : 0.5,
+          ),
+        ),
+        child: Row(
+          children: [
+            Icon(
+              selected ? Icons.check_circle : Icons.circle_outlined,
+              color: selected ? AppColors.sageDark : AppColors.softGray,
+              size: 22,
+            ),
+            const SizedBox(width: 12),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: Container(
+                width: 64,
+                height: 64,
+                color: AppColors.sageTint,
+                padding: const EdgeInsets.all(4),
+                child: GrowthMultiChart(
+                  notebook: child.asNotebook(),
+                  measures: measures,
+                  showWeight: _showWeight,
+                  compact: true,
+                  chartHeight: 56,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Courbe de croissance — ${child.label}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${measures.length} mesures · pleine page A4 dans le livre',
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMedium),
+                  ),
                 ],
               ),
             ),

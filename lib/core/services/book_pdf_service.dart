@@ -9,6 +9,7 @@ import '../models/notebook_model.dart';
 import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
+import '../models/tag_model.dart';
 import '../data/growth_data.dart';
 import 'photo_service.dart';
 import '../utils/date_precision.dart';
@@ -146,11 +147,11 @@ class BookPdfService {
     // pour la largeur exacte de couverture wraparound. Non requis si
     // padForPrint == false.
     String coverType = 'soft',
-    // Chapitre croissance (courbe OMS) : null = comportement auto historique
-    // (affiché dès que ≥2 mesures existent) ; true/false permet à l'utilisateur
-    // de forcer l'affichage/masquage explicitement — mais jamais affiché sans
-    // au moins 2 mesures, quel que soit ce paramètre.
-    bool? includeGrowthChapter,
+    // Chapitres croissance (courbe OMS) : un par tag enfant listé ici, à
+    // condition que `memories` contienne ≥2 de ses mesures taille/poids —
+    // permet plusieurs enfants dans un même livre (ex. "Mes souvenirs" non
+    // filtré par tag), chacun avec sa propre page pleine A4 en fin de livre.
+    List<TagModel> growthChildren = const [],
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -441,39 +442,48 @@ class BookPdfService {
 
     final pdfCover = _toPdf(coverColor);
 
-    // Page courbe de croissance (carnet enfant uniquement) : dès 2 mesures
-    // taille/poids, une page récap placée à la fin du livre (réf. OMS).
-    final growthMilestones = sorted
-        .where((m) =>
-            m.type == 'taille_poids' &&
-            (m.heightCm != null || m.weightKg != null))
-        .map((m) => MilestoneModel(
-              id: m.id,
-              childId: notebook.id,
-              type: 'taille_poids',
-              date: m.date,
-              rawContent: '',
-              createdAt: m.date,
-              weightKg: m.weightKg,
-              heightCm: m.heightCm,
-            ))
-        .toList();
-    final hasEnoughGrowthData =
-        notebook.type == 'enfant' && growthMilestones.length >= 2;
-    final hasGrowth = hasEnoughGrowthData && (includeGrowthChapter ?? true);
-    final childForGrowth = ChildModel(
-      id: notebook.id,
-      parentId: '',
-      firstName: notebook.title,
-      birthDate: notebook.birthdate ?? DateTime.now(),
-      animalId: notebook.companion ?? 'fox',
-      animalName: notebook.companionName ?? '',
-      coverColor: notebook.coverColor,
-      gender: notebook.gender ?? 'boy',
-    );
+    // Pages courbe de croissance : une par enfant de `growthChildren` dont
+    // les mesures taille/poids (identifiées par son tagId dans `tagIds`)
+    // atteignent 2 — placées à la fin du livre (réf. OMS), une pleine page
+    // A4 chacune.
+    final growthChapters = <({ChildModel child, List<MilestoneModel> milestones})>[];
+    for (final childTag in growthChildren) {
+      final milestones = sorted
+          .where((m) =>
+              m.type == 'taille_poids' &&
+              (m.heightCm != null || m.weightKg != null) &&
+              m.tagIds.contains(childTag.id))
+          .map((m) => MilestoneModel(
+                id: m.id,
+                childId: childTag.id,
+                type: 'taille_poids',
+                date: m.date,
+                rawContent: '',
+                createdAt: m.date,
+                weightKg: m.weightKg,
+                heightCm: m.heightCm,
+              ))
+          .toList();
+      if (milestones.length < 2) continue;
+      growthChapters.add((
+        child: ChildModel(
+          id: childTag.id,
+          parentId: '',
+          firstName: childTag.label,
+          birthDate: childTag.birthdate ?? DateTime.now(),
+          animalId: childTag.companion ?? 'fox',
+          animalName: childTag.companionName ?? '',
+          coverColor: childTag.color,
+          gender: childTag.gender ?? 'boy',
+        ),
+        milestones: milestones,
+      ));
+    }
 
-    final totalPages =
-        1 + photoPages.length + textOnlyMemories.length + (hasGrowth ? 1 : 0);
+    final totalPages = 1 +
+        photoPages.length +
+        textOnlyMemories.length +
+        growthChapters.length;
     final finalPageCount =
         !padForPrint ? totalPages : _validPageCount(coverType, totalPages);
     // A4 full-bleed — margins handled inside each widget
@@ -540,17 +550,18 @@ class BookPdfService {
         ));
       }
 
-      // 3b. Page courbe de croissance (enfant) — en fin de livre.
-      if (hasGrowth) {
+      // 3b. Pages courbe de croissance — une par enfant, en fin de livre.
+      for (int g = 0; g < growthChapters.length; g++) {
+        final chapter = growthChapters[g];
         doc.addPage(pw.Page(
           pageFormat: fmt,
           build: (_) => _growthPage(
-            child: childForGrowth,
-            milestones: growthMilestones,
+            child: chapter.child,
+            milestones: chapter.milestones,
             cover: pdfCover,
             pB: playfairB,
             dm: dmSans,
-            pageNum: 1 + photoPages.length + textOnlyMemories.length + 1,
+            pageNum: 1 + photoPages.length + textOnlyMemories.length + g + 1,
             total: totalPages,
           ),
         ));

@@ -13,6 +13,7 @@ import '../../core/config/app_config.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
+import '../../core/models/tag_model.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
@@ -63,6 +64,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // ── Data ───────────────────────────────────────────────────────────────────
   NotebookModel? _notebook;
   List<MemoryModel> _memories = [];
+  // Tous les tags visibles (miens + partagés) — sert uniquement à retrouver
+  // les tags enfant pour grouper les mesures taille/poids par enfant, voir
+  // _growthGroups. Chargé une fois avec le reste (_loadData).
+  List<TagModel> _allTags = [];
   String? _loadError; // message si le chargement initial échoue
 
   // ── State ──────────────────────────────────────────────────────────────────
@@ -71,9 +76,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
   bool _showPreview = false;
   String _coverType = 'soft'; // 'soft', 'hard' ou 'layflat'
-  // Chapitre croissance (courbe OMS) : coché par défaut dès que le livre a
-  // assez de données pour l'afficher (voir _hasGrowthData), décochable.
-  bool _includeGrowthChapter = true;
+  // Chapitre croissance (courbe OMS) : un par enfant ayant ≥2 mesures dans
+  // la sélection (voir _growthGroups), coché par défaut, décochable
+  // individuellement — id de tag enfant présent ici = exclu du livre.
+  final Set<String> _excludedGrowthChildIds = {};
   bool _generating = false;
   double _progress = 0.0;
   int _msgIndex = 0;
@@ -121,21 +127,43 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   List<MemoryModel> get _selectedMemories =>
       _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();
 
-  // Même seuil que BookPdfService::hasEnoughGrowthData (≥2 mesures taille ou
-  // poids) — sert à savoir si la case "chapitre croissance" a un sens à
-  // afficher pour ce livre.
-  bool get _hasGrowthData =>
-      _notebook?.type == 'enfant' &&
-      _selectedMemories
-              .where((m) =>
-                  m.type == 'taille_poids' &&
-                  (m.heightCm != null || m.weightKg != null))
-              .length >=
-          2;
+  // Mesures taille/poids de la sélection, groupées par enfant (identifié via
+  // le tagId présent dans `tagIds` de la mesure — cf. growth_screen.dart, qui
+  // pose toujours ce tag en premier à la création). Un groupe n'apparaît
+  // que dès 2 mesures — même seuil que BookPdfService.generateForNotebook.
+  // Permet plusieurs enfants dans un même livre (ex. "Mes souvenirs" sans
+  // filtre de tag), chacun avec sa propre carte et sa propre page.
+  List<({TagModel child, List<MemoryModel> measures})> get _growthGroups {
+    final childTags = _allTags.where((t) => t.isChild).toList();
+    final byChildId = <String, List<MemoryModel>>{};
+    for (final m in _selectedMemories) {
+      if (m.type != 'taille_poids') continue;
+      if (m.heightCm == null && m.weightKg == null) continue;
+      final childId = m.tagIds.firstWhere(
+        (id) => childTags.any((c) => c.id == id),
+        orElse: () => '',
+      );
+      if (childId.isEmpty) continue;
+      byChildId.putIfAbsent(childId, () => []).add(m);
+    }
+    return [
+      for (final entry in byChildId.entries)
+        if (entry.value.length >= 2)
+          (
+            child: childTags.firstWhere((c) => c.id == entry.key),
+            measures: entry.value,
+          ),
+    ];
+  }
+
+  List<TagModel> get _includedGrowthChildren => [
+        for (final g in _growthGroups)
+          if (!_excludedGrowthChildIds.contains(g.child.id)) g.child,
+      ];
 
   // Texte du bandeau "Souvenirs inclus" — les mesures taille/poids ne sont
-  // jamais comptées comme des souvenirs (voir _MemorySelectionSheet), le
-  // chapitre croissance est mentionné à part quand il s'applique.
+  // jamais comptées comme des souvenirs (voir _MemorySelectionSheet), les
+  // chapitres croissance inclus sont mentionnés à part, par enfant.
   String get _memorySelectionSummary {
     final total = _memories.where((m) => m.type != 'taille_poids').length;
     final selected =
@@ -143,8 +171,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     final base = selected == total
         ? 'Tous les souvenirs inclus ($total)'
         : '$selected souvenir${selected != 1 ? 's' : ''} sur $total inclus';
-    if (!_hasGrowthData || !_includeGrowthChapter) return base;
-    return '$base + courbe de croissance';
+    final included = _includedGrowthChildren;
+    if (included.isEmpty) return base;
+    final names = included.map((t) => t.label).join(', ');
+    return '$base + courbe de croissance ($names)';
   }
 
   // Photo la plus proche de chaque anniversaire (±30j), pour les mettre en
@@ -307,6 +337,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     try {
       // Les souvenirs retenus à l'écran de sélection, dans l'ordre chronologique.
       final visible = await MemoryQueryService.visible().first.timeout(t);
+      // Tags enfant, pour grouper les mesures taille/poids par enfant
+      // (chapitre croissance — voir _growthGroups). Best-effort : un échec
+      // ici prive juste le livre du chapitre croissance, rien de bloquant.
+      final tags = await TagService.visibleTags().timeout(t, onTimeout: () => const []);
       if (!mounted) return;
       final wanted = widget.memoryIds.toSet();
       final allMemories = visible
@@ -353,6 +387,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       setState(() {
         _notebook = nb;
         _memories = allMemories;
+        _allTags = tags;
         _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
         _coverPhotoUrl = defaultCover;
         _loadError = null;
@@ -454,7 +489,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
       backendUrl: AppConfig.backendUrl,
-      includeGrowthChapter: _hasGrowthData ? _includeGrowthChapter : null,
+      growthChildren: _includedGrowthChildren,
     ).timeout(const Duration(seconds: 180));
   }
 
@@ -618,7 +653,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         backendUrl: AppConfig.backendUrl,
         padForPrint: true, // pages valides imprimeur (pair, ≥24)
         coverType: _coverType, // largeur exacte de couverture wraparound
-        includeGrowthChapter: _hasGrowthData ? _includeGrowthChapter : null,
+        growthChildren: _includedGrowthChildren,
       );
       final pdfBytes = gen.bytes;
       final pageCount = gen.pageCount;
@@ -1580,7 +1615,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   bool _memoriesChangedInSheet = false;
 
   Future<void> _openMemorySelection() async {
-    final growthBefore = _includeGrowthChapter;
+    final growthBefore = Set<String>.from(_excludedGrowthChildIds);
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -1588,11 +1623,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       builder: (_) => _MemorySelectionSheet(
         memories: _memories,
         selectedIds: _selectedMemoryIds,
-        notebook: _notebook,
-        hasGrowthData: _hasGrowthData,
-        includeGrowthChapter: _includeGrowthChapter,
-        onGrowthChapterChanged: (v) =>
-            setState(() => _includeGrowthChapter = v),
+        growthGroups: _growthGroups,
+        excludedGrowthChildIds: _excludedGrowthChildIds,
+        onGrowthChildrenChanged: (excluded) => setState(() {
+          _excludedGrowthChildIds
+            ..clear()
+            ..addAll(excluded);
+        }),
         onChanged: (ids) => setState(() {
           _selectedMemoryIds = ids;
           // Reset cover photo if it no longer belongs to selected memories
@@ -1604,7 +1641,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         onMemoryUpdated: _applyMemoryLayoutUpdate,
       ),
     );
-    if (_memoriesChangedInSheet || growthBefore != _includeGrowthChapter) {
+    final growthChanged = growthBefore.length != _excludedGrowthChildIds.length ||
+        !growthBefore.containsAll(_excludedGrowthChildIds);
+    if (_memoriesChangedInSheet || growthChanged) {
       _memoriesChangedInSheet = false;
       await _generate();
     }
@@ -2466,26 +2505,23 @@ class _MemorySelectionSheet extends StatefulWidget {
   final Set<String> selectedIds;
   final ValueChanged<Set<String>> onChanged;
   final ValueChanged<MemoryModel> onMemoryUpdated;
-  // Chapitre croissance : représenté ici comme une carte à part (pas une
-  // ligne « souvenir » comme les autres — voir _visibleMemories) puisqu'il ne
-  // correspond à aucun souvenir individuel mais à une page récap générée à
-  // partir de TOUTES les mesures taille/poids.
-  final bool hasGrowthData;
-  final bool includeGrowthChapter;
-  final ValueChanged<bool> onGrowthChapterChanged;
-  // Nécessaire pour prévisualiser la courbe (genre, date de naissance) — voir
-  // GrowthMultiChart, qui rend la MÊME courbe que la page Croissance.
-  final NotebookModel? notebook;
+  // Chapitres croissance : un par enfant, représentés ici comme des cartes à
+  // part (pas une ligne « souvenir » comme les autres — voir
+  // _visibleMemories) puisqu'ils ne correspondent à aucun souvenir individuel
+  // mais à une page récap générée à partir des mesures taille/poids DE CET
+  // ENFANT (childTag.id présent dans les tagIds des mesures).
+  final List<({TagModel child, List<MemoryModel> measures})> growthGroups;
+  final Set<String> excludedGrowthChildIds;
+  final ValueChanged<Set<String>> onGrowthChildrenChanged;
 
   const _MemorySelectionSheet({
     required this.memories,
     required this.selectedIds,
     required this.onChanged,
     required this.onMemoryUpdated,
-    required this.hasGrowthData,
-    required this.includeGrowthChapter,
-    required this.onGrowthChapterChanged,
-    required this.notebook,
+    required this.growthGroups,
+    required this.excludedGrowthChildIds,
+    required this.onGrowthChildrenChanged,
   });
 
   @override
@@ -2494,7 +2530,7 @@ class _MemorySelectionSheet extends StatefulWidget {
 
 class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   late Set<String> _local;
-  late bool _growthIncluded;
+  late Set<String> _excludedGrowth;
   // Souvenirs patchés localement après ajout de photos (mediaKeys à jour) —
   // widget.memories n'est reçu qu'une fois à l'ouverture de la sheet, donc on
   // superpose ces versions pour que le compteur/bouton "Mise en page" reflètent
@@ -2506,26 +2542,23 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
   void initState() {
     super.initState();
     _local = Set.from(widget.selectedIds);
-    _growthIncluded = widget.includeGrowthChapter;
+    _excludedGrowth = Set.from(widget.excludedGrowthChildIds);
   }
 
   // Les mesures taille/poids ne sont pas des souvenirs qu'on coche/décoche
-  // une par une ici — seule la carte "Courbe de croissance" (globale)
-  // représente ce chapitre. Elles restent dans `_local` (jamais retirées par
-  // « Tout cocher/décocher », qui n'agit que sur cette liste visible) pour
-  // continuer d'alimenter la courbe même si l'utilisateur ne les voit jamais.
+  // une par une ici — seules les cartes "Courbe de croissance" (une par
+  // enfant) représentent ce chapitre. Elles restent dans `_local` (jamais
+  // retirées par « Tout cocher/décocher », qui n'agit que sur cette liste
+  // visible) pour continuer d'alimenter les courbes même invisibles ici.
   List<MemoryModel> get _visibleMemories =>
       widget.memories.where((m) => m.type != 'taille_poids').toList();
 
-  List<MemoryModel> get _growthMeasures =>
-      widget.memories.where((m) => m.type == 'taille_poids').toList();
-
-  // Aperçu : montre la taille par défaut, le poids seulement si c'est la
-  // mesure la mieux renseignée (plus de points) — évite un aperçu vide si le
-  // parent n'a saisi que le poids.
-  bool get _growthShowWeight {
-    final heights = _growthMeasures.where((m) => m.heightCm != null).length;
-    final weights = _growthMeasures.where((m) => m.weightKg != null).length;
+  // Aperçu d'un groupe : montre la taille par défaut, le poids seulement si
+  // c'est la mesure la mieux renseignée (plus de points) — évite un aperçu
+  // vide si le parent n'a saisi que le poids.
+  bool _growthShowWeight(List<MemoryModel> measures) {
+    final heights = measures.where((m) => m.heightCm != null).length;
+    final weights = measures.where((m) => m.weightKg != null).length;
     return weights > heights;
   }
 
@@ -2740,13 +2773,16 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
               ),
             ),
             const Divider(height: 1, color: Color(0xFFEEEBE3)),
-            if (widget.hasGrowthData) ...[
+            for (final g in widget.growthGroups)
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
                 child: InkWell(
                   borderRadius: BorderRadius.circular(10),
-                  onTap: () =>
-                      setState(() => _growthIncluded = !_growthIncluded),
+                  onTap: () => setState(() {
+                    if (!_excludedGrowth.remove(g.child.id)) {
+                      _excludedGrowth.add(g.child.id);
+                    }
+                  }),
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -2761,18 +2797,18 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                           width: 22,
                           height: 22,
                           decoration: BoxDecoration(
-                            color: _growthIncluded
+                            color: !_excludedGrowth.contains(g.child.id)
                                 ? AppColors.sage
                                 : AppColors.surface,
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: _growthIncluded
+                              color: !_excludedGrowth.contains(g.child.id)
                                   ? AppColors.sage
                                   : const Color(0xFFCCC8BE),
                               width: 1.5,
                             ),
                           ),
-                          child: _growthIncluded
+                          child: !_excludedGrowth.contains(g.child.id)
                               ? const Icon(Icons.check,
                                   size: 14, color: Colors.white)
                               : null,
@@ -2785,17 +2821,13 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                             height: 56,
                             color: AppColors.surface,
                             padding: const EdgeInsets.all(4),
-                            child: widget.notebook != null &&
-                                    _growthMeasures.isNotEmpty
-                                ? GrowthMultiChart(
-                                    notebook: widget.notebook!,
-                                    measures: _growthMeasures,
-                                    showWeight: _growthShowWeight,
-                                    compact: true,
-                                    chartHeight: 48,
-                                  )
-                                : const Icon(Icons.show_chart_rounded,
-                                    color: AppColors.sage, size: 22),
+                            child: GrowthMultiChart(
+                              notebook: g.child.asNotebook(),
+                              measures: g.measures,
+                              showWeight: _growthShowWeight(g.measures),
+                              compact: true,
+                              chartHeight: 48,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -2804,10 +2836,7 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                widget.notebook != null
-                                    ? 'Courbe de croissance — '
-                                        '${widget.notebook!.title}'
-                                    : 'Courbe de croissance',
+                                'Courbe de croissance — ${g.child.label}',
                                 style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
@@ -2815,7 +2844,7 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                               ),
                               const SizedBox(height: 2),
                               const Text(
-                                'Générée depuis tes mesures de la page '
+                                'Générée depuis les mesures de la page '
                                 'Croissance — occupe une pleine page A4 dans '
                                 'le livre.',
                                 style: TextStyle(
@@ -2831,7 +2860,7 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                   ),
                 ),
               ),
-            ],
+            if (widget.growthGroups.isNotEmpty) const SizedBox(height: 4),
             // Memory list
             Expanded(
               child: ListView.builder(
@@ -3073,11 +3102,14 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                   SizedBox(
                     width: double.infinity,
                     child: ElevatedButton(
-                      onPressed: _visibleSelectedCount == 0 && !_growthIncluded
+                      onPressed: _visibleSelectedCount == 0 &&
+                              widget.growthGroups.every(
+                                  (g) => _excludedGrowth.contains(g.child.id))
                           ? null
                           : () {
                               widget.onChanged(Set.from(_local));
-                              widget.onGrowthChapterChanged(_growthIncluded);
+                              widget.onGrowthChildrenChanged(
+                                  Set.from(_excludedGrowth));
                               Navigator.pop(context);
                             },
                       child: Text(
