@@ -2060,13 +2060,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// d'en sélectionner deux par erreur (un seul tag enfant a de sens ici).
   Widget _buildChildSelector() {
     final childTags = _allTags.where((t) => t.isChild).toList();
-    if (childTags.isEmpty) {
-      return Text(
-        'Crée d\'abord un tag enfant (bouton "+" dans Mes tags) pour pouvoir '
-        'relier une mesure à sa courbe de croissance.',
-        style: TextStyle(color: AppColors.error, fontSize: 12),
-      );
-    }
     return Wrap(
       spacing: 8,
       runSpacing: 8,
@@ -2096,8 +2089,48 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                       : AppColors.border),
             ),
           ),
+        ActionChip(
+          avatar: const Icon(Icons.add, size: 15, color: AppColors.sage),
+          label: const Text('Ajouter un enfant'),
+          onPressed: _addChildTag,
+          backgroundColor: AppColors.background,
+          labelStyle: const TextStyle(
+              fontSize: 12,
+              color: AppColors.sage,
+              fontWeight: FontWeight.w600),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(50),
+            side: const BorderSide(color: AppColors.sage),
+          ),
+        ),
       ],
     );
+  }
+
+  /// Crée un tout nouveau tag enfant (nom + date de naissance + genre) quand
+  /// aucun n'existe encore — sans ça, la seule façon d'en obtenir un était la
+  /// migration d'un ancien carnet enfant, jamais accessible depuis l'UI.
+  Future<void> _addChildTag() async {
+    final result = await showModalBottomSheet<
+        ({String name, DateTime birthdate, String gender})>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const _AddChildSheet(),
+    );
+    if (result == null || !mounted) return;
+    final tag = await TagService.createChildTag(
+      label: result.name,
+      birthdate: result.birthdate,
+      gender: result.gender,
+    );
+    if (tag == null || !mounted) return;
+    setState(() {
+      _allTags = [..._allTags, tag];
+      _tagLabels.removeWhere(
+          (l) => _allTags.any((x) => x.isChild && x.label == l));
+      _tagLabels.add(tag.label);
+    });
   }
 
   Widget _buildTaillePoidsForm() {
@@ -3007,6 +3040,155 @@ class _SaveButton extends StatelessWidget {
           ),
         ],
       ],
+    );
+  }
+}
+
+/// Petite feuille de création d'un tag enfant — nom, date de naissance et
+/// genre, les trois nécessaires pour qu'une courbe de croissance existe
+/// (âge en mois = date de la mesure − date de naissance, courbe OMS choisie
+/// selon le genre).
+class _AddChildSheet extends StatefulWidget {
+  const _AddChildSheet();
+
+  @override
+  State<_AddChildSheet> createState() => _AddChildSheetState();
+}
+
+class _AddChildSheetState extends State<_AddChildSheet> {
+  final _nameCtrl = TextEditingController();
+  DateTime? _birthdate;
+  String _gender = 'boy';
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  bool get _valid => _nameCtrl.text.trim().isNotEmpty && _birthdate != null;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(bottom: 16),
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppColors.softGray.withOpacity(0.5),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Text(
+              'Ajouter un enfant',
+              style: TextStyle(
+                fontFamily: 'PlayfairDisplay',
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: AppColors.textDark,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Nom et date de naissance servent à calculer son âge sur la '
+              'courbe de croissance.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 12),
+            ),
+            const SizedBox(height: 18),
+            TextField(
+              controller: _nameCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(labelText: 'Prénom'),
+              onChanged: (_) => setState(() {}),
+            ),
+            const SizedBox(height: 14),
+            DateMaskField(
+              label: 'Date de naissance',
+              firstDate: DateTime(2000),
+              lastDate: DateTime.now(),
+              onChanged: (d) => setState(() => _birthdate = d),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _GenderChip(
+                    label: '👦 Garçon',
+                    selected: _gender == 'boy',
+                    onTap: () => setState(() => _gender = 'boy'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _GenderChip(
+                    label: '👧 Fille',
+                    selected: _gender == 'girl',
+                    onTap: () => setState(() => _gender = 'girl'),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: _valid
+                  ? () => Navigator.pop(context, (
+                        name: _nameCtrl.text.trim(),
+                        birthdate: _birthdate!,
+                        gender: _gender,
+                      ))
+                  : null,
+              child: const Text('Ajouter'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _GenderChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _GenderChip(
+      {required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? AppColors.sage : AppColors.background,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(
+              color: selected ? AppColors.sage : AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : AppColors.textDark,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ),
     );
   }
 }

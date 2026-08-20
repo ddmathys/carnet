@@ -135,6 +135,36 @@ class TagService {
     return TagModel.fromFirestore(doc);
   }
 
+  /// Crée un nouveau tag enfant — nom, date de naissance et genre, requis dès
+  /// la création : contrairement à [ensureTag], un tag enfant sans date de
+  /// naissance ne peut alimenter aucune courbe de croissance (âge en mois
+  /// incalculable). C'est la seule façon de démarrer un suivi pour un enfant
+  /// qui n'a pas encore de tag (la date de naissance n'était jusqu'ici écrite
+  /// que par la migration des anciens carnets enfant, jamais depuis l'UI).
+  static Future<TagModel?> createChildTag({
+    required String label,
+    required DateTime birthdate,
+    required String gender,
+  }) async {
+    final uid = _uid;
+    final clean = label.trim();
+    if (uid == null || clean.isEmpty) return null;
+
+    final tag = TagModel(
+      id: '',
+      userId: uid,
+      label: clean,
+      kind: 'enfant',
+      color: _colorFor(clean),
+      birthdate: birthdate,
+      gender: gender,
+      createdAt: DateTime.now(),
+    );
+    final ref = await _col.add(tag.toFirestore());
+    final doc = await ref.get();
+    return TagModel.fromFirestore(doc);
+  }
+
   /// Tags posés d'office sur un nouveau souvenir : l'année et le lieu.
   /// L'utilisateur peut les retirer ensuite comme n'importe quel autre tag.
   static Future<List<TagModel>> autoTags({

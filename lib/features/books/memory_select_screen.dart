@@ -78,8 +78,20 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
   List<TagModel> get _selectedTags =>
       [for (final t in _tags) if (_filterLabels.contains(t.label)) t];
 
-  List<MemoryModel> get _visible =>
-      _all.where((m) => memoryMatchesTags(m, _selectedTags)).toList();
+  // Les mesures taille/poids ne sont pas des souvenirs qu'on choisit ici —
+  // elles se gèrent uniquement depuis la page Croissance. Elles restent
+  // néanmoins automatiquement transmises au livre (voir _continue) pour que
+  // le chapitre croissance continue de s'alimenter sans que l'utilisateur
+  // ait à les cocher lui-même.
+  List<MemoryModel> get _visible => _all
+      .where((m) => m.type != 'taille_poids')
+      .where((m) => memoryMatchesTags(m, _selectedTags))
+      .toList();
+
+  List<MemoryModel> get _growthVisible => _all
+      .where((m) => m.type == 'taille_poids')
+      .where((m) => memoryMatchesTags(m, _selectedTags))
+      .toList();
 
   Future<void> _openFilter() async {
     final result = await showTagPickerSheet(
@@ -231,7 +243,10 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
   }
 
   void _continue() {
-    final ids = _selected.join(',');
+    // Les mesures taille/poids ne sont jamais cochées ici (invisibles dans
+    // cette liste), mais doivent quand même accompagner le livre pour
+    // alimenter le chapitre croissance — cf. _growthVisible.
+    final ids = {..._selected, ..._growthVisible.map((m) => m.id)}.join(',');
     // Un seul tag coché → il donne le titre et la couleur de la couverture.
     final sole = _selectedTags.length == 1 ? _selectedTags.first : null;
     final tag = sole != null ? '&tag=${sole.id}' : '';

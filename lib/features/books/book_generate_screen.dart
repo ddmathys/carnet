@@ -2799,19 +2799,22 @@ class _MemorySelectionSheetState extends State<_MemorySelectionSheet> {
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Expanded(
+                        Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                'Courbe de croissance',
-                                style: TextStyle(
+                                widget.notebook != null
+                                    ? 'Courbe de croissance — '
+                                        '${widget.notebook!.title}'
+                                    : 'Courbe de croissance',
+                                style: const TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
                                     color: AppColors.textDark),
                               ),
-                              SizedBox(height: 2),
-                              Text(
+                              const SizedBox(height: 2),
+                              const Text(
                                 'Générée depuis tes mesures de la page '
                                 'Croissance — occupe une pleine page A4 dans '
                                 'le livre.',
