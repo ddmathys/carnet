@@ -404,7 +404,10 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                   // Adresse
                   Text('📍 ${o.fullAddress}',
                     style: const TextStyle(fontSize: 13, color: AppColors.textMedium)),
-                  Text('${o.coverType == 'hard' ? 'Couverture rigide' : 'Couverture souple'} · ${o.memoryCount} souvenirs',
+                  Text(
+                    o.isPoster
+                        ? 'Poster ${o.posterSize ?? ''} · ${o.posterOrientation == 'landscape' ? 'paysage' : 'portrait'} · ${o.posterHangerColor ?? ''}'
+                        : '${o.coverType == 'hard' ? 'Couverture rigide' : 'Couverture souple'} · ${o.memoryCount} souvenirs',
                     style: const TextStyle(fontSize: 13, color: AppColors.textMedium)),
                   const SizedBox(height: 14),
 
@@ -571,8 +574,9 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
             child: ElevatedButton.icon(
               onPressed: (!canSend || !o.canRetryPrint)
                   ? null
-                  : () => context.push(
-                      '/book/select?tag=${o.notebookId}&editOrder=${o.id}'),
+                  : () => context.push(o.isPoster
+                      ? '/poster/select?editOrder=${o.id}'
+                      : '/book/select?tag=${o.notebookId}&editOrder=${o.id}'),
               icon: const Icon(Icons.edit_outlined, size: 18),
               label: const Text('Modifier le livre et renvoyer'),
               style: ElevatedButton.styleFrom(backgroundColor: AppColors.amber),

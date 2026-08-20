@@ -5,6 +5,15 @@ import { db } from '../../lib/firebase'
 import { ADMIN_EMAIL } from '../../lib/resend'
 import { refreshProdigiOrderStatus, notifyAdminOfError, PRODIGI_API_URL } from '../../lib/prodigi'
 import { computePrice, printablePages, type CoverType } from '../../lib/pricing'
+import {
+  posterCatalogEntry,
+  computePosterPrice,
+  isPosterSize,
+  isPosterOrientation,
+  isPosterHangerColor,
+  type PosterSize,
+  type PosterOrientation,
+} from '../../lib/poster_pricing'
 
 // Route dynamique regroupant les endpoints Prodigi en UNE seule fonction
 // serverless (le plan Hobby de Vercel plafonne à 12 fonctions). URLs :
@@ -161,11 +170,38 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     return res.status(400).json({ error: 'Commande sans PDF (pdfUrl manquant)' })
   }
 
-  const orderCoverType: CoverType =
-    o.coverType === 'hard' || o.coverType === 'layflat' ? o.coverType : 'soft'
-  const { sku, envName } = skuFor(orderCoverType)
-  if (!sku) {
-    return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
+  const isPoster = o.productType === 'poster'
+
+  let item: Record<string, any>
+  if (isPoster) {
+    if (!isPosterSize(o.posterSize) || !isPosterOrientation(o.posterOrientation)) {
+      return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur la commande' })
+    }
+    const entry = posterCatalogEntry(o.posterSize, o.posterOrientation)
+    if (!entry) {
+      return res.status(400).json({ error: `Aucun SKU poster pour ${o.posterSize}/${o.posterOrientation}` })
+    }
+    const color = isPosterHangerColor(o.posterHangerColor) ? o.posterHangerColor : 'natural'
+    item = {
+      sku: entry.sku,
+      copies: 1,
+      sizing: 'fillPrintArea',
+      attributes: { color },
+      assets: [{ printArea: 'default', url: pdfUrl }],
+    }
+  } else {
+    const orderCoverType: CoverType =
+      o.coverType === 'hard' || o.coverType === 'layflat' ? o.coverType : 'soft'
+    const { sku, envName } = skuFor(orderCoverType)
+    if (!sku) {
+      return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
+    }
+    item = {
+      sku,
+      copies: 1,
+      sizing: 'fillPrintArea',
+      assets: [{ printArea: 'default', url: pdfUrl, pageCount }],
+    }
   }
 
   const payload = {
@@ -180,20 +216,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
         townOrCity: String(o.city ?? ''),
       },
     },
-    items: [
-      {
-        sku,
-        copies: 1,
-        sizing: 'fillPrintArea',
-        assets: [
-          {
-            printArea: 'default',
-            url: pdfUrl,
-            pageCount,
-          },
-        ],
-      },
-    ],
+    items: [item],
   }
 
   // Champs communs mis à jour dans Firestore quel que soit le résultat de
@@ -266,28 +289,56 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
       .json({ error: 'Prodigi non configuré (PRODIGI_API_KEY manquante)' })
   }
 
-  const { coverType, pageCount, country, shippingMethod } = (req.body ?? {}) as {
+  const {
+    productType,
+    coverType,
+    pageCount,
+    country,
+    shippingMethod,
+    posterSize,
+    posterOrientation,
+  } = (req.body ?? {}) as {
+    productType?: string
     coverType?: string
     pageCount?: number
     country?: string
     shippingMethod?: string
-  }
-  if (coverType !== 'soft' && coverType !== 'hard' && coverType !== 'layflat') {
-    return res.status(400).json({ error: 'coverType doit être "soft", "hard" ou "layflat"' })
-  }
-  if (!Number.isFinite(pageCount) || (pageCount as number) <= 0) {
-    return res.status(400).json({ error: 'pageCount invalide' })
+    posterSize?: string
+    posterOrientation?: string
   }
 
-  const { sku, envName } = skuFor(coverType)
-  if (!sku) {
-    return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
-  }
+  const isPoster = productType === 'poster'
+  let sku: string | undefined
+  let localPrintedPages: number | undefined
+  let localPriceChf: number | null = null
 
-  // Même règle de pagination que pour une vraie commande (pair, bornes
-  // produit) — c'est CE nombre-là, pas le brut, qui sera facturé/imprimé.
-  const localPrintedPages = printablePages(coverType as CoverType, pageCount as number)
-  const localPriceChf = computePrice(coverType as CoverType, pageCount as number)
+  if (isPoster) {
+    if (!isPosterSize(posterSize) || !isPosterOrientation(posterOrientation)) {
+      return res.status(400).json({ error: 'posterSize/posterOrientation invalide' })
+    }
+    const entry = posterCatalogEntry(posterSize as PosterSize, posterOrientation as PosterOrientation)
+    if (!entry) {
+      return res.status(400).json({ error: `Aucun SKU poster pour ${posterSize}/${posterOrientation}` })
+    }
+    sku = entry.sku
+    localPriceChf = computePosterPrice(posterSize as PosterSize, posterOrientation as PosterOrientation)
+  } else {
+    if (coverType !== 'soft' && coverType !== 'hard' && coverType !== 'layflat') {
+      return res.status(400).json({ error: 'coverType doit être "soft", "hard" ou "layflat"' })
+    }
+    if (!Number.isFinite(pageCount) || (pageCount as number) <= 0) {
+      return res.status(400).json({ error: 'pageCount invalide' })
+    }
+    const resolved = skuFor(coverType)
+    if (!resolved.sku) {
+      return res.status(503).json({ error: `SKU Prodigi manquant (env ${resolved.envName})` })
+    }
+    sku = resolved.sku
+    // Même règle de pagination que pour une vraie commande (pair, bornes
+    // produit) — c'est CE nombre-là, pas le brut, qui sera facturé/imprimé.
+    localPrintedPages = printablePages(coverType as CoverType, pageCount as number)
+    localPriceChf = computePrice(coverType as CoverType, pageCount as number)
+  }
 
   const payload = {
     // Comparaison de méthode d'envoi (débogage prix admin) — 'Standard' par
@@ -300,11 +351,9 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     // un vrai changement de tarif Prodigi, pas juste le taux de change.
     currencyCode: 'USD',
     items: [
-      {
-        sku,
-        copies: 1,
-        assets: [{ printArea: 'default', pageCount: localPrintedPages }],
-      },
+      isPoster
+        ? { sku, copies: 1, assets: [{ printArea: 'default' }] }
+        : { sku, copies: 1, assets: [{ printArea: 'default', pageCount: localPrintedPages }] },
     ],
   }
 

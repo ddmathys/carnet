@@ -47,7 +47,11 @@ class OrderService {
       try {
         final r2Key = PdfService.keyFromUrl(url);
         if (r2Key != null) {
-          await PdfService.deleteBookPdf(r2Key);
+          if (order.isPoster) {
+            await PdfService.deletePosterPdf(r2Key);
+          } else {
+            await PdfService.deleteBookPdf(r2Key);
+          }
         } else {
           await FirebaseStorage.instance.refFromURL(url).delete();
         }

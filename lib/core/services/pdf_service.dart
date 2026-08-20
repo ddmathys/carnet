@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -21,13 +20,21 @@ class PdfUploadResult {
 /// peut survenir bien après la commande — une URL signée aurait expiré.
 class PdfService {
   /// Envoie le PDF sur R2. Retourne sa clé + son URL stable, ou null si échec.
-  static Future<PdfUploadResult?> uploadBookPdf(Uint8List bytes) async {
+  static Future<PdfUploadResult?> uploadBookPdf(Uint8List bytes) =>
+      _uploadPdf(bytes, action: 'book-upload-url');
+
+  /// Même chose pour un poster (préfixe R2 `posters/` au lieu de `books/`).
+  static Future<PdfUploadResult?> uploadPosterPdf(Uint8List bytes) =>
+      _uploadPdf(bytes, action: 'poster-upload-url');
+
+  static Future<PdfUploadResult?> _uploadPdf(Uint8List bytes,
+      {required String action}) async {
     try {
       final token = await FirebaseAuth.instance.currentUser?.getIdToken();
       if (token == null) return null;
       final signRes = await http
           .post(
-            Uri.parse('${AppConfig.backendUrl}/api/video/book-upload-url'),
+            Uri.parse('${AppConfig.backendUrl}/api/video/$action'),
             headers: {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
@@ -36,7 +43,7 @@ class PdfService {
           )
           .timeout(const Duration(seconds: 30));
       if (signRes.statusCode != 200) {
-        debugPrint('PdfService: book-upload-url ${signRes.statusCode}');
+        debugPrint('PdfService: $action ${signRes.statusCode}');
         return null;
       }
       final data = jsonDecode(signRes.body) as Map<String, dynamic>;
@@ -68,7 +75,9 @@ class PdfService {
     if (url == null || url.isEmpty) return null;
     try {
       final key = Uri.parse(url).queryParameters['key'];
-      return (key != null && key.startsWith('books/')) ? key : null;
+      return (key != null && (key.startsWith('books/') || key.startsWith('posters/')))
+          ? key
+          : null;
     } catch (_) {
       return null;
     }
@@ -76,16 +85,23 @@ class PdfService {
 
   /// Supprime un PDF de R2 (ignore les erreurs : l'entrée d'historique, elle,
   /// est déjà partie).
-  static Future<void> deleteBookPdf(String? keyOrUrl) async {
-    final key = (keyOrUrl != null && keyOrUrl.startsWith('books/'))
+  static Future<void> deleteBookPdf(String? keyOrUrl) =>
+      _deletePdf(keyOrUrl, prefix: 'books/', action: 'book-delete');
+
+  static Future<void> deletePosterPdf(String? keyOrUrl) =>
+      _deletePdf(keyOrUrl, prefix: 'posters/', action: 'poster-delete');
+
+  static Future<void> _deletePdf(String? keyOrUrl,
+      {required String prefix, required String action}) async {
+    final key = (keyOrUrl != null && keyOrUrl.startsWith(prefix))
         ? keyOrUrl
         : keyFromUrl(keyOrUrl);
-    if (key == null) return;
+    if (key == null || !key.startsWith(prefix)) return;
     try {
       final token = await FirebaseAuth.instance.currentUser?.getIdToken();
       if (token == null) return;
       await http.post(
-        Uri.parse('${AppConfig.backendUrl}/api/video/book-delete'),
+        Uri.parse('${AppConfig.backendUrl}/api/video/$action'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',

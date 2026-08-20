@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomUUID } from 'crypto'
-import { requireAuth } from '../../lib/verify'
+import { requireAuth, escapeHtml } from '../../lib/verify'
+import { db } from '../../lib/firebase'
 import {
   presignPut,
   presignGet,
@@ -15,7 +16,8 @@ import {
   photoKeysOf,
   audioKeyOf,
 } from '../../lib/access'
-import { migrateLegacyMedia } from '../../lib/migrate'
+import { migrateLegacyMedia, migrateLegacyMediaAll } from '../../lib/migrate'
+import { ADMIN_EMAIL } from '../../lib/resend'
 
 // La migration des médias travaille par lots : on lui laisse le temps d'un lot.
 export const config = { maxDuration: 60 }
@@ -53,7 +55,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // clé signée ne permet pas d'en deviner une autre.
     const key = (req.query.key ?? '') as string
     const sig = (req.query.sig ?? '') as string
-    if (!key.startsWith('books/') || !verifyKeySignature(key, sig)) {
+    const allowedPrefix = key.startsWith('books/') || key.startsWith('posters/')
+    if (!allowedPrefix || !verifyKeySignature(key, sig)) {
       return res.status(403).send('Lien invalide')
     }
     try {
@@ -62,6 +65,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.redirect(302, url)
     } catch {
       return res.status(404).send('PDF introuvable')
+    }
+  }
+
+  if (action === 'poster-video-reel') {
+    // PUBLIC par construction : c'est l'URL encodée dans le QR code imprimé
+    // sur le poster — pas de compte carnet côté visiteur. Le reelId fait
+    // office de capacité non-devinable (même principe que listen.ts), lu
+    // dans un document `posterReels` séparé des commandes (créé AVANT la
+    // commande elle-même, voir `poster-reel-create` ci-dessous : le QR doit
+    // déjà être imprimé dans le PDF avant qu'un orderId existe).
+    const reelId = (req.query.o ?? '') as string
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader('Cache-Control', 'public, max-age=300')
+
+    if (!reelId) {
+      return res.status(400).send(reelPage('Lien invalide', '<p>Identifiant manquant.</p>'))
+    }
+    try {
+      const reelSnap = await db.collection('posterReels').doc(reelId).get()
+      if (!reelSnap.exists) {
+        return res.status(404).send(reelPage('Introuvable', '<p>Ce poster n’a plus de vidéos associées.</p>'))
+      }
+      const reel = reelSnap.data() as Record<string, unknown>
+      const memoryIds = Array.isArray(reel.memoryIds)
+        ? (reel.memoryIds as unknown[]).filter((x): x is string => typeof x === 'string')
+        : []
+
+      const videos: { title: string; url: string }[] = []
+      for (const memoryId of memoryIds) {
+        const memSnap = await db.collection('memories').doc(memoryId).get()
+        if (!memSnap.exists) continue
+        const mem = memSnap.data() as Record<string, unknown>
+        const title = typeof mem.title === 'string' ? mem.title : ''
+        for (const key of videoKeysOf(mem)) {
+          const url = await presignGet(key, 3600)
+          videos.push({ title, url })
+        }
+      }
+
+      if (videos.length === 0) {
+        return res.status(404).send(reelPage('Pas encore de vidéo', '<p>Aucune vidéo n’est associée à ce poster pour l’instant.</p>'))
+      }
+
+      const body = videos
+        .map(
+          (v) => `
+        ${v.title ? `<p class="reelTitle">${escapeHtml(v.title)}</p>` : ''}
+        <video controls preload="metadata" src="${escapeHtml(v.url)}"></video>
+      `
+        )
+        .join('')
+      return res.status(200).send(reelPage('Souvenirs en vidéo', body))
+    } catch {
+      return res.status(500).send(reelPage('Erreur', '<p>Impossible de charger les vidéos pour l’instant.</p>'))
     }
   }
 
@@ -244,6 +301,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ── PDF des posters (même infra que les livres, préfixe R2 différent) ────
+  if (action === 'poster-upload-url') {
+    const key = `posters/${user.uid}/${randomUUID()}.pdf`
+    try {
+      const uploadUrl = await presignPut(key, 'application/pdf')
+      return res.status(200).json({
+        uploadUrl,
+        key,
+        contentType: 'application/pdf',
+        url: stablePdfUrl(req, key),
+      })
+    } catch {
+      return res.status(500).json({ error: 'Signature impossible' })
+    }
+  }
+
+  if (action === 'poster-delete') {
+    const key = (body.key ?? '') as string
+    if (!key || !key.startsWith(`posters/${user.uid}/`)) {
+      return res.status(403).json({ error: 'Clé invalide' })
+    }
+    try {
+      await deleteObject(key)
+      return res.status(200).json({ ok: true })
+    } catch {
+      return res.status(500).json({ error: 'Suppression impossible' })
+    }
+  }
+
+  // ── "Reel" vidéo public d'un poster (cible du QR imprimé) ─────────────────
+  if (action === 'poster-reel-create') {
+    // Créé AVANT la commande (et avant même le paiement) : le QR doit déjà
+    // être imprimé dans le PDF au moment où on génère celui-ci, alors que
+    // l'orderId n'existe pas encore. Un reel orphelin (poster jamais commandé)
+    // est inoffensif — juste un petit doc Firestore qui ne sert jamais.
+    const memoryIds = Array.isArray(body.memoryIds)
+      ? (body.memoryIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : []
+    if (memoryIds.length === 0) {
+      return res.status(400).json({ error: 'memoryIds manquant' })
+    }
+    for (const memoryId of memoryIds) {
+      const mem = await memoryIfMember(memoryId, user.uid, user.email)
+      if (!mem) return res.status(403).json({ error: `Accès refusé au souvenir ${memoryId}` })
+    }
+    const reelId = randomUUID()
+    await db.collection('posterReels').doc(reelId).set({
+      userId: user.uid,
+      memoryIds,
+      createdAt: new Date(),
+    })
+    return res.status(200).json({ reelId })
+  }
+
   // ── Reprise des médias restés sur Firebase Storage ───────────────────────
   if (action === 'migrate') {
     // Chaque utilisateur migre SES médias, par lots, jusqu'à `remaining == 0`.
@@ -262,5 +373,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // ── Balayage admin : migre TOUS les comptes, pas seulement l'appelant ────
+  // Ferme l'exposition pour les comptes qui ne rouvrent jamais l'app (donc ne
+  // déclenchent jamais la migration self-service ci-dessus).
+  if (action === 'migrate-all') {
+    if (user.email !== ADMIN_EMAIL) {
+      return res.status(403).json({ error: 'Admin uniquement' })
+    }
+    const limit = Math.min(Math.max(Number(body.limit ?? 20), 1), 50)
+    try {
+      const report = await migrateLegacyMediaAll(limit, (key) =>
+        stablePdfUrl(req, key)
+      )
+      return res.status(200).json(report)
+    } catch (e) {
+      return res
+        .status(500)
+        .json({ error: 'Migration impossible', detail: String(e) })
+    }
+  }
+
   return res.status(404).json({ error: 'Action inconnue' })
+}
+
+// Gabarit HTML de la page publique `poster-video-reel` — même style de carte
+// que backend/api/listen.ts, avec une liste de vidéos au lieu d'un seul audio.
+function reelPage(titleText: string, body: string): string {
+  return `<!DOCTYPE html><html lang="fr"><head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${escapeHtml(titleText)} · carnet</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+    background:#f5ece0;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;padding:24px;}
+  .card{background:#fff;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.08);
+    padding:36px 32px;max-width:480px;width:100%;text-align:center;}
+  .brand{color:#3A6648;font-style:italic;font-weight:bold;font-size:20px;margin-bottom:20px;}
+  h1{font-size:22px;color:#2d2d2d;margin:0 0 20px;}
+  .reelTitle{color:#7a6a5a;font-size:13px;margin:18px 0 6px;text-align:left;}
+  video{width:100%;border-radius:12px;display:block;margin-bottom:8px;}
+  p{color:#7a6a5a;}
+</style></head>
+<body><div class="card"><div class="brand">carnet</div><h1>${escapeHtml(titleText)}</h1>${body}</div></body></html>`
 }

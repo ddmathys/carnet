@@ -32,11 +32,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const ref = `#${orderId.slice(0, 8).toUpperCase()}`
-  const bookTitle = escapeHtml(String(o.bookTitle ?? ''))
+  const isPoster = o.productType === 'poster'
+  const posterColorLabel: Record<string, string> = { black: 'Noir', natural: 'Chêne', white: 'Blanc' }
+  // Titre de l'article : le titre du livre, ou un libellé généré pour un poster
+  // (pas de titre saisi par l'utilisateur pour ce produit).
+  const itemTitle = isPoster
+    ? `Poster ${escapeHtml(String(o.posterSize ?? ''))}`
+    : escapeHtml(String(o.bookTitle ?? ''))
+  const bookTitle = itemTitle // conservé pour les emplacements ci-dessous, nom historique
   const fullName = escapeHtml(`${o.firstName ?? ''} ${o.lastName ?? ''}`.trim())
   const firstName = escapeHtml(String(o.firstName ?? ''))
   const userEmail = String(o.userEmail ?? '')
-  const cover = o.coverType === 'hard' ? 'Rigide' : 'Souple'
+  const cover = isPoster
+    ? `${o.posterOrientation === 'landscape' ? 'Paysage' : 'Portrait'} · ${
+        posterColorLabel[String(o.posterHangerColor ?? '')] ?? String(o.posterHangerColor ?? '')
+      }`
+    : o.coverType === 'hard'
+      ? 'Rigide'
+      : 'Souple'
+  const itemEmoji = isPoster ? '🖼️' : '📖'
+  const itemLabel = isPoster ? 'Poster' : 'Livre'
+  const detailLabel = isPoster ? 'Finition' : 'Couverture'
   const address = escapeHtml(
     [o.street, `${o.npa ?? ''} ${o.city ?? ''}`.trim(), o.country]
       .filter(Boolean)
@@ -67,8 +83,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">🎉 Nouvelle commande reçue</p>
     ${row('Commande', `<strong>${ref}</strong>`)}
     ${row('Client', `${fullName} · ${escapeHtml(userEmail)}`)}
-    ${row('Livre', bookTitle)}
-    ${row('Couverture', cover)}
+    ${row(itemLabel, bookTitle)}
+    ${row(detailLabel, cover)}
     ${row('Adresse', address)}
     ${row('Montant', `<strong style="color:#3A6648">${price}</strong>`)}
   `)
@@ -76,13 +92,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const userHtml = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">Bonjour ${firstName},</p>
     <p style="margin:0 0 24px;font-size:15px;color:#2d2d2d;line-height:1.6;">
-      Merci pour votre commande ! Nous avons bien reçu votre livre <strong>« ${bookTitle} »</strong>.
+      Merci pour votre commande ! Nous avons bien reçu votre ${isPoster ? 'poster' : 'livre'} <strong>« ${bookTitle} »</strong>.
     </p>
     <table width="100%" style="background:#f5ece0;border-radius:12px;margin-bottom:24px;">
       <tr><td style="padding:20px 24px;">
         <p style="margin:0 0 12px;font-size:13px;color:#7a6a5a;text-transform:uppercase;letter-spacing:1px;">Récapitulatif</p>
-        <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📖 ${bookTitle}</p>
-        <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📦 Couverture ${cover.toLowerCase()}</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">${itemEmoji} ${bookTitle}</p>
+        <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📦 ${detailLabel} ${isPoster ? cover : cover.toLowerCase()}</p>
         <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📍 ${address}</p>
         <p style="margin:0;font-size:15px;font-weight:bold;color:#3A6648;">${price}</p>
       </td></tr>
@@ -91,7 +107,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <tr><td style="padding:20px 24px;">
         <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
         <p style="margin:0 0 14px;font-size:14px;color:#2d2d2d;line-height:1.6;">
-          Le paiement déclenche la fabrication de votre livre. Merci de régler <strong>${price}</strong> :
+          Le paiement déclenche la fabrication de votre ${isPoster ? 'poster' : 'livre'}. Merci de régler <strong>${price}</strong> :
         </p>
         ${paymentRows}
         <p style="margin:14px 0 0;font-size:14px;color:#2d2d2d;">🔖 Référence à indiquer : <strong>${ref}</strong></p>
@@ -116,7 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     userEmail
       ? sendEmail({
           to: userEmail,
-          subject: `Commande confirmée — ${String(o.bookTitle ?? '')}`,
+          subject: `Commande confirmée — ${isPoster ? `Poster ${String(o.posterSize ?? '')}` : String(o.bookTitle ?? '')}`,
           html: userHtml,
         })
       : Promise.resolve(false),

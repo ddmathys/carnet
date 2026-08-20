@@ -4,8 +4,12 @@ class OrderModel {
   final String id;
   final String userId;
   final String userEmail;
+  // Titre affiché (liste admin, PDF téléchargé, email) : le titre du livre
+  // pour un livre, un libellé généré ("Poster A2") pour un poster — jamais
+  // saisi par l'utilisateur pour ce second produit. Nom historique conservé
+  // pour ne pas toucher tous les affichages existants.
   final String bookTitle;
-  final String coverType; // 'soft' | 'hard'
+  final String coverType; // 'soft' | 'hard' — vide pour un poster
   final double price;
   final String firstName;
   final String lastName;
@@ -33,6 +37,21 @@ class OrderModel {
   // client.
   final int prodigiRetryCount;
 
+  // ── Discriminant produit ──────────────────────────────────────────────
+  // 'book' (défaut, rétrocompatible avec toutes les commandes existantes)
+  // ou 'poster'. Les champs `poster*` ci-dessous sont null pour un livre.
+  final String productType;
+  final String? posterSku;
+  final String? posterSize; // 'A4' | 'A3' | 'A2' | 'A1' | 'A0'
+  final String? posterOrientation; // 'portrait' | 'landscape'
+  final String? posterHangerColor; // 'black' | 'natural' | 'white'
+  final String? posterCaption;
+  // Souvenirs dont les vidéos alimentent le QR imprimé sur le poster (le QR
+  // pointe en réalité vers un `posterReels/{id}` distinct, créé avant la
+  // commande — voir poster_generate_screen.dart — ce champ est gardé pour
+  // affichage/traçabilité admin).
+  final List<String>? posterMemoryIds;
+
   const OrderModel({
     required this.id,
     required this.userId,
@@ -58,7 +77,16 @@ class OrderModel {
     this.prodigiStatus,
     this.prodigiError,
     this.prodigiRetryCount = 0,
+    this.productType = 'book',
+    this.posterSku,
+    this.posterSize,
+    this.posterOrientation,
+    this.posterHangerColor,
+    this.posterCaption,
+    this.posterMemoryIds,
   });
+
+  bool get isPoster => productType == 'poster';
 
   String get fullName => '$firstName $lastName';
 
@@ -122,6 +150,15 @@ class OrderModel {
       prodigiStatus: d['prodigiStatus'],
       prodigiError: d['prodigiError'],
       prodigiRetryCount: (d['prodigiRetryCount'] as num?)?.toInt() ?? 0,
+      productType: d['productType'] ?? 'book',
+      posterSku: d['posterSku'],
+      posterSize: d['posterSize'],
+      posterOrientation: d['posterOrientation'],
+      posterHangerColor: d['posterHangerColor'],
+      posterCaption: d['posterCaption'],
+      posterMemoryIds: (d['posterMemoryIds'] as List<dynamic>?)
+          ?.map((e) => e.toString())
+          .toList(),
     );
   }
 
@@ -145,5 +182,12 @@ class OrderModel {
     'memoryCount': memoryCount,
     'pageCount': pageCount,
     'pdfUrl': pdfUrl,
+    'productType': productType,
+    'posterSku': posterSku,
+    'posterSize': posterSize,
+    'posterOrientation': posterOrientation,
+    'posterHangerColor': posterHangerColor,
+    'posterCaption': posterCaption,
+    'posterMemoryIds': posterMemoryIds,
   };
 }

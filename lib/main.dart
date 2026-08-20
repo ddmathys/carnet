@@ -25,6 +25,8 @@ import 'features/memories/memory_detail_screen.dart';
 import 'features/books/book_generate_screen.dart';
 import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
+import 'features/posters/poster_select_screen.dart';
+import 'features/posters/poster_generate_screen.dart';
 import 'features/orders/order_tracking_screen.dart';
 import 'features/orders/order_confirmation_screen.dart';
 import 'features/admin/admin_orders_screen.dart';
@@ -117,6 +119,27 @@ final _router = GoRouter(
       },
     ),
     GoRoute(path: '/books', builder: (_, __) => const BookHistoryScreen()),
+
+    // ── Posters ──
+    GoRoute(
+      path: '/poster/select',
+      builder: (_, state) => PosterSelectScreen(
+        editOrderId: state.uri.queryParameters['editOrder'],
+      ),
+    ),
+    GoRoute(
+      path: '/poster/new',
+      builder: (_, state) {
+        final ids = (state.uri.queryParameters['memories'] ?? '')
+            .split(',')
+            .where((s) => s.isNotEmpty)
+            .toList();
+        return PosterGenerateScreen(
+          memoryIds: ids,
+          editOrderId: state.uri.queryParameters['editOrder'],
+        );
+      },
+    ),
 
     // ── Croissance (tags « enfant ») ──
     GoRoute(

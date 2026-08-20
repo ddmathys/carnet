@@ -216,6 +216,10 @@ class _HomeScreenState extends State<HomeScreen> {
         SliverToBoxAdapter(
           child: _CreateBookCta(onTap: () => context.push('/book/select')),
         ),
+        // 6) Créer un poster — juste en dessous, même geste d'aboutissement.
+        SliverToBoxAdapter(
+          child: _CreatePosterCta(onTap: () => context.push('/poster/select')),
+        ),
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
     );
@@ -748,6 +752,69 @@ class _CreateBookCta extends StatelessWidget {
                         )),
                     SizedBox(height: 3),
                     Text('Choisis un tag ou tes souvenirs un par un.',
+                        style: TextStyle(fontSize: 12.5, color: Colors.white70)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: Colors.white70),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// « Créer un poster » : même bandeau que _CreateBookCta, couleurs distinctes
+// (vert sauge plutôt que brun) pour bien différencier les deux produits.
+class _CreatePosterCta extends StatelessWidget {
+  final VoidCallback onTap;
+  const _CreatePosterCta({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 4, 22, 4),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(22),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF1F3D2B).withOpacity(0.28),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Row(
+            children: [
+              const SizedBox(
+                width: 54,
+                height: 54,
+                child: Icon(Icons.image_outlined, color: Colors.white, size: 30),
+              ),
+              const SizedBox(width: 18),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Créer un poster',
+                        style: TextStyle(
+                          fontFamily: 'Fraunces',
+                          fontSize: 19,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        )),
+                    SizedBox(height: 3),
+                    Text('Une ou plusieurs photos, prêtes à accrocher.',
                         style: TextStyle(fontSize: 12.5, color: Colors.white70)),
                   ],
                 ),
