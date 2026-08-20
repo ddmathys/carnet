@@ -1,0 +1,11 @@
+{
+  "name": "Lingua",
+  "short_name": "Lingua",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#2F6F5E",
+  "description": "Carnet de vocabulaire : les mots et phrases à retenir, dans leur contexte.",
+  "orientation": "portrait-primary",
+  "prefer_related_applications": false
+}

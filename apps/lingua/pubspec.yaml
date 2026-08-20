@@ -1,0 +1,23 @@
+name: lingua
+description: Carnet de vocabulaire — les mots et phrases qu'on ne connaît pas encore, classés par thème et gardés dans leur contexte.
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Tout est stocké sur l'appareil : pas de compte, pas de backend.
+  # Le carnet tient dans une seule clé JSON (voir core/store/vocab_store.dart).
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
