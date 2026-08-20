@@ -406,7 +406,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                     style: const TextStyle(fontSize: 13, color: AppColors.textMedium)),
                   Text(
                     o.isPoster
-                        ? 'Poster ${o.posterSize ?? ''} · ${o.posterOrientation == 'landscape' ? 'paysage' : 'portrait'} · ${o.posterHangerColor ?? ''}'
+                        ? 'Tirage ${o.posterSize ?? ''} · ${o.posterOrientation == 'landscape' ? 'paysage' : 'portrait'} · ${o.posterHangerColor ?? ''}'
                         : '${o.coverType == 'hard' ? 'Couverture rigide' : 'Couverture souple'} · ${o.memoryCount} souvenirs',
                     style: const TextStyle(fontSize: 13, color: AppColors.textMedium)),
                   const SizedBox(height: 14),

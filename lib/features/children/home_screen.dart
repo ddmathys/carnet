@@ -806,7 +806,7 @@ class _CreatePosterCta extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Créer un poster',
+                    Text('Créer un tirage',
                         style: TextStyle(
                           fontFamily: 'Fraunces',
                           fontSize: 19,

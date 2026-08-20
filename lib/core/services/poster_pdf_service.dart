@@ -81,7 +81,7 @@ class PosterPdfService {
     final playfairB = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Bold.ttf'));
 
-    final doc = pw.Document(title: 'Poster $size', author: 'Carnet');
+    final doc = pw.Document(title: 'Tirage $size', author: 'Carnet');
 
     final tiles = <pw.Widget>[];
     for (var i = 0; i < layout.tiles.length; i++) {

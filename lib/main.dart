@@ -130,12 +130,22 @@ final _router = GoRouter(
     GoRoute(
       path: '/poster/new',
       builder: (_, state) {
-        final ids = (state.uri.queryParameters['memories'] ?? '')
+        // Format `memoryId:photoIndex,memoryId:photoIndex,...` — une entrée
+        // par PHOTO choisie (pas par souvenir, un souvenir peut en fournir
+        // plusieurs). Voir poster_select_screen.dart::_continue.
+        final refs = (state.uri.queryParameters['photos'] ?? '')
             .split(',')
             .where((s) => s.isNotEmpty)
+            .map((s) {
+              final parts = s.split(':');
+              return (
+                memoryId: parts[0],
+                photoIndex: parts.length > 1 ? int.tryParse(parts[1]) ?? 0 : 0,
+              );
+            })
             .toList();
         return PosterGenerateScreen(
-          memoryIds: ids,
+          photoRefs: refs,
           editOrderId: state.uri.queryParameters['editOrder'],
         );
       },

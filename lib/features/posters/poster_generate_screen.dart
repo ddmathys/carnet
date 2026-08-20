@@ -19,16 +19,21 @@ import '../../core/services/poster_pricing.dart';
 import '../../core/services/poster_quality_service.dart';
 import '../../core/utils/image_dims.dart';
 
-/// Génération d'un poster ("Art print with hanger") à partir des photos
-/// choisies à l'écran précédent (poster_select_screen.dart). Équivalent
-/// poster de BookGenerateScreen, en beaucoup plus court : une seule page, un
-/// petit catalogue de tailles fixes (voir poster_pricing.dart).
+/// Génération d'un tirage à accrocher ("Art print with hanger" chez Prodigi)
+/// à partir des photos choisies à l'écran précédent
+/// (poster_select_screen.dart). Équivalent poster de BookGenerateScreen, en
+/// beaucoup plus court : une seule page, un petit catalogue de tailles fixes
+/// (voir poster_pricing.dart). Noms de code internes (fichiers, routes,
+/// champs Firestore) gardés "poster" — seul le texte affiché à l'utilisateur
+/// dit "tirage à accrocher".
 class PosterGenerateScreen extends StatefulWidget {
-  final List<String> memoryIds;
+  /// Une entrée par PHOTO choisie (pas par souvenir — un souvenir peut en
+  /// fournir plusieurs, voir poster_select_screen.dart).
+  final List<({String memoryId, int photoIndex})> photoRefs;
   final String? editOrderId;
   const PosterGenerateScreen({
     super.key,
-    this.memoryIds = const [],
+    this.photoRefs = const [],
     this.editOrderId,
   });
 
@@ -39,7 +44,9 @@ class PosterGenerateScreen extends StatefulWidget {
 class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   int _step = 0; // 0 = collage, 1 = taille/couleur, 2 = adresse/commande
 
-  List<MemoryModel> _memories = [];
+  // Souvenirs DISTINCTS parmi les photos choisies — sert au "reel" vidéo
+  // (QR code) et au décompte affiché, pas au collage lui-même.
+  List<MemoryModel> _uniqueMemories = [];
   List<String> _photoUrls = [];
   List<Uint8List> _photoBytes = [];
   List<({int w, int h})?> _photoDims = [];
@@ -80,7 +87,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
     super.dispose();
   }
 
-  PosterLayout get _layout => buildPosterLayout(_memories.length, _featured);
+  PosterLayout get _layout => buildPosterLayout(_photoUrls.length, _featured);
 
   Map<String, PosterSizeQuality> get _quality =>
       PosterQualityService.evaluateAll(layout: _layout, photoDims: _photoDims);
@@ -92,26 +99,35 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
           .first
           .timeout(const Duration(seconds: 20));
       final byId = {for (final m in visible) m.id: m};
-      final ordered = [
-        for (final id in widget.memoryIds)
-          if (byId.containsKey(id)) byId[id]!,
+
+      var refs = [
+        for (final r in widget.photoRefs) if (byId.containsKey(r.memoryId)) r,
       ];
-      if (ordered.isEmpty) {
+      if (refs.isEmpty) {
         setState(() {
-          _loadError = 'Aucune photo sélectionnée pour ce poster.';
+          _loadError = 'Aucune photo sélectionnée pour ce tirage.';
           _loading = false;
         });
         return;
       }
-      if (ordered.length > posterMaxPhotos) {
-        ordered.removeRange(posterMaxPhotos, ordered.length);
+      if (refs.length > posterMaxPhotos) {
+        refs = refs.sublist(0, posterMaxPhotos);
+      }
+
+      // Résout les photos de chaque souvenir DISTINCT une seule fois
+      // (PhotoService met déjà en cache par souvenir), puis pioche l'index
+      // demandé pour chaque photo choisie, dans l'ordre de sélection.
+      final uniqueIds = {for (final r in refs) r.memoryId};
+      final urlsByMemory = <String, List<String>>{};
+      for (final id in uniqueIds) {
+        urlsByMemory[id] = await PhotoService.resolvePhotoUrls(byId[id]!);
       }
 
       final urls = <String>[];
-      for (final m in ordered) {
-        final resolved = await PhotoService.resolvePhotoUrls(m);
-        if (resolved.isEmpty) continue;
-        urls.add(resolved.first);
+      for (final r in refs) {
+        final list = urlsByMemory[r.memoryId] ?? const [];
+        if (r.photoIndex < 0 || r.photoIndex >= list.length) continue;
+        urls.add(list[r.photoIndex]);
       }
       if (urls.isEmpty) {
         setState(() {
@@ -126,7 +142,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
       if (!mounted) return;
       setState(() {
-        _memories = ordered;
+        _uniqueMemories = [for (final id in uniqueIds) byId[id]!];
         _photoUrls = urls;
         _photoBytes = bytes;
         _photoDims = dims;
@@ -167,7 +183,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   void _toggleFeatured(int i) {
     setState(() {
-      if (_memories.length <= 4) {
+      if (_photoUrls.length <= 4) {
         // 1-4 photos : la vedette change le template (voir poster_template.dart)
         // — un seul choix à la fois pour rester dans le petit catalogue de
         // templates prévu.
@@ -205,17 +221,17 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       // doit déjà être imprimé dedans.
       final reelRes = await BackendClient.postJson(
         '/api/video/poster-reel-create',
-        {'memoryIds': _memories.map((m) => m.id).toList()},
+        {'memoryIds': _uniqueMemories.map((m) => m.id).toList()},
         timeout: const Duration(seconds: 20),
       );
       final reelId = reelRes?['reelId'] as String?;
       if (reelId == null) {
-        throw Exception('Impossible de préparer les vidéos liées au poster.');
+        throw Exception('Impossible de préparer les vidéos liées au tirage.');
       }
       final qrUrl = '${AppConfig.backendUrl}/api/video/poster-video-reel?o=$reelId';
 
       if (!mounted) return;
-      setState(() => _orderMessage = 'Génération du poster…');
+      setState(() => _orderMessage = 'Génération du tirage…');
 
       // 2. PDF plein cadre
       final pdfBytes = await PosterPdfService.generate(
@@ -254,7 +270,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         id: '',
         userId: user.uid,
         userEmail: user.email ?? '',
-        bookTitle: 'Poster $_size',
+        bookTitle: 'Tirage $_size',
         coverType: '',
         price: price,
         firstName: _firstNameCtrl.text.trim(),
@@ -266,7 +282,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         status: 'received',
         createdAt: DateTime.now(),
         notebookId: '',
-        memoryCount: _memories.length,
+        memoryCount: _uniqueMemories.length,
         pdfUrl: uploaded.url,
         productType: 'poster',
         posterSku: entry?.sku,
@@ -274,7 +290,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         posterOrientation: _orientation,
         posterHangerColor: _color,
         posterCaption: _captionCtrl.text.trim().isNotEmpty ? _captionCtrl.text.trim() : null,
-        posterMemoryIds: _memories.map((m) => m.id).toList(),
+        posterMemoryIds: _uniqueMemories.map((m) => m.id).toList(),
       );
       final orderId = await OrderService.createOrder(order);
 
@@ -302,7 +318,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
-        title: const Text('Créer le poster',
+        title: const Text('Créer le tirage',
             style: TextStyle(
                 fontFamily: 'Fraunces',
                 fontWeight: FontWeight.w600,
@@ -368,7 +384,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                           child: _CollageTile(
                             url: _photoUrls[i],
                             featured: _featured.contains(i),
-                            selectable: _memories.length <= 4,
+                            selectable: _photoUrls.length <= 4,
                             onTap: () => _toggleFeatured(i),
                           ),
                         ),
@@ -381,8 +397,8 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         ),
         const SizedBox(height: 12),
         Text(
-          _memories.length <= 4
-              ? (_memories.length == 1
+          _photoUrls.length <= 4
+              ? (_photoUrls.length == 1
                   ? 'Une seule photo — plein cadre.'
                   : 'Tape une photo pour la mettre en avant.')
               : 'Au-delà de 4 photos, toutes les photos sont affichées à la même taille.',
@@ -390,7 +406,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
           style: const TextStyle(fontSize: 12.5, color: AppColors.textMedium),
         ),
         const SizedBox(height: 24),
-        const Text('Texte sur le poster (optionnel)',
+        const Text('Texte sur le tirage (optionnel)',
             style: TextStyle(
                 fontFamily: 'PlayfairDisplay',
                 fontSize: 15,
@@ -513,7 +529,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Poster $_size · ${_orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(_color)}',
+                  'Tirage $_size · ${_orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(_color)}',
                   style: const TextStyle(fontSize: 13.5, color: AppColors.textDark),
                 ),
               ),

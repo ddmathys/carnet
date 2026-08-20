@@ -85,7 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const reelSnap = await db.collection('posterReels').doc(reelId).get()
       if (!reelSnap.exists) {
-        return res.status(404).send(reelPage('Introuvable', '<p>Ce poster n’a plus de vidéos associées.</p>'))
+        return res.status(404).send(reelPage('Introuvable', '<p>Ce tirage n’a plus de vidéos associées.</p>'))
       }
       const reel = reelSnap.data() as Record<string, unknown>
       const memoryIds = Array.isArray(reel.memoryIds)
@@ -105,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (videos.length === 0) {
-        return res.status(404).send(reelPage('Pas encore de vidéo', '<p>Aucune vidéo n’est associée à ce poster pour l’instant.</p>'))
+        return res.status(404).send(reelPage('Pas encore de vidéo', '<p>Aucune vidéo n’est associée à ce tirage pour l’instant.</p>'))
       }
 
       const body = videos
