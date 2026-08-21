@@ -172,6 +172,17 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
 
   const isPoster = o.productType === 'poster'
 
+  // Prix de référence recalculé côté serveur — order.price vient du client à
+  // la création (écrit direct dans Firestore, jamais passé par un backend qui
+  // pourrait le corriger) et ne doit jamais être facturé/affiché tel quel.
+  // Découvert le 21.08.26 : une vraie commande poster A1 a été facturée
+  // $44.95 par Prodigi (article + livraison) alors que order.price valait
+  // CHF 30 — la table de prix poster ne comptait pas la livraison à ce
+  // moment-là (corrigé dans poster_pricing.ts). Ce garde-fou empêche qu'un
+  // futur écart de prix (app pas à jour, table de prix qui dérive à nouveau)
+  // reste invisible dans la console admin/les emails.
+  let trustedPrice: number | null = null
+
   let item: Record<string, any>
   if (isPoster) {
     if (!isPosterSize(o.posterSize) || !isPosterOrientation(o.posterOrientation)) {
@@ -189,6 +200,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       attributes: { color },
       assets: [{ printArea: 'default', url: pdfUrl }],
     }
+    trustedPrice = computePosterPrice(o.posterSize, o.posterOrientation)
   } else {
     const orderCoverType: CoverType =
       o.coverType === 'hard' || o.coverType === 'layflat' ? o.coverType : 'soft'
@@ -202,6 +214,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       sizing: 'fillPrintArea',
       assets: [{ printArea: 'default', url: pdfUrl, pageCount }],
     }
+    trustedPrice = pageCount ? computePrice(orderCoverType, pageCount) : null
   }
 
   const payload = {
@@ -226,6 +239,9 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
   if (typeof overridePdfUrl === 'string' && overridePdfUrl) commonUpdate.pdfUrl = overridePdfUrl
   if (typeof overridePageCount === 'number' && overridePageCount > 0) {
     commonUpdate.pageCount = overridePageCount
+  }
+  if (trustedPrice != null && Math.abs(Number(o.price ?? 0) - trustedPrice) > 0.001) {
+    commonUpdate.price = trustedPrice
   }
   if (isRetry) commonUpdate.prodigiRetryCount = Number(o.prodigiRetryCount ?? 0) + 1
 
