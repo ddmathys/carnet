@@ -2,17 +2,17 @@ import 'dart:io';
 import 'dart:math' show min, max;
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:image_picker/image_picker.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/notebook_model.dart';
+import '../../core/models/growth_measurement.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/data/growth_data.dart';
+import '../../core/services/growth_measurement_service.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/space_service.dart';
@@ -30,7 +30,8 @@ String _animalId(NotebookModel nb) =>
 /// - Tag « enfant » (il porte une date de naissance) : courbe OMS (taille +
 ///   poids) + toise visuelle.
 /// - Autre tag : courbe de poids simple (suivi), sans percentiles.
-/// Les mesures sont des `memories` de type `taille_poids` portant ce tag.
+/// Les mesures vivent dans le tableau `measurements` d'UN SEUL souvenir de
+/// type `taille_poids` portant ce tag — pas un souvenir par pesée.
 class GrowthScreen extends StatefulWidget {
   final String tagId;
   /// Ouvre directement la saisie d'une mesure au chargement.
@@ -47,14 +48,20 @@ class GrowthScreen extends StatefulWidget {
 
 class _GrowthScreenState extends State<GrowthScreen> {
   bool _autoOpened = false;
+  // Fusion des anciens souvenirs (une pesée = un souvenir) vers le souvenir
+  // unique du tag. Tentée une seule fois par ouverture d'écran : le flux
+  // Firestore réémet après chaque écriture, et sans ce garde-fou la fusion se
+  // relancerait sur sa propre mise à jour.
+  bool _consolidateTried = false;
 
-  void _openMeasureSheet(NotebookModel notebook) {
+  void _openMeasureSheet(NotebookModel notebook,
+      {List<String> carrierTagLabels = const []}) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) =>
-          _MeasureSheet(notebook: notebook, previousMeasures: const []),
+      builder: (_) => _MeasureSheet(
+          notebook: notebook, carrierTagLabels: carrierTagLabels),
     );
   }
 
@@ -83,11 +90,30 @@ class _GrowthScreenState extends State<GrowthScreen> {
             if (!snap.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final measures = snap.data!
-                .where((m) => m.type == 'taille_poids')
-                .where((m) => m.heightCm != null || m.weightKg != null)
+            // Même ordre que le service : le plus ancien est le souvenir
+            // porteur, c'est le sien qui fait référence (tags, id).
+            final carriers = snap.data!
+                .where((m) => m.type == GrowthMeasurementService.memoryType)
                 .toList()
-              ..sort((a, b) => a.date.compareTo(b.date));
+              ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+            final measures = GrowthMeasurementService.collect(carriers);
+            final carrierTagLabels = carriers.isNotEmpty
+                ? carriers.first.tagLabels
+                : const <String>[];
+
+            // Reliquat de l'ancien format : plusieurs souvenirs pour le même
+            // tag. On les fusionne en tâche de fond ; l'affichage, lui, est
+            // déjà correct puisque `collect` lit les deux formats.
+            if (!_consolidateTried && carriers.length > 1) {
+              _consolidateTried = true;
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                GrowthMeasurementService.consolidate(
+                  tagId: widget.tagId,
+                  tagLabel: tag.label,
+                  memories: carriers,
+                );
+              });
+            }
 
             if (measures.isEmpty) {
               return _EmptyState(notebook: notebook, isChild: isChild);
@@ -95,10 +121,16 @@ class _GrowthScreenState extends State<GrowthScreen> {
 
             if (!isChild) {
               // Suivi adulte : courbe de poids simple + historique + saisie.
-              return _AdultWeightTab(notebook: notebook, measures: measures);
+              return _AdultWeightTab(
+                  notebook: notebook,
+                  measures: measures,
+                  carrierTagLabels: carrierTagLabels);
             }
 
-            return _CurvesTab(notebook: notebook, measures: measures);
+            return _CurvesTab(
+                notebook: notebook,
+                measures: measures,
+                carrierTagLabels: carrierTagLabels);
           },
         );
 
@@ -139,8 +171,13 @@ class _GrowthScreenState extends State<GrowthScreen> {
 
 class _CurvesTab extends StatefulWidget {
   final NotebookModel notebook;
-  final List<MemoryModel> measures;
-  const _CurvesTab({required this.notebook, required this.measures});
+  final List<GrowthMeasurement> measures;
+  final List<String> carrierTagLabels;
+  const _CurvesTab({
+    required this.notebook,
+    required this.measures,
+    this.carrierTagLabels = const [],
+  });
 
   @override
   State<_CurvesTab> createState() => _CurvesTabState();
@@ -171,6 +208,7 @@ class _CurvesTabState extends State<_CurvesTab> {
             notebook: widget.notebook,
             measures: widget.measures,
             showWeight: _showWeight,
+            carrierTagLabels: widget.carrierTagLabels,
           ),
           const SizedBox(height: 20),
         ],
@@ -236,7 +274,7 @@ class _ToggleBar extends StatelessWidget {
 
 class _MultiPointChart extends StatelessWidget {
   final NotebookModel notebook;
-  final List<MemoryModel> measures;
+  final List<GrowthMeasurement> measures;
   final bool showWeight;
 
   const _MultiPointChart({
@@ -450,8 +488,13 @@ class _MultiPointChart extends StatelessWidget {
 
 class _AdultWeightTab extends StatelessWidget {
   final NotebookModel notebook;
-  final List<MemoryModel> measures;
-  const _AdultWeightTab({required this.notebook, required this.measures});
+  final List<GrowthMeasurement> measures;
+  final List<String> carrierTagLabels;
+  const _AdultWeightTab({
+    required this.notebook,
+    required this.measures,
+    this.carrierTagLabels = const [],
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -465,9 +508,13 @@ class _AdultWeightTab extends StatelessWidget {
           _SimpleWeightChart(measures: wMeasures),
           const SizedBox(height: 24),
           _MeasurementList(
-              notebook: notebook, measures: measures, showWeight: true),
+              notebook: notebook,
+              measures: measures,
+              showWeight: true,
+              carrierTagLabels: carrierTagLabels),
           const SizedBox(height: 20),
-          _AddMeasureButton(notebook: notebook, measures: measures),
+          _AddMeasureButton(
+              notebook: notebook, carrierTagLabels: carrierTagLabels),
         ],
       ),
     );
@@ -476,7 +523,7 @@ class _AdultWeightTab extends StatelessWidget {
 
 /// Courbe de poids simple (sans percentiles OMS) : poids dans le temps.
 class _SimpleWeightChart extends StatelessWidget {
-  final List<MemoryModel> measures;
+  final List<GrowthMeasurement> measures;
   const _SimpleWeightChart({required this.measures});
 
   @override
@@ -609,29 +656,31 @@ class _SimpleWeightChart extends StatelessWidget {
 
 class _MeasurementList extends StatelessWidget {
   final NotebookModel notebook;
-  final List<MemoryModel> measures;
+  final List<GrowthMeasurement> measures;
   final bool showWeight;
+  final List<String> carrierTagLabels;
 
   const _MeasurementList({
     required this.notebook,
     required this.measures,
     required this.showWeight,
+    this.carrierTagLabels = const [],
   });
 
-  void _edit(BuildContext context, MemoryModel m) {
+  void _edit(BuildContext context, GrowthMeasurement m) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _MeasureSheet(
         notebook: notebook,
-        previousMeasures: const [],
+        carrierTagLabels: carrierTagLabels,
         editing: m,
       ),
     );
   }
 
-  String _label(MemoryModel m) =>
+  String _label(GrowthMeasurement m) =>
       m.dateLabel ??
       formatDateWithPrecision(
           m.date, datePrecisionFromString(m.datePrecision));
@@ -712,7 +761,9 @@ class _MeasurementList extends StatelessWidget {
                           child: SizedBox(
                             width: 42,
                             height: 42,
-                            child: _MeasurePhoto(memory: m),
+                            child: _MeasurePhoto(
+                                memoryId: m.memoryId,
+                                mediaKey: m.mediaKeys.first),
                           ),
                         )
                       : Container(
@@ -786,15 +837,18 @@ class _MeasurementList extends StatelessWidget {
 
 // Vignette photo d'une mesure (résout la clé R2 à la demande).
 class _MeasurePhoto extends StatelessWidget {
-  final MemoryModel memory;
-  const _MeasurePhoto({required this.memory});
+  /// Souvenir porteur (c'est lui que le backend sait signer) et clé de la photo
+  /// propre à CETTE mesure — le porteur en regroupe plusieurs.
+  final String memoryId;
+  final String mediaKey;
+  const _MeasurePhoto({required this.memoryId, required this.mediaKey});
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<List<String>>(
-      future: PhotoService.resolvePhotoUrls(memory),
+    return FutureBuilder<Map<String, String>>(
+      future: PhotoService.signedUrlsForMemory(memoryId),
       builder: (_, snap) {
-        final url = (snap.data?.isNotEmpty ?? false) ? snap.data!.first : null;
+        final url = snap.data?[mediaKey];
         if (url == null) return Container(color: AppColors.cream);
         return CachedNetworkImage(
           imageUrl: url,
@@ -809,9 +863,10 @@ class _MeasurePhoto extends StatelessWidget {
 
 class _AddMeasureButton extends StatelessWidget {
   final NotebookModel notebook;
-  final List<MemoryModel> measures;
+  final List<String> carrierTagLabels;
 
-  const _AddMeasureButton({required this.notebook, required this.measures});
+  const _AddMeasureButton(
+      {required this.notebook, this.carrierTagLabels = const []});
 
   @override
   Widget build(BuildContext context) {
@@ -856,7 +911,7 @@ class _AddMeasureButton extends StatelessWidget {
       backgroundColor: Colors.transparent,
       builder: (_) => _MeasureSheet(
         notebook: notebook,
-        previousMeasures: measures,
+        carrierTagLabels: carrierTagLabels,
       ),
     );
   }
@@ -866,13 +921,14 @@ class _AddMeasureButton extends StatelessWidget {
 
 class _MeasureSheet extends StatefulWidget {
   final NotebookModel notebook;
-  final List<MemoryModel> previousMeasures;
+  /// Tags déjà portés par le souvenir du tag, pour pré-cocher le sélecteur.
+  final List<String> carrierTagLabels;
   /// Mesure existante à éditer (null = nouvelle mesure).
-  final MemoryModel? editing;
+  final GrowthMeasurement? editing;
 
   const _MeasureSheet({
     required this.notebook,
-    required this.previousMeasures,
+    this.carrierTagLabels = const [],
     this.editing,
   });
 
@@ -921,12 +977,17 @@ class _MeasureSheetState extends State<_MeasureSheet> {
       final looksAuto =
           RegExp(r'^[\d.,\s•×xcmkg]*$', caseSensitive: false).hasMatch(raw);
       if (raw.isNotEmpty && !looksAuto) _commentCtrl.text = raw;
-      if (e.tagLabels.isNotEmpty) _selectedTagLabels = e.tagLabels.toSet();
+      if (widget.carrierTagLabels.isNotEmpty) {
+        _selectedTagLabels = widget.carrierTagLabels.toSet();
+      }
       if (e.mediaKeys.isNotEmpty) {
         _existingPhotoKey = e.mediaKeys.first;
-        PhotoService.resolvePhotoUrls(e).then((urls) {
-          if (mounted && urls.isNotEmpty) {
-            setState(() => _existingPhotoUrl = urls.first);
+        // La signature se demande sur le souvenir porteur : c'est lui qui
+        // détient la clé, la mesure n'est qu'une entrée de son tableau.
+        PhotoService.signedUrlsForMemory(e.memoryId).then((urls) {
+          final url = urls[e.mediaKeys.first];
+          if (mounted && url != null) {
+            setState(() => _existingPhotoUrl = url);
           }
         });
       }
@@ -996,63 +1057,45 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     final comment = _commentCtrl.text.trim();
 
     setState(() => _saving = true);
-    final col = FirebaseFirestore.instance.collection('memories');
     // Le « carnet » reçu ici est celui synthétisé depuis le tag : son id EST
-    // l'id du tag. La mesure porte toujours ce tag, plus d'éventuels tags
-    // additionnels choisis dans le sélecteur.
+    // l'id du tag. La mesure rejoint le souvenir unique de ce tag.
     final tagId = widget.notebook.id;
-    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
     final spaceId = await SpaceService.ensureSpaceId() ?? '';
-
-    final tagIds = <String>[tagId];
-    final tagLabels = <String>[widget.notebook.title];
-    for (final label in _selectedTagLabels) {
-      if (label == widget.notebook.title) continue;
-      final tag = await TagService.ensureTag(label, kind: TagService.inferKind(label));
-      if (tag == null || tagIds.contains(tag.id)) continue;
-      tagIds.add(tag.id);
-      tagLabels.add(tag.label);
-    }
-    final allTags = await TagService.visibleTags();
-    final sharedWith = TagService.sharedUidsFor(tagIds, allTags, uid);
 
     String? newPhotoKey;
     if (_localPhoto != null) {
-      newPhotoKey =
-          await PhotoService.uploadMemoryPhotoToR2(photo: _localPhoto!, notebookId: spaceId);
+      newPhotoKey = await PhotoService.uploadMemoryPhotoToR2(
+          photo: _localPhoto!, notebookId: spaceId);
     }
     final mediaKeys = newPhotoKey != null
         ? [newPhotoKey]
         : (_photoRemoved
             ? const <String>[]
-            : (_existingPhotoKey != null ? [_existingPhotoKey!] : const <String>[]));
+            : (_existingPhotoKey != null
+                ? [_existingPhotoKey!]
+                : const <String>[]));
 
-    final data = {
-      'notebookId': spaceId,
-      'userId': uid,
-      'tagIds': tagIds,
-      'tagLabels': tagLabels,
-      'sharedWith': sharedWith,
-      'type': 'taille_poids',
-      'subType': null,
-      'date': Timestamp.fromDate(_date),
-      'datePrecision': 'exact',
-      'dateLabel': null,
-      'rawContent': comment.isNotEmpty ? comment : parts.join(', '),
-      'aiNarration': null,
-      'photoUrl': null,
-      'mediaUrls': <String>[],
-      'mediaKeys': mediaKeys,
-      'weightKg': weightKg,
-      'heightCm': heightCm,
-    };
+    final entry = GrowthMeasurement(
+      // En édition on conserve l'id de l'entrée, sinon la mesure modifiée
+      // s'ajouterait à côté de l'ancienne au lieu de la remplacer.
+      id: widget.editing?.id ?? GrowthMeasurement.newId(),
+      date: _date,
+      heightCm: heightCm,
+      weightKg: weightKg,
+      rawContent: comment.isNotEmpty ? comment : parts.join(', '),
+      mediaKeys: mediaKeys,
+    );
+
     try {
-      if (_isEditing) {
-        // Édition : on met à jour la mesure existante (createdAt conservé).
-        await col.doc(widget.editing!.id).update(data);
-      } else {
-        await col.add({...data, 'createdAt': Timestamp.now()});
-      }
+      final memoryId = await GrowthMeasurementService.saveMeasurement(
+        tagId: tagId,
+        tagLabel: widget.notebook.title,
+        entry: entry,
+        extraTagLabels: _selectedTagLabels.toList(),
+      );
+      // Les URLs signées du porteur sont en cache : sans invalidation, une
+      // photo tout juste ajoutée ne s'afficherait qu'au prochain lancement.
+      PhotoService.invalidateSignedCache(memoryId);
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -1081,10 +1124,11 @@ class _MeasureSheetState extends State<_MeasureSheet> {
     if (ok != true) return;
     setState(() => _deleting = true);
     try {
-      await FirebaseFirestore.instance
-          .collection('memories')
-          .doc(widget.editing!.id)
-          .delete();
+      await GrowthMeasurementService.deleteMeasurement(
+        tagId: widget.notebook.id,
+        tagLabel: widget.notebook.title,
+        entryId: widget.editing!.id,
+      );
       if (mounted) Navigator.pop(context);
     } finally {
       if (mounted) setState(() => _deleting = false);
@@ -1475,10 +1519,7 @@ class _EmptyState extends StatelessWidget {
                 context: context,
                 isScrollControlled: true,
                 backgroundColor: Colors.transparent,
-                builder: (_) => _MeasureSheet(
-                  notebook: notebook,
-                  previousMeasures: const [],
-                ),
+                builder: (_) => _MeasureSheet(notebook: notebook),
               ),
               child: Container(
                 padding:

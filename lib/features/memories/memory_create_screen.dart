@@ -10,9 +10,11 @@ import 'package:image_picker/image_picker.dart';
 import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
+import '../../core/models/growth_measurement.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/growth_measurement_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/shared_media_service.dart';
@@ -1149,6 +1151,22 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ? double.tryParse(_heightController.text.replaceAll(',', '.'))
           : null;
 
+      // Une mesure ne devient pas un souvenir de plus : elle rejoint le
+      // souvenir unique du tag enfant, celui qui porte toute la courbe. Le tag
+      // est obligatoire pour enregistrer une mesure, donc `_childTag` est
+      // renseigné ici ; la sauvegarde générique ci-dessous reste le chemin de
+      // toutes les autres catégories.
+      final childTag = _childTag;
+      if (category == 'taille_poids' && childTag != null) {
+        await _saveGrowthMeasurement(
+          tag: childTag,
+          heightCm: heightCm,
+          weightKg: weightKg,
+          rawContent: rawContent,
+        );
+        return;
+      }
+
       // ── Sauvegarde optimiste (façon WhatsApp) ─────────────────────────────
       // On écrit d'abord le souvenir en base AVEC les médias déjà connus
       // (photos existantes en édition, audio existant conservé). Les NOUVEAUX
@@ -1313,6 +1331,53 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       setState(() => _loading = false);
       _showSnack(_friendlyError(e));
     }
+  }
+
+  /// Enregistre une mesure dans le souvenir « croissance » du tag.
+  ///
+  /// Les photos partent tout de suite au lieu de passer par la file d'upload
+  /// en arrière-plan : le tableau de mesures porte des CLÉS R2 par mesure, et
+  /// la file ne sait compléter qu'un souvenir classique.
+  Future<void> _saveGrowthMeasurement({
+    required TagModel tag,
+    required double? heightCm,
+    required double? weightKg,
+    required String rawContent,
+  }) async {
+    final spaceId = await SpaceService.ensureSpaceId();
+    if (spaceId == null) throw Exception('Espace introuvable');
+
+    final mediaKeys = <String>[
+      for (final u in _existingPhotoUrls)
+        if (_existingKeyByUrl.containsKey(u)) _existingKeyByUrl[u]!
+    ];
+    for (final photo in _localPhotos) {
+      final key = await PhotoService.uploadMemoryPhotoToR2(
+          photo: photo, notebookId: spaceId);
+      if (key != null) mediaKeys.add(key);
+    }
+
+    final entry = GrowthMeasurement(
+      // En édition d'une ancienne mesure (un souvenir = une pesée), l'id de
+      // l'entrée EST l'id du document : la reprendre ici met à jour la bonne
+      // mesure au lieu d'en ajouter une seconde.
+      id: _isEditing ? widget.memoryId! : GrowthMeasurement.newId(),
+      date: _selectedDate,
+      datePrecision: datePrecisionToString(_datePrecision),
+      heightCm: heightCm,
+      weightKg: weightKg,
+      rawContent: rawContent,
+      mediaKeys: mediaKeys,
+    );
+
+    final memoryId = await GrowthMeasurementService.saveMeasurement(
+      tagId: tag.id,
+      tagLabel: tag.label,
+      entry: entry,
+      extraTagLabels: _tagLabels.toList(),
+    );
+    PhotoService.invalidateSignedCache(memoryId);
+    if (mounted) context.go('/memories');
   }
 
   String _friendlyError(Object e) {

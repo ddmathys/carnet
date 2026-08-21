@@ -181,7 +181,13 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                             memory: m,
                             cat: _safeCat(m.type),
                             tilt: (i % 2 == 0) ? -0.02 : 0.02,
-                            onTap: () => context.push('/memory/${m.id}'),
+                            // Le souvenir « croissance » d'un tag n'a pas de
+                            // fiche à lui : il ouvre la courbe, où chaque
+                            // mesure se modifie d'un tap.
+                            onTap: () => m.type == 'taille_poids' &&
+                                    m.tagIds.isNotEmpty
+                                ? context.push('/growth/${m.tagIds.first}')
+                                : context.push('/memory/${m.id}'),
                             onDelete: () => confirmAndDeleteMemory(context, m),
                           );
                         },

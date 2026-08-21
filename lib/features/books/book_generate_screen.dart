@@ -14,6 +14,7 @@ import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/book_pdf_service.dart';
+import '../../core/services/growth_measurement_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
@@ -122,15 +123,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Même seuil que BookPdfService::hasEnoughGrowthData (≥2 mesures taille ou
   // poids) — sert à savoir si la case "chapitre croissance" a un sens à
-  // afficher pour ce livre.
+  // afficher pour ce livre. On compte les MESURES, pas les souvenirs : depuis
+  // qu'un souvenir « croissance » les regroupe toutes, un seul suffit à
+  // remplir la courbe.
   bool get _hasGrowthData =>
       _notebook?.type == 'enfant' &&
-      _selectedMemories
-              .where((m) =>
-                  m.type == 'taille_poids' &&
-                  (m.heightCm != null || m.weightKg != null))
-              .length >=
-          2;
+      GrowthMeasurementService.collect(_selectedMemories).length >= 2;
 
   // Photo la plus proche de chaque anniversaire (±30j), pour les mettre en
   // avant en pleine page (bookFeaturedMedia) sans repasser par un template

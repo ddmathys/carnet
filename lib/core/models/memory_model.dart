@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'growth_measurement.dart';
+
 class MemoryModel {
   final String id;
   final String notebookId;
@@ -36,6 +38,12 @@ class MemoryModel {
   // Compat ascendante : les anciens souvenirs ont un `videoKey` unique.
   final List<String> videoKeys;
   final List<int> videoDurationsMs;
+  // Mesures taille/poids. Un souvenir `taille_poids` par tag les accumule
+  // toutes ici, au lieu d'un souvenir par pesée. Les anciens souvenirs n'ont
+  // que les champs plats `weightKg`/`heightCm` ci-dessous : la lecture les
+  // convertit en une entrée unique, donc rien à migrer pour afficher une
+  // courbe correcte.
+  final List<GrowthMeasurement> measurements;
   final double? weightKg;
   final double? heightCm;
   final DateTime createdAt;
@@ -72,6 +80,7 @@ class MemoryModel {
     this.audioDurationMs,
     this.videoKeys = const [],
     this.videoDurationsMs = const [],
+    this.measurements = const [],
     this.weightKg,
     this.heightCm,
     required this.createdAt,
@@ -107,6 +116,7 @@ class MemoryModel {
       audioDurationMs: (d['audioDurationMs'] as num?)?.toInt(),
       videoKeys: _readVideoKeys(d),
       videoDurationsMs: _readVideoDurations(d),
+      measurements: _readMeasurements(d, doc.id),
       weightKg: (d['weightKg'] as num?)?.toDouble(),
       heightCm: (d['heightCm'] as num?)?.toDouble(),
       createdAt: d['createdAt'] != null
@@ -117,6 +127,41 @@ class MemoryModel {
           (d['bookHorizontalDensity'] as num?)?.toInt() ?? 2,
       bookFeaturedMedia: List<String>.from(d['bookFeaturedMedia'] ?? []),
     );
+  }
+
+  /// Lit le tableau `measurements` avec repli sur les champs plats d'origine.
+  /// Un ancien souvenir taille/poids (une seule pesée, `heightCm`/`weightKg` à
+  /// la racine) est présenté comme un tableau d'une entrée : les courbes et le
+  /// livre n'ont ainsi qu'un seul format à lire.
+  static List<GrowthMeasurement> _readMeasurements(
+      Map<String, dynamic> d, String memoryId) {
+    final raw = d['measurements'] as List<dynamic>?;
+    if (raw != null && raw.isNotEmpty) {
+      return raw
+          .map((e) => GrowthMeasurement.fromMap(
+              Map<String, dynamic>.from(e as Map), memoryId: memoryId))
+          .toList()
+        ..sort((a, b) => a.date.compareTo(b.date));
+    }
+    final legacyHeight = (d['heightCm'] as num?)?.toDouble();
+    final legacyWeight = (d['weightKg'] as num?)?.toDouble();
+    if (legacyHeight == null && legacyWeight == null) return const [];
+    final date = d['date'];
+    return [
+      GrowthMeasurement(
+        // L'id du document sert d'id d'entrée : stable, et jamais en collision
+        // avec les ids générés pour les nouvelles mesures.
+        id: memoryId,
+        memoryId: memoryId,
+        date: date is Timestamp ? date.toDate() : DateTime.now(),
+        datePrecision: d['datePrecision'] ?? 'exact',
+        dateLabel: d['dateLabel'],
+        heightCm: legacyHeight,
+        weightKg: legacyWeight,
+        rawContent: d['rawContent'] ?? '',
+        mediaKeys: List<String>.from(d['mediaKeys'] ?? const []),
+      )
+    ];
   }
 
   /// Lit `videoKeys` (nouveau format multi) avec repli sur l'ancien `videoKey`.
@@ -165,6 +210,7 @@ class MemoryModel {
         'videoKey': videoKeys.isNotEmpty ? videoKeys.first : null,
         'videoDurationMs':
             videoDurationsMs.isNotEmpty ? videoDurationsMs.first : null,
+        'measurements': measurements.map((e) => e.toMap()).toList(),
         'weightKg': weightKg,
         'heightCm': heightCm,
         'createdAt': Timestamp.fromDate(createdAt),
@@ -203,6 +249,7 @@ class MemoryModel {
         audioDurationMs: audioDurationMs,
         videoKeys: videoKeys,
         videoDurationsMs: videoDurationsMs,
+        measurements: measurements,
         weightKg: weightKg,
         heightCm: heightCm,
         createdAt: createdAt,

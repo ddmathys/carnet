@@ -71,6 +71,11 @@ class BookPricing {
   static int estimatePages(List<MemoryModel> memories) {
     int pages = 0;
     for (final m in memories) {
+      // Un souvenir « croissance » ne produit ni page photo ni page texte : il
+      // n'alimente que la courbe en fin de livre. Ses photos de mesures sont
+      // portées par le souvenir depuis qu'il les regroupe toutes — sans ce
+      // filtre, elles seraient facturées comme des pages qui n'existent pas.
+      if (m.type == 'taille_poids') continue;
       final n = m.mediaKeys.isNotEmpty
           ? m.mediaKeys.length
           : (m.mediaUrls.isNotEmpty
@@ -78,7 +83,7 @@ class BookPricing {
               : (m.photoUrl != null && m.photoUrl!.isNotEmpty ? 1 : 0));
       if (n > 0) {
         pages += (n / 4).ceil(); // ~4 photos / page, ≥1 page par souvenir
-      } else if (m.type != 'taille_poids') {
+      } else {
         pages += 1; // page texte
       }
     }

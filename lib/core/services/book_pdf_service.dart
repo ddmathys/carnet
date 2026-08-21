@@ -10,6 +10,7 @@ import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
 import '../data/growth_data.dart';
+import 'growth_measurement_service.dart';
 import 'photo_service.dart';
 import '../utils/date_precision.dart';
 
@@ -443,19 +444,20 @@ class BookPdfService {
 
     // Page courbe de croissance (carnet enfant uniquement) : dès 2 mesures
     // taille/poids, une page récap placée à la fin du livre (réf. OMS).
-    final growthMilestones = sorted
-        .where((m) =>
-            m.type == 'taille_poids' &&
-            (m.heightCm != null || m.weightKg != null))
-        .map((m) => MilestoneModel(
-              id: m.id,
+    // Un souvenir « croissance » porte toutes les mesures du tag : la courbe
+    // se reconstruit à partir de son tableau, à chaque génération. Les anciens
+    // souvenirs (une mesure par document) se lisent pareil — `measurements`
+    // leur fabrique une entrée unique depuis leurs champs plats.
+    final growthMilestones = GrowthMeasurementService.collect(sorted)
+        .map((e) => MilestoneModel(
+              id: e.id,
               childId: notebook.id,
               type: 'taille_poids',
-              date: m.date,
+              date: e.date,
               rawContent: '',
-              createdAt: m.date,
-              weightKg: m.weightKg,
-              heightCm: m.heightCm,
+              createdAt: e.date,
+              weightKg: e.weightKg,
+              heightCm: e.heightCm,
             ))
         .toList();
     final hasEnoughGrowthData =
