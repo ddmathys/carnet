@@ -14,8 +14,10 @@ class PosterPdfService {
   static const _textDark = PdfColor(0.176, 0.141, 0.086);
 
   // Bande du bas (texte + QR) : fraction de la hauteur de page réservée,
-  // suffisante pour rester lisible du A4 au A0.
-  static const double _bandFraction = 0.09;
+  // suffisante pour rester lisible du A4 au A0. Définie dans
+  // poster_template.dart car PosterFormatRules en a besoin aussi (la place
+  // qui reste aux cases décide du format minimum).
+  static const double _bandFraction = posterBandFraction;
 
   /// Télécharge les octets de chaque photo (URL déjà résolue — R2 signée ou
   /// Firebase), même pattern que BookPdfService : concurrence bornée, un

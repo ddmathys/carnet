@@ -14,6 +14,7 @@ import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/pdf_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/poster_format_rules.dart';
 import '../../core/services/poster_pdf_service.dart';
 import '../../core/services/poster_pricing.dart';
 import '../../core/services/poster_quality_service.dart';
@@ -92,6 +93,21 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   Map<String, PosterSizeQuality> get _quality =>
       PosterQualityService.evaluateAll(layout: _layout, photoDims: _photoDims);
 
+  /// Format papier minimum imposé par le collage courant (nombre de photos ET
+  /// mises en avant) — voir poster_format_rules.dart.
+  String get _minSize => PosterFormatRules.minSizeFor(_layout);
+
+  List<String> get _allowedSizes => PosterFormatRules.allowedSizes(_layout);
+
+  /// À appeler (dans un setState) après TOUT changement du collage : si la
+  /// taille choisie est devenue trop petite pour le nombre de cases, on
+  /// remonte au minimum imposé. On ne redescend jamais une taille plus grande
+  /// choisie exprès.
+  void _syncSizeToLayout() {
+    final sizes = _allowedSizes;
+    if (!sizes.contains(_size)) _size = sizes.first;
+  }
+
   Future<void> _loadData() async {
     setState(() => _loadError = null);
     try {
@@ -146,7 +162,11 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         _photoUrls = urls;
         _photoBytes = bytes;
         _photoDims = dims;
+        // Une photo en avant par défaut dès qu'il y en a plusieurs : c'est
+        // aussi ce qui rend la fonction visible (l'étoile apparaît sur la
+        // première photo, le texte au-dessus explique comment en changer).
         if (urls.length > 1) _featured.add(0);
+        _syncSizeToLayout();
         _loading = false;
       });
 
@@ -168,6 +188,9 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       setState(() {
         if (order.posterSize != null) _size = order.posterSize!;
         if (order.posterHangerColor != null) _color = order.posterHangerColor!;
+        // Une ancienne commande peut porter une taille devenue trop petite
+        // pour ce collage : on la remonte plutôt que de la laisser bloquer.
+        _syncSizeToLayout();
         _firstNameCtrl.text = order.firstName;
         _lastNameCtrl.text = order.lastName;
         _streetCtrl.text = order.street;
@@ -192,9 +215,14 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
             ..clear()
             ..add(i);
         }
+      } else if (!_featured.remove(i)) {
+        // 5 photos et plus : autant de photos en avant qu'on veut, chacune
+        // occupe un bloc 2×2 dans la mosaïque.
+        _featured.add(i);
       }
-      // 5-6 photos : la mise en avant est ignorée (grille égale) — pas
-      // d'action, le message dédié l'explique dans l'UI (_buildCollageStep).
+      // Une vedette de plus = des cases plus petites pour les autres, donc
+      // parfois un format minimum plus grand.
+      _syncSizeToLayout();
     });
   }
 
@@ -202,6 +230,11 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       _layout.orientation == PosterOrientation.landscape ? 'landscape' : 'portrait';
 
   Future<void> _placeOrder() async {
+    if (PosterFormatRules.isTooSmall(_layout, _size)) {
+      _showSnack(
+          'Avec ${_photoUrls.length} photos, le format minimum est $_minSize.');
+      return;
+    }
     final quality = _quality[_size];
     if (quality == null || quality.verdict == PosterQualityVerdict.disabled) {
       _showSnack('Cette taille n\'est pas assez nette avec ces photos — choisis une taille plus petite.');
@@ -349,12 +382,91 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   // ── Étape 0 : collage + légende ───────────────────────────────────────────
 
+  /// Texte d'aide de la mise en avant — dépend du nombre de photos, parce que
+  /// la règle n'est pas la même (1 seule vedette jusqu'à 4 photos, autant
+  /// qu'on veut au-delà).
+  String get _featuredHint {
+    final n = _photoUrls.length;
+    if (n <= 1) return 'Une seule photo : elle occupe tout le tirage.';
+    if (n <= 4) {
+      return _featured.isEmpty
+          ? 'Tape une photo pour l\'agrandir — à ce nombre de photos, une seule à la fois.'
+          : 'Tape une autre photo pour l\'agrandir à sa place, ou la même pour revenir à égalité.';
+    }
+    final count = _featured.length;
+    return count == 0
+        ? 'Tape les photos à mettre en avant : chacune prend 4 fois la place d\'une autre.'
+        : '$count photo${count > 1 ? 's' : ''} en avant — tape une photo pour l\'agrandir, retape-la pour la remettre à égalité.';
+  }
+
+  /// Explique la règle « le format suit le collage » avec les chiffres du
+  /// collage courant (voir poster_format_rules.dart).
+  String get _formatRuleText {
+    final n = _photoUrls.length;
+    final cm = PosterFormatRules.smallestTileCm(_layout, _minSize);
+    final each = cm == null
+        ? ''
+        : ' — la plus petite photo y fait ${cm.toStringAsFixed(0)} cm de côté';
+    if (n == 1) {
+      return 'Une photo plein cadre : tous les formats sont ouverts, du $_minSize au A0.';
+    }
+    return '$n photos : format $_minSize minimum$each. En dessous, chaque photo deviendrait une vignette — les formats plus petits sont verrouillés.';
+  }
+
+  /// Largeur/hauteur de la page choisie (identique pour tous les formats A,
+  /// seule l'orientation change) — sert à l'aperçu du collage.
+  double get _pageAspectRatio {
+    final mm = PosterPricing.mmFor(_size, _orientation) ??
+        PosterPricing.mmFor('A4', 'portrait')!;
+    return mm.wMm / mm.hMm;
+  }
+
   Widget _buildCollageStep() {
+    final multi = _photoUrls.length > 1;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
+        if (multi) ...[
+          Row(
+            children: [
+              const Expanded(
+                child: Text('Photos en avant',
+                    style: TextStyle(
+                        fontFamily: 'PlayfairDisplay',
+                        fontSize: 15,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textDark)),
+              ),
+              if (_featured.isNotEmpty)
+                TextButton(
+                  onPressed: () => setState(() {
+                    _featured.clear();
+                    _syncSizeToLayout();
+                  }),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 6),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Toutes à égalité',
+                      style: TextStyle(
+                          color: AppColors.sageDark,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12.5)),
+                ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(_featuredHint,
+              style: const TextStyle(
+                  fontSize: 12.5, color: AppColors.textMedium, height: 1.35)),
+          const SizedBox(height: 10),
+        ],
         AspectRatio(
-          aspectRatio: _layout.orientation == PosterOrientation.landscape ? 4 / 3 : 3 / 4,
+          // Proportions RÉELLES du papier (ISO 216 : 1/√2), pas un 3/4
+          // approximatif : maintenant que le format est imposé par le
+          // collage, l'aperçu doit montrer la vraie forme du tirage.
+          aspectRatio: _pageAspectRatio,
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(16),
@@ -384,7 +496,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                           child: _CollageTile(
                             url: _photoUrls[i],
                             featured: _featured.contains(i),
-                            selectable: _photoUrls.length <= 4,
+                            selectable: _photoUrls.length > 1,
                             onTap: () => _toggleFeatured(i),
                           ),
                         ),
@@ -396,14 +508,24 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          _photoUrls.length <= 4
-              ? (_photoUrls.length == 1
-                  ? 'Une seule photo — plein cadre.'
-                  : 'Tape une photo pour la mettre en avant.')
-              : 'Au-delà de 4 photos, toutes les photos sont affichées à la même taille.',
-          textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 12.5, color: AppColors.textMedium),
+        Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: AppColors.sageTint,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Icon(Icons.straighten, size: 18, color: AppColors.sageDark),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(_formatRuleText,
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.textDark, height: 1.35)),
+              ),
+            ],
+          ),
         ),
         const SizedBox(height: 24),
         const Text('Texte sur le tirage (optionnel)',
@@ -441,6 +563,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   Widget _buildSizeStep() {
     final quality = _quality;
+    final allowed = _allowedSizes;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
@@ -450,14 +573,33 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
                 color: AppColors.textDark)),
+        const SizedBox(height: 6),
+        Text(_formatRuleText,
+            style: const TextStyle(
+                fontSize: 12.5, color: AppColors.textMedium, height: 1.35)),
         const SizedBox(height: 10),
         for (final size in PosterPricing.sizes)
           _SizeCard(
             size: size,
             quality: quality[size],
+            // Trop PETIT pour ce collage (PosterFormatRules) — l'inverse du
+            // verdict qualité, qui interdit les formats trop GRANDS pour la
+            // résolution des photos. Un format absent du catalogue dans cette
+            // orientation (A0 paysage) n'est pas "trop petit" : on le laisse
+            // au verdict qualité, qui dit "indisponible".
+            tooSmall: !allowed.contains(size) &&
+                PosterPricing.entryFor(size, _orientation) != null,
+            photoCount: _photoUrls.length,
+            tileCm: PosterFormatRules.smallestTileCm(_layout, size),
             price: PosterPricing.price(size, _orientation),
             selected: _size == size,
             onTap: () {
+              if (!allowed.contains(size) &&
+                  PosterPricing.entryFor(size, _orientation) != null) {
+                _showSnack(
+                    '$size est trop petit pour ${_photoUrls.length} photos — format minimum : $_minSize.');
+                return;
+              }
               final q = quality[size];
               if (q == null || q.verdict == PosterQualityVerdict.disabled) {
                 final detail = q?.achievableDpi != null
@@ -633,12 +775,18 @@ class _CollageTile extends StatelessWidget {
               placeholder: (_, __) => Container(color: AppColors.sageTint),
               errorWidget: (_, __, ___) => Container(color: AppColors.sageTint),
             ),
-            if (featured)
-              const Positioned(
+            // Étoile pleine sur les vedettes, étoile creuse (discrète) sur
+            // les autres : sans elle, rien ne dit que les cases se tapent.
+            if (featured || selectable)
+              Positioned(
                 right: 4,
                 top: 4,
-                child: Icon(Icons.star, color: Colors.white, size: 18,
-                    shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
+                child: Icon(
+                  featured ? Icons.star : Icons.star_border,
+                  color: featured ? Colors.white : Colors.white70,
+                  size: featured ? 18 : 15,
+                  shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
+                ),
               ),
           ],
         ),
@@ -650,12 +798,21 @@ class _CollageTile extends StatelessWidget {
 class _SizeCard extends StatelessWidget {
   final String size;
   final PosterSizeQuality? quality;
+  /// Format verrouillé parce qu'il est trop petit pour le nombre de photos
+  /// (PosterFormatRules), indépendamment de la qualité des photos.
+  final bool tooSmall;
+  final int photoCount;
+  /// Côté de la plus petite photo du collage à ce format, en cm.
+  final double? tileCm;
   final double? price;
   final bool selected;
   final VoidCallback onTap;
   const _SizeCard({
     required this.size,
     required this.quality,
+    required this.tooSmall,
+    required this.photoCount,
+    required this.tileCm,
     required this.price,
     required this.selected,
     required this.onTap,
@@ -663,12 +820,18 @@ class _SizeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final disabled = quality == null || quality!.verdict == PosterQualityVerdict.disabled;
-    final badge = switch (quality?.verdict) {
-      PosterQualityVerdict.ok => ('✅', AppColors.sage, 'Qualité parfaite'),
-      PosterQualityVerdict.limited => ('⚠️', AppColors.amber, 'Qualité limite'),
-      _ => ('🚫', AppColors.error, 'Indisponible'),
-    };
+    final disabled =
+        tooSmall || quality == null || quality!.verdict == PosterQualityVerdict.disabled;
+    final badge = tooSmall
+        ? ('📐', AppColors.textMedium, 'Trop petit pour $photoCount photos')
+        : switch (quality?.verdict) {
+            PosterQualityVerdict.ok => ('✅', AppColors.sage, 'Qualité parfaite'),
+            PosterQualityVerdict.limited => ('⚠️', AppColors.amber, 'Qualité limite'),
+            _ => ('🚫', AppColors.error, 'Indisponible'),
+          };
+    final tileLabel = photoCount > 1 && tileCm != null
+        ? ' · ${tileCm!.toStringAsFixed(0)} cm par photo'
+        : '';
     return Opacity(
       opacity: disabled ? 0.55 : 1,
       child: GestureDetector(
@@ -695,7 +858,8 @@ class _SizeCard extends StatelessWidget {
                     Text(size,
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textDark)),
-                    Text(badge.$3, style: TextStyle(fontSize: 11.5, color: badge.$2)),
+                    Text('${badge.$3}$tileLabel',
+                        style: TextStyle(fontSize: 11.5, color: badge.$2)),
                   ],
                 ),
               ),

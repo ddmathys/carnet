@@ -17,6 +17,11 @@ import '../tags/tag_picker_sheet.dart';
 /// croissance, pas de "tout cocher par défaut" : une sélection délibérée,
 /// plafonnée à `posterMaxPhotos` PHOTOS (pas souvenirs) au total.
 ///
+/// Le nombre choisi ici n'est PAS contraint par un gabarit : la mosaïque
+/// s'adapte (poster_template.dart) et c'est le FORMAT du papier qui grandit
+/// avec (poster_format_rules.dart). Le plafond n'est qu'une limite pratique
+/// de téléchargement/génération.
+///
 /// Un souvenir avec plusieurs photos ouvre une sheet pour choisir laquelle
 /// (ou lesquelles) inclure — pas de choix automatique de "la première photo".
 class PosterSelectScreen extends StatefulWidget {
@@ -110,7 +115,7 @@ class _PosterSelectScreenState extends State<PosterSelectScreen> {
     if (_selected.length >= posterMaxPhotos) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(
-            'Maximum $posterMaxPhotos photos pour un tirage — décoche-en une pour en choisir une autre.'),
+            'Maximum $posterMaxPhotos photos pour un tirage (au-delà, la génération devient trop lourde) — décoche-en une pour en choisir une autre.'),
       ));
       return false;
     }
@@ -212,6 +217,14 @@ class _PosterSelectScreenState extends State<PosterSelectScreen> {
                             fontWeight: FontWeight.w600),
                       ),
                     ],
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 2, 16, 6),
+                  child: Text(
+                    'Prends-en autant que tu veux : le format du tirage grandit avec le nombre de photos, et tu choisiras ensuite celles à agrandir.',
+                    style: TextStyle(
+                        fontSize: 11.5, color: AppColors.textMedium, height: 1.3),
                   ),
                 ),
                 Expanded(
