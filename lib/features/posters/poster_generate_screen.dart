@@ -249,15 +249,37 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   String get _orientation =>
       _layout.orientation == PosterOrientation.landscape ? 'landscape' : 'portrait';
 
-  Future<void> _placeOrder() async {
+  /// Valide `_size` pour le collage courant — les deux règles
+  /// (PosterFormatRules = format minimum lisible, PosterQualityService =
+  /// format maximum net vu la résolution des photos) peuvent se contredire
+  /// sur un collage dense/très featuré : le format minimum imposé peut être
+  /// justement celui que la qualité interdit. Appelée dès la sortie de
+  /// l'étape Taille (pas seulement à la commande) pour ne pas laisser
+  /// l'utilisateur remplir toute l'adresse avant de découvrir le problème.
+  String? _sizeValidationError() {
     if (PosterFormatRules.isTooSmall(_layout, _size)) {
-      _showSnack(
-          'Avec ${_photoUrls.length} photos, le format minimum est $_minSize.');
-      return;
+      return 'Avec ${_photoUrls.length} photos, le format minimum est $_minSize.';
     }
     final quality = _quality[_size];
     if (quality == null || quality.verdict == PosterQualityVerdict.disabled) {
-      _showSnack('Cette taille n\'est pas assez nette avec ces photos — choisis une taille plus petite.');
+      // Si _size est déjà le plus petit format imposé par le collage
+      // (_allowedSizes est trié du plus petit au plus grand, et la qualité ne
+      // peut que se dégrader avec la taille), aucun format du catalogue ne
+      // conviendra : le vrai problème est le collage, pas le choix de taille.
+      final allowed = _allowedSizes;
+      final isSmallestAllowed = allowed.isNotEmpty && allowed.first == _size;
+      if (isSmallestAllowed) {
+        return 'Aucun format n\'est assez net pour ce collage avec ces photos — retire des photos ou réduis le nombre de photos mises en avant, puis réessaie.';
+      }
+      return 'Cette taille n\'est pas assez nette avec ces photos — choisis une taille plus petite.';
+    }
+    return null;
+  }
+
+  Future<void> _placeOrder() async {
+    final sizeError = _sizeValidationError();
+    if (sizeError != null) {
+      _showSnack(sizeError);
       return;
     }
     final isEdit = widget.editOrderId != null;
@@ -686,7 +708,14 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         ),
         const SizedBox(height: 24),
         ElevatedButton(
-          onPressed: () => setState(() => _step = 2),
+          onPressed: () {
+            final err = _sizeValidationError();
+            if (err != null) {
+              _showSnack(err);
+              return;
+            }
+            setState(() => _step = 2);
+          },
           style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(52)),
           child: const Text('Continuer'),
         ),
