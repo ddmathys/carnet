@@ -464,102 +464,116 @@ class _MemoryPhotosSheet extends StatelessWidget {
         : 'Souvenir';
     return StatefulBuilder(
       builder: (context, setModalState) {
-        return SafeArea(
-          child: Container(
-            margin: const EdgeInsets.all(12),
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: AppColors.background,
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+        return DraggableScrollableSheet(
+          initialChildSize: 0.85,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          expand: false,
+          builder: (context, scrollController) {
+            return SafeArea(
+              child: Container(
+                margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+                decoration: const BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Text(title,
-                          style: const TextStyle(
-                              fontFamily: 'PlayfairDisplay',
-                              fontSize: 16,
-                              fontWeight: FontWeight.bold,
-                              color: AppColors.textDark)),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(title,
+                              style: const TextStyle(
+                                  fontFamily: 'PlayfairDisplay',
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.textDark)),
+                        ),
+                        Builder(builder: (context) {
+                          final allSelected = List.generate(urls.length, (i) => i)
+                              .every(isSelected);
+                          return TextButton(
+                            onPressed: () {
+                              for (var i = 0; i < urls.length; i++) {
+                                if (isSelected(i) == allSelected) onToggle(i);
+                              }
+                              setModalState(() {});
+                            },
+                            child: Text(allSelected ? 'Tout retirer' : 'Tout ajouter',
+                                style: const TextStyle(
+                                    color: AppColors.sageDark,
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12.5)),
+                          );
+                        }),
+                      ],
                     ),
-                    Builder(builder: (context) {
-                      final allSelected =
-                          List.generate(urls.length, (i) => i).every(isSelected);
-                      return TextButton(
-                        onPressed: () {
-                          for (var i = 0; i < urls.length; i++) {
-                            if (isSelected(i) == allSelected) onToggle(i);
-                          }
-                          setModalState(() {});
+                    const SizedBox(height: 4),
+                    Text(
+                      'Toutes les photos sont ajoutées par défaut — décoche celles que tu ne veux pas garder (${urls.length} photo${urls.length > 1 ? 's' : ''}).',
+                      style: const TextStyle(
+                          fontSize: 12.5, color: AppColors.textMedium),
+                    ),
+                    const SizedBox(height: 14),
+                    Expanded(
+                      child: GridView.builder(
+                        controller: scrollController,
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                        ),
+                        itemCount: urls.length,
+                        itemBuilder: (_, i) {
+                          final selected = isSelected(i);
+                          return GestureDetector(
+                            onTap: () {
+                              onToggle(i);
+                              setModalState(() {});
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  CachedNetworkImage(
+                                    imageUrl: urls[i],
+                                    fit: BoxFit.cover,
+                                    placeholder: (_, __) =>
+                                        Container(color: AppColors.sageTint),
+                                    errorWidget: (_, __, ___) =>
+                                        Container(color: AppColors.sageTint),
+                                  ),
+                                  if (selected)
+                                    Container(
+                                      color: AppColors.sageDark.withOpacity(0.35),
+                                      alignment: Alignment.center,
+                                      child: const Icon(Icons.check_circle,
+                                          color: Colors.white, size: 28),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
                         },
-                        child: Text(allSelected ? 'Tout retirer' : 'Tout ajouter',
-                            style: const TextStyle(
-                                color: AppColors.sageDark,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 12.5)),
-                      );
-                    }),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: ElevatedButton.styleFrom(
+                            minimumSize: const Size.fromHeight(48)),
+                        child: const Text('OK'),
+                      ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Toutes les photos sont ajoutées par défaut — décoche celles que tu ne veux pas garder.',
-                  style: TextStyle(fontSize: 12.5, color: AppColors.textMedium),
-                ),
-                const SizedBox(height: 14),
-                GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 3,
-                    crossAxisSpacing: 8,
-                    mainAxisSpacing: 8,
-                  ),
-                  itemCount: urls.length,
-                  itemBuilder: (_, i) {
-                    final selected = isSelected(i);
-                    return GestureDetector(
-                      onTap: () {
-                        onToggle(i);
-                        setModalState(() {});
-                      },
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: Stack(
-                          fit: StackFit.expand,
-                          children: [
-                            CachedNetworkImage(
-                              imageUrl: urls[i],
-                              fit: BoxFit.cover,
-                              placeholder: (_, __) => Container(color: AppColors.sageTint),
-                              errorWidget: (_, __, ___) => Container(color: AppColors.sageTint),
-                            ),
-                            if (selected)
-                              Container(
-                                color: AppColors.sageDark.withOpacity(0.35),
-                                alignment: Alignment.center,
-                                child: const Icon(Icons.check_circle,
-                                    color: Colors.white, size: 28),
-                              ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
-                  child: const Text('OK'),
-                ),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
