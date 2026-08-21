@@ -271,7 +271,7 @@ class _BloomAppState extends State<BloomApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp.router(
-      title: 'Folio',
+      title: 'Carnet album souvenir',
       theme: AppTheme.light,
       routerConfig: _router,
       scaffoldMessengerKey: _messengerKey,

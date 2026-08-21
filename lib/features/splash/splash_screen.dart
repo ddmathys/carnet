@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import '../../core/theme/app_theme.dart';
 import '../../core/services/media_migration_service.dart';
 import '../../core/services/migration_service.dart';
 import '../../core/services/notification_service.dart';
@@ -112,10 +111,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
     super.dispose();
   }
 
+  // Identité "livre-cœur" (assets/branding/) : palette dédiée à l'écran de
+  // démarrage, distincte du thème sombre espresso du reste de l'app.
+  static const _terracotta = Color(0xFFD0806A);
+  static const _cream = Color(0xFFFBF4EF);
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.sage,
+      backgroundColor: _terracotta,
       body: Center(
         child: FadeTransition(
           opacity: _fadeIn,
@@ -125,19 +129,20 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
               mainAxisSize: MainAxisSize.min,
               children: [
                 SvgPicture.asset(
-                  'assets/images/bloom_logo_v3.svg',
-                  width: 160,
-                  height: 160,
+                  'assets/branding/svg/carnet-mark.svg',
+                  width: 140,
+                  height: 140,
                 ),
                 const SizedBox(height: 16),
                 const Text(
-                  'carnet',
+                  'Carnet album souvenir',
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                     fontFamily: 'PlayfairDisplay',
-                    fontSize: 48,
+                    fontSize: 30,
                     fontWeight: FontWeight.bold,
-                    color: AppColors.cream,
-                    letterSpacing: 2,
+                    color: _cream,
+                    letterSpacing: 1,
                     fontStyle: FontStyle.italic,
                   ),
                 ),
@@ -147,7 +152,7 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
                   style: TextStyle(
                     fontFamily: 'DMSans',
                     fontSize: 14,
-                    color: AppColors.cream.withOpacity(0.8),
+                    color: _cream.withOpacity(0.85),
                     letterSpacing: 0.5,
                   ),
                 ),

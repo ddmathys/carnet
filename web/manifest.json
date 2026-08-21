@@ -1,11 +1,11 @@
 {
-    "name": "bloom",
-    "short_name": "bloom",
+    "name": "Carnet album souvenir",
+    "short_name": "Carnet",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#D0806A",
+    "theme_color": "#D0806A",
+    "description": "Journal de vie intelligent pour enfants avec narration IA.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

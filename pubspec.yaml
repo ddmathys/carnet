@@ -84,6 +84,7 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^4.0.0
   flutter_launcher_icons: ^0.14.3
+  flutter_native_splash: ^2.4.4
 
 # La version pub de record_linux (0.7.2) est périmée et casse la compilation
 # (n'implémente pas startStream de record_platform_interface ^1.6.0, importé
@@ -95,11 +96,24 @@ dependency_overrides:
     path: packages/record_linux
 
 flutter_launcher_icons:
+  image_path: "assets/branding/ios/carnet_appicon_1024.png"
   android: true
-  ios: false
-  image_path: "assets/images/launcher_icon.png"
-  adaptive_icon_background: "#1B140F"
-  adaptive_icon_foreground: "assets/images/launcher_icon.png"
+  ios: true
+  remove_alpha_ios: true
+  adaptive_icon_background: "#D0806A"
+  adaptive_icon_foreground: "assets/branding/android/carnet_adaptive_foreground_1024.png"
+  web:
+    generate: true
+    image_path: "assets/branding/web/favicon_512.png"
+    background_color: "#D0806A"
+    theme_color: "#D0806A"
+
+flutter_native_splash:
+  color: "#D0806A"
+  image: "assets/branding/splash/carnet_splash_logo_1024.png"
+  android_12:
+    color: "#D0806A"
+    image: "assets/branding/splash/carnet_splash_logo_1024.png"
 
 flutter:
   uses-material-design: true
@@ -108,6 +122,8 @@ flutter:
     - assets/images/animals/
     - assets/icons/
     - assets/welcome/
+    - assets/branding/svg/
+    - assets/branding/splash/
     # Le PDF du livre charge ses polices par CHEMIN (rootBundle), pas par
     # famille. Depuis que les familles sont repointées vers Fraunces/Outfit,
     # les TTF historiques n'étaient plus embarqués → l'aperçu échouait sur
