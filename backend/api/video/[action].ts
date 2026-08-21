@@ -92,7 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? (reel.memoryIds as unknown[]).filter((x): x is string => typeof x === 'string')
         : []
 
-      const videos: { title: string; url: string }[] = []
+      const medias: { title: string; url: string; kind: 'video' | 'audio' }[] = []
       for (const memoryId of memoryIds) {
         const memSnap = await db.collection('memories').doc(memoryId).get()
         if (!memSnap.exists) continue
@@ -100,23 +100,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const title = typeof mem.title === 'string' ? mem.title : ''
         for (const key of videoKeysOf(mem)) {
           const url = await presignGet(key, 3600)
-          videos.push({ title, url })
+          medias.push({ title, url, kind: 'video' })
+        }
+        const audioKey = audioKeyOf(mem)
+        if (audioKey) {
+          const url = await presignGet(audioKey, 3600)
+          medias.push({ title, url, kind: 'audio' })
         }
       }
 
-      if (videos.length === 0) {
-        return res.status(404).send(reelPage('Pas encore de vidéo', '<p>Aucune vidéo n’est associée à ce tirage pour l’instant.</p>'))
+      if (medias.length === 0) {
+        return res.status(404).send(reelPage('Pas encore de souvenir', '<p>Aucune vidéo ni mémo vocal n’est associé à ce tirage pour l’instant.</p>'))
       }
 
-      const body = videos
+      const body = medias
         .map(
-          (v) => `
-        ${v.title ? `<p class="reelTitle">${escapeHtml(v.title)}</p>` : ''}
-        <video controls preload="metadata" src="${escapeHtml(v.url)}"></video>
+          (m) => `
+        ${m.title ? `<p class="reelTitle">${escapeHtml(m.title)}</p>` : ''}
+        ${
+          m.kind === 'video'
+            ? `<video controls preload="metadata" src="${escapeHtml(m.url)}"></video>`
+            : `<audio controls preload="metadata" src="${escapeHtml(m.url)}" style="width:100%"></audio>`
+        }
       `
         )
         .join('')
-      return res.status(200).send(reelPage('Souvenirs en vidéo', body))
+      return res.status(200).send(reelPage('Souvenirs en vidéo et en son', body))
     } catch {
       return res.status(500).send(reelPage('Erreur', '<p>Impossible de charger les vidéos pour l’instant.</p>'))
     }

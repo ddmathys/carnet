@@ -68,7 +68,10 @@ class PosterPdfService {
     required String size,
     required String orientation,
     String? caption,
-    required String qrUrl,
+    // null = pas de vidéo/mémo vocal parmi les souvenirs choisis : pas de QR
+    // imprimé (un code qui ne mène nulle part n'a aucune valeur pour le
+    // destinataire). Décidé par l'appelant (poster_generate_screen.dart).
+    String? qrUrl,
   }) async {
     assert(photoBytes.length == layout.tiles.length);
     final mm = PosterPricing.mmFor(size, orientation);
@@ -137,14 +140,16 @@ class PosterPdfService {
                           ),
                         ),
                 ),
-                pw.SizedBox(width: bandH * 0.15),
-                pw.BarcodeWidget(
-                  barcode: pw.Barcode.qrCode(),
-                  data: qrUrl,
-                  width: qrSize,
-                  height: qrSize,
-                  color: _textDark,
-                ),
+                if (qrUrl != null) ...[
+                  pw.SizedBox(width: bandH * 0.15),
+                  pw.BarcodeWidget(
+                    barcode: pw.Barcode.qrCode(),
+                    data: qrUrl,
+                    width: qrSize,
+                    height: qrSize,
+                    color: _textDark,
+                  ),
+                ],
               ],
             ),
           ),

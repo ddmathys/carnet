@@ -99,6 +99,15 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   List<String> get _allowedSizes => PosterFormatRules.allowedSizes(_layout);
 
+  /// Vrai si au moins un des souvenirs choisis a une vidéo ou un mémo vocal —
+  /// seul cas où le QR (lien vers le "reel") a une destination réelle. Un
+  /// tirage 100% photos n'imprime pas de QR mort. `audioKey` seulement (pas
+  /// l'ancien `audioUrl` Firebase) : même convention que le backend
+  /// (`audioKeyOf` dans lib/access.ts), pour que ce que promet le QR soit
+  /// toujours ce que le reel peut effectivement servir.
+  bool get _hasMedia =>
+      _uniqueMemories.any((m) => m.videoKeys.isNotEmpty || m.audioKey != null);
+
   /// À appeler (dans un setState) après TOUT changement du collage : si la
   /// taille choisie est devenue trop petite pour le nombre de cases, on
   /// remonte au minimum imposé. On ne redescend jamais une taille plus grande
@@ -245,23 +254,28 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
+    final hasMedia = _hasMedia;
     setState(() {
       _ordering = true;
-      _orderMessage = 'Préparation des vidéos liées…';
+      _orderMessage = hasMedia ? 'Préparation des vidéos liées…' : 'Génération du tirage…';
     });
     try {
       // 1. "Reel" vidéo public (cible du QR) — créé AVANT le PDF puisque le QR
-      // doit déjà être imprimé dedans.
-      final reelRes = await BackendClient.postJson(
-        '/api/video/poster-reel-create',
-        {'memoryIds': _uniqueMemories.map((m) => m.id).toList()},
-        timeout: const Duration(seconds: 20),
-      );
-      final reelId = reelRes?['reelId'] as String?;
-      if (reelId == null) {
-        throw Exception('Impossible de préparer les vidéos liées au tirage.');
+      // doit déjà être imprimé dedans. Seulement si au moins un souvenir a une
+      // vidéo/mémo vocal : sinon pas de QR à imprimer (voir _hasMedia).
+      String? qrUrl;
+      if (hasMedia) {
+        final reelRes = await BackendClient.postJson(
+          '/api/video/poster-reel-create',
+          {'memoryIds': _uniqueMemories.map((m) => m.id).toList()},
+          timeout: const Duration(seconds: 20),
+        );
+        final reelId = reelRes?['reelId'] as String?;
+        if (reelId == null) {
+          throw Exception('Impossible de préparer les vidéos liées au tirage.');
+        }
+        qrUrl = '${AppConfig.backendUrl}/api/video/poster-video-reel?o=$reelId';
       }
-      final qrUrl = '${AppConfig.backendUrl}/api/video/poster-video-reel?o=$reelId';
 
       if (!mounted) return;
       setState(() => _orderMessage = 'Génération du tirage…');
@@ -483,6 +497,12 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                 builder: (context, constraints) {
                   final w = constraints.maxWidth;
                   final h = constraints.maxHeight;
+                  // Même découpage que PosterPdfService.generate : les cases
+                  // se partagent (1 - posterBandFraction) de la hauteur, le
+                  // reste est la bande titre/QR — l'aperçu doit être fidèle
+                  // au vrai fichier envoyé à l'impression.
+                  final contentH = h * (1 - posterBandFraction);
+                  final bandH = h * posterBandFraction;
                   return Stack(
                     children: [
                       for (var i = 0;
@@ -490,9 +510,9 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                           i++)
                         Positioned(
                           left: _layout.tiles[i].x * w,
-                          top: _layout.tiles[i].y * h,
+                          top: _layout.tiles[i].y * contentH,
                           width: _layout.tiles[i].w * w,
-                          height: _layout.tiles[i].h * h,
+                          height: _layout.tiles[i].h * contentH,
                           child: _CollageTile(
                             url: _photoUrls[i],
                             featured: _featured.contains(i),
@@ -500,6 +520,13 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                             onTap: () => _toggleFeatured(i),
                           ),
                         ),
+                      Positioned(
+                        left: 0,
+                        top: contentH,
+                        width: w,
+                        height: bandH,
+                        child: _BandPreview(captionCtrl: _captionCtrl, hasMedia: _hasMedia),
+                      ),
                     ],
                   );
                 },
@@ -545,9 +572,11 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           ),
         ),
-        const Text(
-          'Affiché dans la bande du bas, à côté du QR code (vidéos des souvenirs choisis).',
-          style: TextStyle(fontSize: 11.5, color: AppColors.textMedium),
+        Text(
+          _hasMedia
+              ? 'Affiché dans la bande du bas, à côté du QR code (vidéos/mémos vocaux des souvenirs choisis).'
+              : 'Affiché dans la bande du bas. Pas de vidéo ni de mémo vocal dans ces souvenirs : pas de QR code imprimé.',
+          style: const TextStyle(fontSize: 11.5, color: AppColors.textMedium),
         ),
         const SizedBox(height: 24),
         ElevatedButton(
@@ -741,6 +770,61 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// Aperçu de la bande du bas, fidèle à ce que dessine PosterPdfService.generate
+/// (texte à gauche, QR à droite si `hasMedia`) — jusqu'ici invisible avant
+/// commande, seulement décrit par un texte d'aide. Se met à jour en direct
+/// avec la saisie du texte (écoute `captionCtrl`).
+class _BandPreview extends StatelessWidget {
+  final TextEditingController captionCtrl;
+  final bool hasMedia;
+  const _BandPreview({required this.captionCtrl, required this.hasMedia});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(
+            child: AnimatedBuilder(
+              animation: captionCtrl,
+              builder: (_, __) {
+                final text = captionCtrl.text.trim();
+                return Text(
+                  text.isEmpty ? '' : text,
+                  maxLines: 2,
+                  overflow: TextOverflow.clip,
+                  style: const TextStyle(
+                    fontFamily: 'PlayfairDisplay',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 11,
+                    color: AppColors.textDark,
+                  ),
+                );
+              },
+            ),
+          ),
+          if (hasMedia) ...[
+            const SizedBox(width: 6),
+            AspectRatio(
+              aspectRatio: 1,
+              child: Container(
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.textDark, width: 1),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+                child: const Icon(Icons.qr_code_2, size: 14, color: AppColors.textDark),
+              ),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
