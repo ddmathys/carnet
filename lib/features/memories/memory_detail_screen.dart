@@ -196,6 +196,7 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
         children: [
           _RoundIcon(
             icon: Icons.arrow_back_ios_new,
+            label: 'Retour',
             onTap: () => context.canPop() ? context.pop() : context.go('/home'),
           ),
           const Spacer(),
@@ -210,6 +211,7 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
           const Spacer(),
           _RoundIcon(
             icon: Icons.delete_outline,
+            label: 'Supprimer ce souvenir',
             onTap: () async {
               final deleted = await confirmAndDeleteMemory(context, m);
               if (deleted && mounted) context.go('/home');
@@ -520,20 +522,25 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
 class _RoundIcon extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
-  const _RoundIcon({required this.icon, required this.onTap});
+  final String label;
+  const _RoundIcon({required this.icon, required this.onTap, required this.label});
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 42,
-        height: 42,
-        decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.03),
-          borderRadius: BorderRadius.circular(14),
+    return Semantics(
+      label: label,
+      button: true,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          width: 42,
+          height: 42,
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.03),
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Icon(icon, size: 18, color: AppColors.textDark),
         ),
-        child: Icon(icon, size: 18, color: AppColors.textDark),
       ),
     );
   }

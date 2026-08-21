@@ -183,19 +183,23 @@ class MemoryPolaroid extends StatelessWidget {
                         Positioned(
                           bottom: 6,
                           left: 6,
-                          child: GestureDetector(
-                            onTap: onDelete,
-                            behavior: HitTestBehavior.opaque,
-                            child: Container(
-                              width: 28,
-                              height: 28,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: Colors.black.withOpacity(0.45),
-                                shape: BoxShape.circle,
+                          child: Semantics(
+                            label: 'Supprimer ce souvenir',
+                            button: true,
+                            child: GestureDetector(
+                              onTap: onDelete,
+                              behavior: HitTestBehavior.opaque,
+                              child: Container(
+                                width: 28,
+                                height: 28,
+                                alignment: Alignment.center,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withOpacity(0.45),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.delete_outline,
+                                    size: 16, color: Colors.white),
                               ),
-                              child: const Icon(Icons.delete_outline,
-                                  size: 16, color: Colors.white),
                             ),
                           ),
                         ),

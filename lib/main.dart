@@ -276,6 +276,21 @@ class _BloomAppState extends State<BloomApp> {
       routerConfig: _router,
       scaffoldMessengerKey: _messengerKey,
       debugShowCheckedModeBanner: false,
+      builder: (context, child) {
+        // Beaucoup de boutons/tuiles ont une hauteur fixe (ex.
+        // Size.fromHeight(52)) — un texte système fortement agrandi (réglage
+        // fréquent chez les grands-parents, un vrai public de cette app) les
+        // ferait déborder. On laisse le texte grossir (accessibilité) mais on
+        // plafonne à 1.3x plutôt que de le laisser casser la mise en page.
+        final scaler = MediaQuery.textScalerOf(context).clamp(
+          minScaleFactor: 1.0,
+          maxScaleFactor: 1.3,
+        );
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(textScaler: scaler),
+          child: child!,
+        );
+      },
     );
   }
 }

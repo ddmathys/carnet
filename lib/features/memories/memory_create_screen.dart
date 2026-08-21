@@ -58,6 +58,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool get _isEditing => widget.memoryId != null;
 
   bool _ready = false;
+  // Sans ça, une lecture qui pend/échoue (Firestore, tags…) laissait le
+  // spinner plein écran ci-dessous tourner à l'infini, sans message.
+  String? _loadError;
 
   // ── Tags ───────────────────────────────────────────────────────────────────
   // On travaille en LIBELLÉS, pas en ids : rien n'est créé en base tant que le
@@ -170,21 +173,29 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// pose les tags automatiques (année, lieu) et on ouvre la galerie si on
   /// arrive du bouton « Importer des médias ».
   Future<void> _loadNew() async {
-    final tags = await TagService.visibleTags();
-    if (!mounted) return;
-    setState(() {
-      _allTags = tags;
-      _selectedCategory = 'anecdote';
-      _step = 1;
-      _ready = true;
-      final initial = widget.initialTagId;
-      if (initial != null) {
-        for (final t in tags) {
-          if (t.id == initial) _tagLabels.add(t.label);
+    try {
+      final tags =
+          await TagService.visibleTags().timeout(const Duration(seconds: 20));
+      if (!mounted) return;
+      setState(() {
+        _allTags = tags;
+        _selectedCategory = 'anecdote';
+        _step = 1;
+        _ready = true;
+        final initial = widget.initialTagId;
+        if (initial != null) {
+          for (final t in tags) {
+            if (t.id == initial) _tagLabels.add(t.label);
+          }
         }
-      }
-      _syncAutoTags();
-    });
+        _syncAutoTags();
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() =>
+          _loadError = 'Chargement impossible. Vérifie ta connexion.');
+      return;
+    }
 
     // Partage entrant : les médias sont déjà là, on les attache directement.
     // Sinon, arrivée depuis « Importer des médias » : on ouvre le sélecteur.
@@ -240,11 +251,23 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   Future<void> _loadForEdit() async {
-    final tagsFuture = TagService.visibleTags();
+    const t = Duration(seconds: 20);
+    try {
+      await _loadForEditBody(t);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() =>
+          _loadError = 'Chargement impossible. Vérifie ta connexion.');
+    }
+  }
+
+  Future<void> _loadForEditBody(Duration t) async {
+    final tagsFuture = TagService.visibleTags().timeout(t);
     final memDoc = await FirebaseFirestore.instance
         .collection('memories')
         .doc(widget.memoryId)
-        .get();
+        .get()
+        .timeout(t);
     final tags = await tagsFuture;
     if (!mounted) return;
 
@@ -269,7 +292,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         List<String>.from(data['mediaKeys'] as List<dynamic>? ?? []);
     Map<String, String> signedMap = const {};
     if (mediaKeysData.isNotEmpty) {
-      signedMap = await PhotoService.signedUrlsForMemory(widget.memoryId!);
+      signedMap =
+          await PhotoService.signedUrlsForMemory(widget.memoryId!).timeout(t);
       if (!mounted) return;
     }
 
@@ -277,7 +301,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     final audioKeyData = data['audioKey'] as String?;
     String? audioPlayUrl = data['audioUrl'] as String?;
     if (audioKeyData != null && audioKeyData.isNotEmpty) {
-      audioPlayUrl = await AudioService.signedAudioUrl(widget.memoryId!);
+      audioPlayUrl = await AudioService.signedAudioUrl(widget.memoryId!).timeout(t);
       if (!mounted) return;
     }
 
@@ -1361,6 +1385,30 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   @override
   Widget build(BuildContext context) {
     if (!_ready) {
+      if (_loadError != null) {
+        return Scaffold(
+          backgroundColor: AppColors.background,
+          body: Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_loadError!, textAlign: TextAlign.center),
+                  const SizedBox(height: 16),
+                  ElevatedButton(
+                    onPressed: () {
+                      setState(() => _loadError = null);
+                      _isEditing ? _loadForEdit() : _loadNew();
+                    },
+                    child: const Text('Réessayer'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
       return const Scaffold(
           backgroundColor: AppColors.background,
           body: Center(child: CircularProgressIndicator()));

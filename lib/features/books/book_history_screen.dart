@@ -311,6 +311,7 @@ class _BookTile extends StatelessWidget {
                       width: 22, height: 22,
                       child: CircularProgressIndicator(strokeWidth: 2))
                   : PopupMenuButton<String>(
+                      tooltip: 'Options du livre',
                       icon: const Icon(Icons.more_vert,
                           color: AppColors.textMedium),
                       onSelected: (v) {

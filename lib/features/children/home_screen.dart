@@ -142,17 +142,24 @@ class _HomeScreenState extends State<HomeScreen> {
   Future<void> _loadQuota() async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
-    final results = await Future.wait([
-      QuotaService.checkQuota(uid),
-      QuotaService.checkVideoQuota(uid),
-      QuotaService.checkAudioQuota(uid),
-    ]);
-    if (mounted) {
-      setState(() {
-        _quota = results[0];
-        _videoQuota = results[1];
-        _audioQuota = results[2];
-      });
+    try {
+      final results = await Future.wait([
+        QuotaService.checkQuota(uid),
+        QuotaService.checkVideoQuota(uid),
+        QuotaService.checkAudioQuota(uid),
+      ]).timeout(const Duration(seconds: 20));
+      if (mounted) {
+        setState(() {
+          _quota = results[0];
+          _videoQuota = results[1];
+          _audioQuota = results[2];
+        });
+      }
+    } catch (_) {
+      // Une lecture qui pend/échoue laissait le bloc quota chargeant à
+      // l'infini, sans message — les widgets quota gèrent déjà une valeur
+      // null comme "pas de barre affichée" plutôt qu'un spinner bloquant,
+      // donc ne rien faire ici suffit à sortir proprement de l'état chargeant.
     }
   }
 
