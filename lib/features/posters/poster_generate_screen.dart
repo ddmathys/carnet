@@ -52,6 +52,10 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   List<Uint8List> _photoBytes = [];
   List<({int w, int h})?> _photoDims = [];
   final Set<int> _featured = {};
+  // Photo désignée par PosterQualityService comme responsable du blocage
+  // qualité d'une taille tapée par l'utilisateur — mise en évidence dans
+  // l'aperçu du collage (étape 0) le temps qu'il/elle agisse dessus.
+  int? _bottleneckIndex;
 
   String _size = 'A4';
   String _color = 'natural';
@@ -171,10 +175,15 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         _photoUrls = urls;
         _photoBytes = bytes;
         _photoDims = dims;
-        // Une photo en avant par défaut dès qu'il y en a plusieurs : c'est
-        // aussi ce qui rend la fonction visible (l'étoile apparaît sur la
-        // première photo, le texte au-dessus explique comment en changer).
-        if (urls.length > 1) _featured.add(0);
+        // Une photo en avant par défaut UNIQUEMENT sur les gabarits fixes
+        // (2-4 photos) : c'est aussi ce qui rend la fonction visible (l'étoile
+        // apparaît sur la première photo, le texte au-dessus explique comment
+        // en changer). À partir de 5 photos (mosaïque), pas de vedette par
+        // défaut — avec beaucoup de vignettes, une case agrandie qu'on n'a pas
+        // choisie est difficile à repérer/désactiver, et peut à elle seule
+        // bloquer les grands formats si sa résolution est trop juste (voir
+        // PosterQualityService.bottleneckPhotoIndex).
+        if (urls.length > 1 && urls.length <= 4) _featured.add(0);
         _syncSizeToLayout();
         _loading = false;
       });
@@ -232,6 +241,8 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       // Une vedette de plus = des cases plus petites pour les autres, donc
       // parfois un format minimum plus grand.
       _syncSizeToLayout();
+      // Le collage a changé : l'ancien repère qualité peut ne plus s'appliquer.
+      _bottleneckIndex = null;
     });
   }
 
@@ -516,6 +527,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                           child: _CollageTile(
                             url: _photoUrls[i],
                             featured: _featured.contains(i),
+                            bottleneck: _bottleneckIndex == i,
                             selectable: _photoUrls.length > 1,
                             onTap: () => _toggleFeatured(i),
                           ),
@@ -631,13 +643,22 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
               }
               final q = quality[size];
               if (q == null || q.verdict == PosterQualityVerdict.disabled) {
-                final detail = q?.achievableDpi != null
-                    ? ' (photo la plus limitante : qualité insuffisante à cette taille)'
-                    : ' (indisponible pour cette orientation)';
-                _showSnack('Taille $size trop juste avec ces photos$detail.');
+                if (q?.bottleneckPhotoIndex != null) {
+                  setState(() {
+                    _bottleneckIndex = q!.bottleneckPhotoIndex;
+                    _step = 0;
+                  });
+                  _showSnack(
+                      'Taille $size trop juste : la photo entourée en rouge n\'est pas assez nette pour cette taille — retire-la ou enlève sa mise en avant.');
+                } else {
+                  _showSnack('Taille $size indisponible pour cette orientation.');
+                }
                 return;
               }
-              setState(() => _size = size);
+              setState(() {
+                _size = size;
+                _bottleneckIndex = null;
+              });
             },
           ),
         const SizedBox(height: 20),
@@ -832,11 +853,13 @@ class _BandPreview extends StatelessWidget {
 class _CollageTile extends StatelessWidget {
   final String url;
   final bool featured;
+  final bool bottleneck;
   final bool selectable;
   final VoidCallback onTap;
   const _CollageTile({
     required this.url,
     required this.featured,
+    this.bottleneck = false,
     required this.selectable,
     required this.onTap,
   });
@@ -848,7 +871,11 @@ class _CollageTile extends StatelessWidget {
       child: Container(
         margin: const EdgeInsets.all(1),
         decoration: BoxDecoration(
-          border: featured ? Border.all(color: Colors.white, width: 3) : null,
+          border: bottleneck
+              ? Border.all(color: AppColors.error, width: 3)
+              : featured
+                  ? Border.all(color: Colors.white, width: 3)
+                  : null,
         ),
         child: Stack(
           fit: StackFit.expand,
@@ -871,6 +898,18 @@ class _CollageTile extends StatelessWidget {
                   size: featured ? 18 : 15,
                   shadows: const [Shadow(blurRadius: 4, color: Colors.black54)],
                 ),
+              ),
+            // Photo désignée par PosterQualityService comme responsable du
+            // blocage qualité de la taille tapée par l'utilisateur — voir
+            // _bottleneckIndex dans _PosterGenerateScreenState.
+            if (bottleneck)
+              const Positioned(
+                left: 4,
+                bottom: 4,
+                child: Icon(Icons.warning_amber_rounded,
+                    color: AppColors.error,
+                    size: 18,
+                    shadows: [Shadow(blurRadius: 4, color: Colors.black54)]),
               ),
           ],
         ),
