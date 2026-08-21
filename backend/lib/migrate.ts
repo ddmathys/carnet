@@ -61,15 +61,16 @@ async function moveToR2(
   return key
 }
 
-/** Migre les souvenirs de l'utilisateur : photos + mémo vocal. */
-async function migrateMemories(
-  uid: string,
+/** Migre un lot de documents `memories` déjà récupérés : photos + mémo vocal.
+ *  Le propriétaire (pour construire les chemins R2) est lu sur CHAQUE document
+ *  (`userId`) plutôt que passé en paramètre, pour servir aussi bien un balayage
+ *  mono-utilisateur qu'un balayage global tous comptes confondus. */
+async function migrateMemoryDocs(
+  docs: FirebaseFirestore.QueryDocumentSnapshot[],
   budget: number,
   report: MigrationReport
 ): Promise<number> {
-  const snap = await db.collection('memories').where('userId', '==', uid).get()
-
-  const pending = snap.docs.filter((d) => {
+  const pending = docs.filter((d) => {
     const x = d.data()
     const urls = [x.photoUrl, ...(Array.isArray(x.mediaUrls) ? x.mediaUrls : [])]
     return urls.some(isFirebaseUrl) || isFirebaseUrl(x.audioUrl)
@@ -80,6 +81,7 @@ async function migrateMemories(
   for (const doc of pending) {
     if (used >= budget) break
     const d = doc.data()
+    const owner = String(d.userId ?? 'unknown')
     const notebookId = String(d.notebookId ?? 'legacy')
 
     // Photos : `photoUrl` (ancien format mono) + `mediaUrls`, dédoublonnées.
@@ -94,7 +96,7 @@ async function migrateMemories(
     for (const url of photoUrls) {
       const path = storagePathOf(url)
       if (!path) continue
-      const key = `photos/${uid}/${notebookId}/${randomUUID()}.jpg`
+      const key = `photos/${owner}/${notebookId}/${randomUUID()}.jpg`
       if (await moveToR2(path, key, 'image/jpeg')) {
         newKeys.push(key)
         report.photos++
@@ -106,7 +108,7 @@ async function migrateMemories(
     if (isFirebaseUrl(d.audioUrl)) {
       const path = storagePathOf(d.audioUrl)
       if (path) {
-        const key = `audio/${uid}/${notebookId}/${randomUUID()}.m4a`
+        const key = `audio/${owner}/${notebookId}/${randomUUID()}.m4a`
         if (await moveToR2(path, key, 'audio/mp4')) {
           audioKey = key
           report.audios++
@@ -137,42 +139,41 @@ async function migrateMemories(
   return used
 }
 
-/** Migre les PDF (livres générés et commandes). Gelato reçoit ensuite une URL
- *  backend stable qui redirige vers une URL R2 signée fraîche. */
-async function migratePdfs(
-  uid: string,
+/** Migre un lot de documents PDF (`generatedBooks` ou `orders`) déjà récupérés.
+ *  Gelato/Prodigi reçoit ensuite une URL backend stable qui redirige vers une
+ *  URL R2 signée fraîche. */
+async function migratePdfDocs(
+  docs: FirebaseFirestore.QueryDocumentSnapshot[],
+  col: 'generatedBooks' | 'orders',
   budget: number,
   report: MigrationReport,
   stableUrl: (key: string) => string
 ): Promise<number> {
+  const pending = docs.filter((d) => isFirebaseUrl(d.data().pdfUrl))
+  report.remaining += pending.length
+
   let used = 0
-
-  for (const col of ['generatedBooks', 'orders']) {
-    const snap = await db.collection(col).where('userId', '==', uid).get()
-    const pending = snap.docs.filter((d) => isFirebaseUrl(d.data().pdfUrl))
-    report.remaining += pending.length
-
-    for (const doc of pending) {
-      if (used >= budget) break
-      const d = doc.data()
-      const path = storagePathOf(d.pdfUrl as string)
-      if (!path) continue
-      const key = `books/${uid}/${randomUUID()}.pdf`
-      const done = await moveToR2(path, key, 'application/pdf')
-      if (!done) {
-        // Fichier source disparu : on retire l'URL morte plutôt que de la garder.
-        await doc.ref.update({ pdfUrl: null })
-        report.remaining--
-        continue
-      }
-      await doc.ref.update({
-        pdfUrl: stableUrl(key),
-        ...(col === 'generatedBooks' ? { storagePath: key } : { pdfKey: key }),
-      })
-      report.pdfs++
-      used++
+  for (const doc of pending) {
+    if (used >= budget) break
+    const d = doc.data()
+    const owner = String(d.userId ?? 'unknown')
+    const path = storagePathOf(d.pdfUrl as string)
+    if (!path) continue
+    const key = `books/${owner}/${randomUUID()}.pdf`
+    const done = await moveToR2(path, key, 'application/pdf')
+    if (!done) {
+      // Fichier source disparu : on retire l'URL morte plutôt que de la garder.
+      await doc.ref.update({ pdfUrl: null })
       report.remaining--
+      continue
     }
+    await doc.ref.update({
+      pdfUrl: stableUrl(key),
+      ...(col === 'generatedBooks' ? { storagePath: key } : { pdfKey: key }),
+    })
+    report.pdfs++
+    used++
+    report.remaining--
   }
   return used
 }
@@ -190,7 +191,44 @@ export async function migrateLegacyMedia(
     pdfs: 0,
     remaining: 0,
   }
-  const used = await migrateMemories(uid, limit, report)
-  await migratePdfs(uid, Math.max(0, limit - used), report, stableUrl)
+  const memSnap = await db
+    .collection('memories')
+    .where('userId', '==', uid)
+    .get()
+  const used = await migrateMemoryDocs(memSnap.docs, limit, report)
+
+  let pdfBudget = Math.max(0, limit - used)
+  for (const col of ['generatedBooks', 'orders'] as const) {
+    const snap = await db.collection(col).where('userId', '==', uid).get()
+    const u = await migratePdfDocs(snap.docs, col, pdfBudget, report, stableUrl)
+    pdfBudget = Math.max(0, pdfBudget - u)
+  }
+  return report
+}
+
+/** Balayage ADMIN : migre les médias de TOUS les comptes, pas seulement
+ *  l'appelant. Ferme l'exposition pour les comptes qui ne rouvrent jamais
+ *  l'app (donc ne déclenchent jamais `MediaMigrationService` côté client) —
+ *  la seule vraie garantie que plus aucune URL Firebase à jeton permanent ne
+ *  reste vivante. Même contrat `remaining` : rappeler tant que ce n'est pas 0. */
+export async function migrateLegacyMediaAll(
+  limit: number,
+  stableUrl: (key: string) => string
+): Promise<MigrationReport> {
+  const report: MigrationReport = {
+    photos: 0,
+    audios: 0,
+    pdfs: 0,
+    remaining: 0,
+  }
+  const memSnap = await db.collection('memories').get()
+  const used = await migrateMemoryDocs(memSnap.docs, limit, report)
+
+  let pdfBudget = Math.max(0, limit - used)
+  for (const col of ['generatedBooks', 'orders'] as const) {
+    const snap = await db.collection(col).get()
+    const u = await migratePdfDocs(snap.docs, col, pdfBudget, report, stableUrl)
+    pdfBudget = Math.max(0, pdfBudget - u)
+  }
   return report
 }
