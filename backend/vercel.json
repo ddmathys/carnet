@@ -2,7 +2,8 @@
   "rewrites": [
     { "source": "/listen", "destination": "/api/listen" },
     { "source": "/watch", "destination": "/api/watch" },
-    { "source": "/join", "destination": "/api/join" }
+    { "source": "/join", "destination": "/api/join" },
+    { "source": "/reel", "destination": "/api/video/poster-video-reel" }
   ],
   "crons": [
     { "path": "/api/prodigi/poll", "schedule": "0 8 * * *" },

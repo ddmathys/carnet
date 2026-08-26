@@ -13,6 +13,11 @@ class BookCoverPreview extends StatelessWidget {
   final List<String> highlights;
   final String title;
 
+  /// Au moins un souvenir du livre a une vidéo : la couverture portera le QR
+  /// qui les rassemble toutes. L'aperçu ne montre qu'un emplacement (le vrai
+  /// code n'existe qu'à la génération du PDF).
+  final bool hasVideos;
+
   const BookCoverPreview({
     super.key,
     required this.notebook,
@@ -21,6 +26,7 @@ class BookCoverPreview extends StatelessWidget {
     this.coverPhotoUrl,
     this.yearRange = '',
     this.highlights = const [],
+    this.hasVideos = false,
   });
 
   @override
@@ -73,63 +79,87 @@ class BookCoverPreview extends StatelessWidget {
             ),
             // Cover content
             if (coverPhotoUrl != null)
-              // Photo version : bandeau bas compact, 2 colonnes (titre à gauche,
-              // liste des souvenirs à droite) — laisse plus de place à la photo.
+              // Photo version : bandeau bas de 38 mm (proportion réelle du
+              // PDF), 2 colonnes — titre à gauche, QR des vidéos à droite (ou
+              // la liste des souvenirs si le livre n'a aucune vidéo).
               Positioned(
                 bottom: 0,
                 left: 0,
                 right: 0,
                 child: Container(
+                  height: 240 * 38 / 297,
                   color: Colors.white.withOpacity(0.94),
-                  padding: const EdgeInsets.fromLTRB(10, 7, 10, 9),
+                  padding: const EdgeInsets.fromLTRB(8, 2, 8, 2),
                   child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             Text(
                               titleText,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontFamily: 'PlayfairDisplay',
-                                fontSize: 11,
+                                fontSize: 8,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF2D2416),
+                                fontStyle: FontStyle.italic,
+                                color: coverColor,
+                                height: 1.15,
                               ),
-                              maxLines: 3,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            const SizedBox(height: 3),
-                            Container(width: 16, height: 1, color: coverColor),
-                            const SizedBox(height: 3),
+                            const SizedBox(height: 2),
                             Text(
-                              yearRange.isNotEmpty
-                                  ? yearRange
-                                  : '${DateTime.now().year}',
+                              'LIVRE DE SOUVENIRS  ·  '
+                              '${yearRange.isNotEmpty ? yearRange : DateTime.now().year}',
                               style: const TextStyle(
-                                  fontSize: 6.5,
+                                  fontSize: 4.5,
                                   color: Color(0xFF8C8C8C),
-                                  letterSpacing: 1.5),
+                                  letterSpacing: 1),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ],
                         ),
                       ),
-                      if (highlights.isNotEmpty) ...[
+                      if (hasVideos) ...[
+                        const SizedBox(width: 6),
+                        const Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            // Emplacement seulement : le vrai code (avec ses
+                            // cœurs) n'existe qu'à la génération du PDF.
+                            Icon(Icons.qr_code_2,
+                                size: 240 * 24 / 297,
+                                color: Color(0xFF2D2416)),
+                            Text(
+                              'regarder',
+                              style: TextStyle(
+                                  fontSize: 4.5,
+                                  color: Color(0xFF8C8C8C),
+                                  letterSpacing: 1),
+                            ),
+                          ],
+                        ),
+                      ] else if (highlights.isNotEmpty) ...[
                         const SizedBox(width: 8),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
+                            mainAxisAlignment: MainAxisAlignment.center,
                             mainAxisSize: MainAxisSize.min,
                             children: highlights
-                                .take(15)
+                                .take(4)
                                 .map((h) => Text(
                                       '· $h',
                                       style: const TextStyle(
-                                          fontSize: 5.5,
+                                          fontSize: 5,
                                           color: Color(0xFF8C8C8C),
-                                          height: 1.3),
+                                          height: 1.25),
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                       textAlign: TextAlign.right,

@@ -11,6 +11,7 @@ import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
 import '../models/tag_model.dart';
 import '../data/growth_data.dart';
+import 'heart_qr.dart';
 import 'photo_service.dart';
 import '../utils/date_precision.dart';
 import '../utils/image_dims.dart' as img_dims;
@@ -33,6 +34,13 @@ class BookPdfService {
   static const _a4W = 21.0 * PdfPageFormat.cm; // 210 mm
   static const _a4H = 29.7 * PdfPageFormat.cm; // 297 mm
   static const _safe = 1.0 * PdfPageFormat.cm; // 10 mm
+
+  // Bandeau de couverture (titre + QR) et taille du QR : cotes de la maquette
+  // « BANDEAU 38 MM · QR 24 MM ». Hauteur FIXE — le bandeau ne suit plus la
+  // longueur de ce qu'on y pose, c'est lui qui décide de la place laissée à
+  // la photo.
+  static const _coverBandH = 3.8 * PdfPageFormat.cm; // 38 mm
+  static const _coverQrSize = 2.4 * PdfPageFormat.cm; // 24 mm
 
   // Mise en page album : images BORD À BORD (full-bleed), sans marge ni
   // espacement blanc entre photos. (Mettre une valeur > 0 réintroduirait un
@@ -143,6 +151,11 @@ class BookPdfService {
     String? customTitle,
     String? customSubtitle,
     String backendUrl = '',
+    // QR de couverture : UNE seule cible qui rassemble les vidéos de TOUS les
+    // souvenirs du livre (le « reel » créé par l'appelant avant la génération,
+    // cf. book_generate_screen.dart). null = aucun souvenir en vidéo → pas de
+    // QR imprimé, on n'imprime jamais un code qui ne mène nulle part.
+    String? coverVideosQrUrl,
     bool padForPrint = false,
     bool excludeCoverPhotoFromBook = false,
     // 'soft' | 'hard' | 'layflat' — détermine le produit imprimeur interrogé
@@ -512,6 +525,7 @@ class BookPdfService {
           highlights: highlights,
           customTitle: customTitle,
           customSubtitle: customSubtitle,
+          coverVideosQrUrl: coverVideosQrUrl,
         ),
       ));
 
@@ -748,13 +762,9 @@ class BookPdfService {
           color: PdfColors.white,
           padding: const pw.EdgeInsets.fromLTRB(6, 6, 8, 6),
           child: pw.Row(mainAxisSize: pw.MainAxisSize.min, children: [
-            pw.BarcodeWidget(
-              barcode: pw.Barcode.qrCode(),
-              data: url,
-              width: 46,
-              height: 46,
-              color: _textDark,
-            ),
+            // 56 et non 46 : HeartQr réserve sa marge blanche À L'INTÉRIEUR
+            // du carré, le code lui-même garde donc la taille d'avant.
+            HeartQr.build(data: url, size: 56, color: _textDark),
             pw.SizedBox(width: 6),
             pw.Column(
               mainAxisSize: pw.MainAxisSize.min,
@@ -895,6 +905,7 @@ class BookPdfService {
     List<String> highlights = const [],
     String? customTitle,
     String? customSubtitle,
+    String? coverVideosQrUrl,
   }) {
     final displayTitle = customTitle?.isNotEmpty == true
         ? customTitle!
@@ -907,8 +918,9 @@ class BookPdfService {
     final highlightLine = highlights.isEmpty
         ? null
         : highlights.take(4).map((h) => '· $h').join('   ');
-    // Liste exhaustive (jusqu'à 15) pour la colonne de droite de la couv. photo.
-    final coverMemoList = highlights.take(15).toList();
+    // Colonne de droite de la couv. photo QUAND il n'y a pas de QR (livre sans
+    // aucune vidéo) : 8 titres, ce que peut tenir le bandeau de 38 mm.
+    final coverMemoList = highlights.take(8).toList();
 
     // "carnet" brand text — top-right on all covers
     pw.Widget folioTag() => pw.Text(
@@ -925,6 +937,30 @@ class BookPdfService {
     // A4 dimensions in points
     const w = _a4W;
     const h = _a4H;
+
+    // Bloc QR de couverture (maquette) : le code, puis son libellé en
+    // petites capitales espacées. Un seul QR pour tout le livre : il ouvre
+    // les vidéos de TOUS les souvenirs, pas celles d'un seul.
+    pw.Widget coverQrBlock() => pw.Column(
+          mainAxisSize: pw.MainAxisSize.min,
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            HeartQr.build(
+              data: coverVideosQrUrl!,
+              size: _coverQrSize,
+              color: _textDark,
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              'regarder',
+              style: pw.TextStyle(
+                  font: pR,
+                  fontSize: 6.5,
+                  color: _textMedium,
+                  letterSpacing: 2),
+            ),
+          ],
+        );
 
     if (coverPhotoBytes != null) {
       // ── Photo cover: full-bleed image + bottom title box ──
@@ -943,35 +979,43 @@ class BookPdfService {
             left: 0,
             right: 0,
             child: pw.Container(
+              width: w,
+              height: _coverBandH,
               color: PdfColors.white,
-              // Bandeau compact (laisse plus de place à la photo) en 2 colonnes :
-              // titre/sous-titre/année à gauche, liste des souvenirs à droite.
-              padding: const pw.EdgeInsets.fromLTRB(24, 14, 24, 18),
+              // Bandeau de 38 mm en deux colonnes : titre / sous-titre /
+              // année à gauche, QR des vidéos à droite. Sans vidéo dans le
+              // livre (donc sans QR), la droite retombe sur la liste des
+              // souvenirs.
+              padding: const pw.EdgeInsets.fromLTRB(24, 9, 24, 9),
               child: pw.Row(
-                crossAxisAlignment: pw.CrossAxisAlignment.end,
+                crossAxisAlignment: pw.CrossAxisAlignment.center,
                 children: [
                   pw.Expanded(
                     child: pw.Column(
                       crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      mainAxisAlignment: pw.MainAxisAlignment.center,
                       mainAxisSize: pw.MainAxisSize.min,
                       children: [
                         pw.Text(
                           displayTitle,
+                          maxLines: 2,
+                          overflow: pw.TextOverflow.clip,
                           style: pw.TextStyle(
                               font: pB,
-                              fontSize: 18,
-                              color: _textDark,
-                              letterSpacing: 0.2),
+                              fontSize: 17,
+                              color: cover,
+                              fontStyle: pw.FontStyle.italic,
+                              lineSpacing: 1.5),
                         ),
                         if (displaySubtitle != null) ...[
                           pw.SizedBox(height: 4),
                           pw.Text(displaySubtitle,
+                              maxLines: 1,
+                              overflow: pw.TextOverflow.clip,
                               style: pw.TextStyle(
-                                  font: pR, fontSize: 10, color: _textMedium)),
+                                  font: pR, fontSize: 9.5, color: _textMedium)),
                         ],
-                        pw.SizedBox(height: 8),
-                        pw.Container(width: 26, height: 1.5, color: cover),
-                        pw.SizedBox(height: 8),
+                        pw.SizedBox(height: 9),
                         pw.Text(
                           'LIVRE DE SOUVENIRS  ·  $yearRange',
                           style: pw.TextStyle(
@@ -983,11 +1027,15 @@ class BookPdfService {
                       ],
                     ),
                   ),
-                  if (coverMemoList.isNotEmpty) ...[
+                  if (coverVideosQrUrl != null) ...[
+                    pw.SizedBox(width: 18),
+                    coverQrBlock(),
+                  ] else if (coverMemoList.isNotEmpty) ...[
                     pw.SizedBox(width: 16),
                     pw.Expanded(
                       child: pw.Column(
                         crossAxisAlignment: pw.CrossAxisAlignment.end,
+                        mainAxisAlignment: pw.MainAxisAlignment.center,
                         mainAxisSize: pw.MainAxisSize.min,
                         children: coverMemoList
                             .map((h) => pw.Padding(
@@ -1084,6 +1132,22 @@ class BookPdfService {
         pw.Positioned(top: _safe + 20, right: _safe + 22, child: folioTag()),
         pw.SizedBox(
             width: w, height: h, child: pw.Center(child: centeredContent)),
+        // Même QR que sur la couverture photo, posé sur un cartouche blanc :
+        // sur un aplat de couleur, un QR imprimé « à même le fond » ne se lit
+        // pas de façon fiable.
+        if (coverVideosQrUrl != null)
+          pw.Positioned(
+            bottom: _safe + 6,
+            left: 0,
+            right: 0,
+            child: pw.Center(
+              child: pw.Container(
+                color: PdfColors.white,
+                padding: const pw.EdgeInsets.fromLTRB(12, 12, 12, 9),
+                child: coverQrBlock(),
+              ),
+            ),
+          ),
       ],
     );
   }
@@ -1116,13 +1180,7 @@ class BookPdfService {
     // QR média (texte seul) : un bloc QR + libellé, réutilisé pour vidéo/audio.
     pw.Widget mediaQr(String url, String line1, String line2) =>
         pw.Row(children: [
-          pw.BarcodeWidget(
-            barcode: pw.Barcode.qrCode(),
-            data: url,
-            width: 56,
-            height: 56,
-            color: _textDark,
-          ),
+          HeartQr.build(data: url, size: 68, color: _textDark),
           pw.SizedBox(width: 10),
           pw.Column(
             mainAxisSize: pw.MainAxisSize.min,

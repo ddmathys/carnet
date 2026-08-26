@@ -56,6 +56,9 @@ dependencies:
   # PDF export
   pdf: ^3.10.8
   printing: ^5.12.0
+  # Déjà tiré par `pdf` ; déclaré ici parce qu'on l'importe directement pour
+  # lire la matrice brute d'un QR code (repères « cœur », heart_qr.dart).
+  barcode: ^2.2.9
 
   exif: ^3.3.0
   google_mlkit_text_recognition: ^0.13.1

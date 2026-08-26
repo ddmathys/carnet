@@ -151,12 +151,13 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
-    // ── Poster reels (vidéos consolidées liées au QR imprimé sur un poster) ──
-    // Créé par le backend via l'action `poster-reel-create` (Admin SDK, donc
-    // ces règles ne s'appliquent qu'à un éventuel accès direct côté client —
-    // il n'y en a aucun aujourd'hui : la page publique `poster-video-reel`
-    // lit ce doc côté serveur, jamais depuis l'app). Lecture/mise à jour
-    // fermées côté client par prudence.
+    // ── Reels (vidéos consolidées derrière un QR imprimé) ───────────────────
+    // Deux usages : le QR d'un poster (`poster-reel-create`) et celui de la
+    // COUVERTURE d'un livre (`book-reel-create`, `videosOnly: true`).
+    // Créés par le backend (Admin SDK), donc ces règles ne s'appliquent qu'à
+    // un éventuel accès direct côté client — il n'y en a aucun aujourd'hui :
+    // la page publique `poster-video-reel` lit ce doc côté serveur, jamais
+    // depuis l'app. Lecture/mise à jour fermées côté client par prudence.
     match /posterReels/{reelId} {
       allow create: if isAuth()
         && request.resource.data.userId == request.auth.uid;

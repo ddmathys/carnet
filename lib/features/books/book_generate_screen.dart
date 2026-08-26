@@ -11,6 +11,7 @@ import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/models/tag_model.dart';
+import '../../core/services/backend_client.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
@@ -124,6 +125,47 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   List<MemoryModel> get _selectedMemories =>
       _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();
+
+  // ── QR de couverture ───────────────────────────────────────────────────────
+  // Un seul code sur la couverture, qui rassemble les vidéos de TOUS les
+  // souvenirs du livre. Cible : le « reel » public créé côté backend AVANT la
+  // génération, puisque le QR doit déjà être imprimé dans le PDF.
+
+  /// Souvenirs du livre qui ont au moins une vidéo. `videoKeys` seulement
+  /// (pas d'ancienne URL Firebase) : même convention que le backend, pour que
+  /// ce que promet le QR soit toujours ce que le reel peut servir.
+  List<MemoryModel> get _videoMemories =>
+      _selectedMemories.where((m) => m.videoKeys.isNotEmpty).toList();
+
+  /// Dernière URL de QR obtenue, et la sélection qui l'a produite : l'aperçu
+  /// est régénéré à chaque retouche, inutile de rappeler le backend tant que
+  /// les souvenirs en vidéo n'ont pas changé.
+  String? _coverQrUrl;
+  String? _coverQrKey;
+
+  /// URL du QR de couverture, ou null s'il n'y a aucune vidéo dans le livre
+  /// (on n'imprime pas un code qui ne mène nulle part). Lève si le backend ne
+  /// répond pas : mieux vaut un aperçu en erreur qu'une couverture qui perd
+  /// silencieusement son QR juste avant une commande.
+  Future<String?> _coverVideosQrUrl() async {
+    final ids = _videoMemories.map((m) => m.id).toList()..sort();
+    if (ids.isEmpty) return null;
+    final key = ids.join(',');
+    if (_coverQrUrl != null && _coverQrKey == key) return _coverQrUrl;
+    final res = await BackendClient.postJson(
+      '/api/video/book-reel-create',
+      {'memoryIds': ids},
+      timeout: const Duration(seconds: 30),
+    );
+    final reelId = res?['reelId'] as String?;
+    if (reelId == null) {
+      throw Exception(
+          'Impossible de préparer les vidéos liées à la couverture.');
+    }
+    _coverQrKey = key;
+    _coverQrUrl = '${AppConfig.backendUrl}/reel?o=$reelId';
+    return _coverQrUrl;
+  }
 
   // Mesures taille/poids de la sélection, groupées par enfant (identifié via
   // le tagId présent dans `tagIds` de la mesure — cf. growth_screen.dart, qui
@@ -472,11 +514,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Génère le PDF d'aperçu — mêmes octets que le téléchargement (sans bourrage
   // de pages blanches), pour un aperçu strictement identique au rendu final.
-  Future<({Uint8List bytes, int pageCount, int photoCount})> _buildPreviewPdf() {
+  Future<({Uint8List bytes, int pageCount, int photoCount})>
+      _buildPreviewPdf() async {
     final coverColor = _notebook!.coverColor.isNotEmpty
         ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
             radix: 16))
         : AppColors.sage;
+    // L'aperçu porte le VRAI QR (mêmes octets que le PDF téléchargé/partagé) :
+    // un aperçu avec un code mort serait partagé tel quel.
+    final coverQrUrl = await _coverVideosQrUrl();
     return BookPdfService.generateForNotebook(
       notebook: _notebook!,
       coverColor: coverColor,
@@ -487,6 +533,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
       backendUrl: AppConfig.backendUrl,
+      coverVideosQrUrl: coverQrUrl,
       growthChildren: _includedGrowthChildren,
     ).timeout(const Duration(seconds: 180));
   }
@@ -649,6 +696,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         customTitle: customTitle,
         backendUrl: AppConfig.backendUrl,
+        coverVideosQrUrl: await _coverVideosQrUrl(),
         padForPrint: true, // pages valides imprimeur (pair, ≥24)
         coverType: _coverType, // largeur exacte de couverture wraparound
         growthChildren: _includedGrowthChildren,
@@ -888,6 +936,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               coverPhotoUrl: _coverPhotoUrl,
               yearRange: _yearRange,
               highlights: _coverHighlights,
+              hasVideos: _videoMemories.isNotEmpty,
               // Aperçu WYSIWYG : piloté en direct par les champs éditables.
               title: _titleCtrl.text.trim().isEmpty
                   ? _defaultCoverTitle(_notebook!)

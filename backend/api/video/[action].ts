@@ -85,12 +85,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const reelSnap = await db.collection('posterReels').doc(reelId).get()
       if (!reelSnap.exists) {
-        return res.status(404).send(reelPage('Introuvable', '<p>Ce tirage n’a plus de vidéos associées.</p>'))
+        return res.status(404).send(reelPage('Introuvable', '<p>Ce code n’a plus de vidéos associées.</p>'))
       }
       const reel = reelSnap.data() as Record<string, unknown>
       const memoryIds = Array.isArray(reel.memoryIds)
         ? (reel.memoryIds as unknown[]).filter((x): x is string => typeof x === 'string')
         : []
+      // `videosOnly` : reel d'un QR de COUVERTURE de livre, qui ne promet que
+      // les vidéos (les mémos vocaux, eux, ont déjà leur propre QR sur la page
+      // du souvenir dans le livre). Absent = reel de poster : vidéos + audio.
+      const videosOnly = reel.videosOnly === true
 
       const medias: { title: string; url: string; kind: 'video' | 'audio' }[] = []
       for (const memoryId of memoryIds) {
@@ -102,7 +106,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const url = await presignGet(key, 3600)
           medias.push({ title, url, kind: 'video' })
         }
-        const audioKey = audioKeyOf(mem)
+        const audioKey = videosOnly ? '' : audioKeyOf(mem)
         if (audioKey) {
           const url = await presignGet(audioKey, 3600)
           medias.push({ title, url, kind: 'audio' })
@@ -110,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       if (medias.length === 0) {
-        return res.status(404).send(reelPage('Pas encore de souvenir', '<p>Aucune vidéo ni mémo vocal n’est associé à ce tirage pour l’instant.</p>'))
+        return res.status(404).send(reelPage('Pas encore de souvenir', '<p>Aucune vidéo n’est associée à ce code pour l’instant.</p>'))
       }
 
       const body = medias
@@ -125,7 +129,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       `
         )
         .join('')
-      return res.status(200).send(reelPage('Souvenirs en vidéo et en son', body))
+      return res
+        .status(200)
+        .send(reelPage(videosOnly ? 'Souvenirs en vidéo' : 'Souvenirs en vidéo et en son', body))
     } catch {
       return res.status(500).send(reelPage('Erreur', '<p>Impossible de charger les vidéos pour l’instant.</p>'))
     }
@@ -359,6 +365,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await db.collection('posterReels').doc(reelId).set({
       userId: user.uid,
       memoryIds,
+      createdAt: new Date(),
+    })
+    return res.status(200).json({ reelId })
+  }
+
+  // ── "Reel" vidéo public d'un LIVRE (cible du QR de couverture) ───────────
+  if (action === 'book-reel-create') {
+    // Un seul code pour tout le livre : il rassemble les vidéos de TOUS les
+    // souvenirs imprimés. Même page publique que le reel de poster, en mode
+    // `videosOnly` (la couverture ne promet que « regarder »).
+    //
+    // L'identifiant est DÉTERMINISTE (HMAC de l'uid + la sélection) et non
+    // tiré au hasard : l'aperçu du livre est régénéré à chaque retouche, et
+    // un reelId neuf à chaque fois laisserait derrière lui des dizaines de
+    // documents orphelins pour un seul livre. Il reste non devinable — sans
+    // le secret HMAC du serveur, connaître les identifiants des souvenirs ne
+    // suffit pas à le reconstruire (même capacité que le reel de poster).
+    const memoryIds = Array.isArray(body.memoryIds)
+      ? (body.memoryIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : []
+    if (memoryIds.length === 0) {
+      return res.status(400).json({ error: 'memoryIds manquant' })
+    }
+    // Un livre peut porter des dizaines de souvenirs : on vérifie
+    // l'appartenance en parallèle (un `for await` séquentiel dépasserait le
+    // budget de 60 s bien avant).
+    const members = await Promise.all(
+      memoryIds.map((id) => memoryIfMember(id, user.uid, user.email))
+    )
+    const refusedAt = members.findIndex((m) => !m)
+    if (refusedAt >= 0) {
+      return res
+        .status(403)
+        .json({ error: `Accès refusé au souvenir ${memoryIds[refusedAt]}` })
+    }
+    const reelId = signKey(
+      `book-reel:${user.uid}:${[...memoryIds].sort().join(',')}`
+    )
+    await db.collection('posterReels').doc(reelId).set({
+      userId: user.uid,
+      memoryIds,
+      videosOnly: true,
+      source: 'book',
       createdAt: new Date(),
     })
     return res.status(200).json({ reelId })
