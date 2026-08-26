@@ -3,7 +3,13 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { requireAuth } from '../../lib/verify'
 import { db } from '../../lib/firebase'
 import { ADMIN_EMAIL } from '../../lib/resend'
-import { refreshProdigiOrderStatus, notifyAdminOfError, PRODIGI_API_URL } from '../../lib/prodigi'
+import {
+  refreshProdigiOrderStatus,
+  notifyAdminOfError,
+  notifyCustomerOfShipment,
+  PRODIGI_API_URL,
+  PRODIGI_OPEN_STATUSES,
+} from '../../lib/prodigi'
 import { computePrice, printablePages, type CoverType } from '../../lib/pricing'
 import {
   posterCatalogEntry,
@@ -21,8 +27,10 @@ import {
 //                               (admin uniquement, en un seul appel — pas de
 //                               brouillon/confirmation comme chez Gelato,
 //                               création directe en un POST /v4.0/orders)
-//   POST /api/prodigi/status → relit le statut réel d'une commande
-//   GET  /api/prodigi/poll   → balaie les commandes en attente (cron only)
+//   POST /api/prodigi/status → relit le statut réel d'une commande (étape de
+//                               fabrication, colis + numéros de suivi, coûts
+//                               facturés) et avance le suivi client
+//   GET  /api/prodigi/poll   → balaie les commandes encore en cours (cron only)
 //   POST /api/prodigi/quote  → vérifie pages/prix contre un vrai devis Prodigi
 //                               (admin, gratuit, ne modifie rien)
 //
@@ -267,11 +275,26 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
 
     const prodigiOrderId = data?.id ?? data?.order?.id ?? null
 
+    // Un renvoi après erreur crée une NOUVELLE commande Prodigi : tout ce qui
+    // décrivait la précédente (colis, suivi, étapes, montants facturés) doit
+    // disparaître, sinon l'app afficherait le tracking d'un colis qui ne
+    // correspond plus à la commande en cours.
     await ref.update({
       ...commonUpdate,
       prodigiOrderId,
       prodigiStatus: 'pending',
       prodigiError: null,
+      prodigiStage: null,
+      prodigiStageDetails: null,
+      prodigiShipments: [],
+      trackingNumber: null,
+      trackingUrl: null,
+      carrierName: null,
+      shippedFromCountry: null,
+      shippedAt: null,
+      // Remis à zéro aussi : le renvoi devra bien redéclencher l'email
+      // « votre colis est parti » quand le nouveau colis partira.
+      shippedNotifiedAt: null,
     })
 
     return res.status(200).json({ ok: true, prodigiOrderId })
@@ -448,16 +471,28 @@ async function handleStatus(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'Accès refusé' })
   }
 
-  const { newlyErrored } = await refreshProdigiOrderStatus(orderId)
+  const { newlyErrored, newlyShipped } = await refreshProdigiOrderStatus(orderId)
   if (newlyErrored) {
     await notifyAdminOfError(orderId)
   }
+  if (newlyShipped) {
+    await notifyCustomerOfShipment(orderId)
+  }
 
   const fresh = (await db.collection('orders').doc(orderId).get()).data()
+  // Le client relit la commande via son stream Firestore ; on renvoie quand
+  // même le suivi ici pour qu'un rafraîchissement manuel puisse afficher le
+  // résultat immédiatement, sans attendre la propagation du snapshot.
   return res.status(200).json({
     ok: true,
     prodigiStatus: fresh?.prodigiStatus ?? null,
+    prodigiStage: fresh?.prodigiStage ?? null,
     prodigiError: fresh?.prodigiError ?? null,
+    status: fresh?.status ?? null,
+    trackingNumber: fresh?.trackingNumber ?? null,
+    trackingUrl: fresh?.trackingUrl ?? null,
+    carrierName: fresh?.carrierName ?? null,
+    shipments: fresh?.prodigiShipments ?? [],
   })
 }
 
@@ -470,24 +505,38 @@ async function handlePoll(req: VercelRequest, res: VercelResponse) {
     return res.status(401).json({ error: 'Unauthorized' })
   }
 
-  const snap = await db.collection('orders').where('prodigiStatus', '==', 'pending').get()
+  // Toutes les commandes encore en cours chez Prodigi, pas seulement
+  // « pending » : une commande passée en fabrication doit continuer d'être
+  // relue jusqu'à l'expédition, sinon elle reste figée sur « en fabrication »
+  // et le numéro de suivi n'arrive jamais. `accepted` est la valeur historique
+  // (voir PRODIGI_OPEN_STATUSES) — les commandes d'avant ce changement la
+  // portent encore et doivent être rattrapées.
+  const snap = await db
+    .collection('orders')
+    .where('prodigiStatus', 'in', [...PRODIGI_OPEN_STATUSES])
+    .get()
 
   let checked = 0
   let errored = 0
+  let shipped = 0
   for (const d of snap.docs) {
     try {
-      const { newlyErrored } = await refreshProdigiOrderStatus(d.id)
+      const { newlyErrored, newlyShipped } = await refreshProdigiOrderStatus(d.id)
       checked++
       if (newlyErrored) {
         errored++
         await notifyAdminOfError(d.id)
+      }
+      if (newlyShipped) {
+        shipped++
+        await notifyCustomerOfShipment(d.id)
       }
     } catch (e) {
       console.error('[prodigi/poll] order', d.id, e)
     }
   }
 
-  return res.status(200).json({ ok: true, checked, errored })
+  return res.status(200).json({ ok: true, checked, errored, shipped })
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {

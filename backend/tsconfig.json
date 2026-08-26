@@ -6,7 +6,12 @@
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    // Les tests tournent directement en TypeScript via le runner intégré de
+    // Node (`npm test` → `node --test lib/*.test.ts`), qui exige l'extension
+    // `.ts` sur les imports relatifs. Sans risque ici : `noEmit` est actif,
+    // rien n'est compilé vers du JS où l'extension casserait la résolution.
+    "allowImportingTsExtensions": true
   },
   "include": ["api/**/*.ts", "lib/**/*.ts"]
 }

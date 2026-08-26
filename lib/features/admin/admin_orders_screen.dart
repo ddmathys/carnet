@@ -116,7 +116,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
   String _statusShort(String s) => switch (s) {
     'received' => 'Reçues',
     'paid'     => 'Payées',
-    'shipped'  => 'Livrées',
+    'shipped'  => 'Expédiées',
     _ => s,
   };
 }
@@ -516,14 +516,24 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
   Widget _buildPrintSection() {
     final o = widget.order;
 
-    final statusBadge = switch (o.prodigiStatus) {
+    // `printStage` replie la valeur historique 'accepted' sur 'inProduction'
+    // (voir OrderModel) — les commandes d'avant le suivi d'expédition la
+    // portent encore en base.
+    final statusBadge = switch (o.printStage) {
       'pending' => _statusBox(
           color: AppColors.amber,
-          text: '⏳ En cours chez l\'imprimeur…',
+          text: '⏳ Préparation chez l\'imprimeur…',
+          detail: o.prodigiStage != null ? 'Étape Prodigi : ${o.prodigiStage}' : null,
         ),
-      'accepted' => _statusBox(
+      'inProduction' => _statusBox(
           color: AppColors.sage,
-          text: '✅ Accepté · en production',
+          text: '🖨️ En production',
+        ),
+      'shipped' => _statusBox(
+          color: AppColors.success,
+          text: '📦 Expédiée'
+              '${o.shippedAt != null ? ' le ${DateFormat('d MMM yyyy', 'fr').format(o.shippedAt!)}' : ''}',
+          detail: _shipmentSummary(o),
         ),
       'error' when o.prodigiError != null => _statusBox(
           color: AppColors.error,
@@ -547,6 +557,23 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
           Text('ID Prodigi : ${o.prodigiOrderId}',
               style: const TextStyle(
                   fontSize: 11, color: AppColors.textMedium)),
+          if (o.prodigiLastCheckedAt != null)
+            Text(
+              'Statut relu le '
+              '${DateFormat("d MMM yyyy 'à' HH:mm", 'fr').format(o.prodigiLastCheckedAt!)}',
+              style: const TextStyle(fontSize: 11, color: AppColors.softGray),
+            ),
+          // Coût réellement facturé par Prodigi vs. prix payé par le client :
+          // un vrai poster A1 a déjà été facturé $44.95 pour CHF 30 encaissés
+          // (voir backend/api/prodigi/[action].ts). Sans les deux montants
+          // côte à côte, l'écart passait inaperçu.
+          if (o.prodigiChargedTotal != null)
+            Text(
+              'Facturé par Prodigi : '
+              '${o.prodigiChargedCurrency ?? ''} ${o.prodigiChargedTotal!.toStringAsFixed(2)}'
+              ' · encaissé CHF ${o.price.toStringAsFixed(2)}',
+              style: const TextStyle(fontSize: 11, color: AppColors.textMedium),
+            ),
           const SizedBox(height: 8),
           _checkButton(),
           const SizedBox(height: 8),
@@ -594,6 +621,20 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
         ],
       ],
     );
+  }
+
+  /// Résumé des colis pour la console admin : un par ligne, avec le numéro de
+  /// suivi et l'atelier de départ. null quand Prodigi n'a encore rien remonté.
+  String? _shipmentSummary(OrderModel o) {
+    final parcels = o.dispatchedShipments;
+    if (parcels.isEmpty) return null;
+    return parcels
+        .map((s) => [
+              s.trackingNumber ?? 'suivi non communiqué',
+              if (s.carrier != null) '(${s.carrier})',
+              if (s.fromCountryLabel != null) '· depuis ${s.fromCountryLabel}',
+            ].join(' '))
+        .join('\n');
   }
 
   Widget _statusBox({required Color color, required String text, String? detail}) {
