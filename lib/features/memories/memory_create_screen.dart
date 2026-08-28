@@ -2230,8 +2230,25 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         Switch(
           value: on,
           activeTrackColor: AppColors.sage,
-          onChanged: (v) => setState(
-              () => _selectedCategory = v ? 'taille_poids' : 'anecdote'),
+          onChanged: (v) => setState(() {
+            _selectedCategory = v ? 'taille_poids' : 'anecdote';
+            // Une mesure de croissance n'accepte pas de photo (section
+            // retirée de _buildTaillePoidsForm) — si des photos avaient déjà
+            // été choisies côté souvenir normal, on les efface ici plutôt
+            // que de les enregistrer quand même malgré le champ masqué.
+            if (v) {
+              for (final url in List<String>.of(_existingPhotoUrls)) {
+                final key = _existingKeyByUrl.remove(url);
+                if (key != null) {
+                  _removedPhotoKeys.add(key);
+                } else {
+                  _removedPhotoUrls.add(url);
+                }
+              }
+              _existingPhotoUrls.clear();
+              _localPhotos.clear();
+            }
+          }),
         ),
       ],
     );
@@ -2344,11 +2361,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const SizedBox(height: 14),
           _FormCard(children: [_titleField('Ex : Visite chez le pédiatre')]),
           const SizedBox(height: 14),
-          _FormCard(children: [
-            _buildPhotoSection(),
-            const SizedBox(height: 16),
-            _buildVideoSection(),
-          ]),
+          // Pas de section photo ici, volontairement : une mesure de
+          // croissance n'en accepte pas (voir _growthToggleRow, qui efface
+          // aussi toute photo déjà choisie côté souvenir normal en basculant
+          // vers ce mode) — la vidéo reste possible.
+          _FormCard(children: [_buildVideoSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [
             _buildDateSection(),

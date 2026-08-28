@@ -41,7 +41,10 @@ android {
         applicationId "ch.gravendev.bloom"
         // flutter_gemma / MediaPipe LLM exige minSdk 24.
         minSdkVersion 24
-        targetSdkVersion 34
+        // Aligné sur compileSdkVersion — Google Play exige un targetSdk proche
+        // de la dernière version Android (fenêtre qui remonte chaque année
+        // fin août) ; y rester en retard bloque l'envoi d'un nouvel APK/AAB.
+        targetSdkVersion 36
         versionCode flutterVersionCode.toInteger()
         versionName flutterVersionName
     }
@@ -61,7 +64,17 @@ android {
 
     buildTypes {
         release {
-            signingConfig System.getenv("ANDROID_KEYSTORE_PATH") != null ? signingConfigs.release : signingConfigs.debug
+            def hasReleaseKey = System.getenv("ANDROID_KEYSTORE_PATH") != null
+            if (!hasReleaseKey) {
+                // Avant : ce repli était totalement silencieux — un build
+                // "release" pouvait finir signé avec la clé DEBUG sans que
+                // rien ne le signale, dangereux si ce build est ensuite
+                // distribué (jamais valide pour Google Play). Le repli reste
+                // (pratique pour un build local rapide sans la vraie clé),
+                // mais devient visible.
+                println "⚠️  ANDROID_KEYSTORE_PATH absent — build 'release' signé avec la clé DEBUG (jamais valide pour Google Play)."
+            }
+            signingConfig hasReleaseKey ? signingConfigs.release : signingConfigs.debug
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }

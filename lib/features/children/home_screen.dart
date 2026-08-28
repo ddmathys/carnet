@@ -191,24 +191,32 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
         SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
 
-        // 1) Le geste principal : importer des médias → nouveau souvenir.
-        SliverToBoxAdapter(
-          child: ImportMediaCta(
-              onTap: () => context.push('/memory/new?import=1')),
-        ),
-
         _ActiveOrdersBanner(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
 
-        if (!hasMemories)
-          const SliverToBoxAdapter(child: _EmptyState())
-        else ...[
-          // 2) Le filtre par tags (date / lieu / événement), puis les souvenirs.
+        if (!hasMemories) ...[
+          // Pas encore de souvenir : le geste principal reste visible tout de
+          // suite, avant l'état vide qui explique quoi faire.
+          SliverToBoxAdapter(
+            child: ImportMediaCta(
+                onTap: () => context.push('/memory/new?import=1')),
+          ),
+          const SliverToBoxAdapter(child: _EmptyState()),
+        ] else ...[
+          // 1) Le filtre par tags (date / lieu / événement), le geste
+          // principal (importer) tout en haut de cette section — plus
+          // intuitif qu'un bandeau séparé au-dessus, qui se lisait comme
+          // détaché de « mes souvenirs » plutôt que comme le moyen d'en
+          // ajouter un — puis les souvenirs.
           _sectionHeader(
             _filterLabels.isEmpty
                 ? 'Mes derniers souvenirs'
                 : 'Souvenirs filtrés',
             'Tout voir',
             onAction: () => context.push('/memories'),
+          ),
+          SliverToBoxAdapter(
+            child: ImportMediaCta(
+                onTap: () => context.push('/memory/new?import=1')),
           ),
           SliverToBoxAdapter(child: _filterBar(context)),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
