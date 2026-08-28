@@ -8,6 +8,7 @@ import 'package:app_links/app_links.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'core/services/app_messenger.dart';
 import 'core/services/notification_service.dart';
 import 'core/services/shared_media_service.dart';
 import 'core/services/tag_service.dart';
@@ -176,7 +177,6 @@ final _router = GoRouter(
   ],
 );
 
-final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
 class BloomApp extends StatefulWidget {
   const BloomApp({super.key});
@@ -210,7 +210,7 @@ class _BloomAppState extends State<BloomApp> {
     _sharedMediaSub = SharedMediaService.stream.listen((items) {
       if (items.isEmpty) return;
       if (FirebaseAuth.instance.currentUser == null) {
-        _messengerKey.currentState?.showSnackBar(
+        appMessengerKey.currentState?.showSnackBar(
           const SnackBar(
             content: Text('Connecte-toi à Carnet, puis repartage tes médias.'),
           ),
@@ -244,7 +244,7 @@ class _BloomAppState extends State<BloomApp> {
     if (token == null || token.isEmpty) return;
 
     final result = await TagService.joinByToken(token);
-    final messenger = _messengerKey.currentState;
+    final messenger = appMessengerKey.currentState;
     if (result != null) {
       _router.go('/memories?tag=${result.tagId}');
       messenger?.showSnackBar(
@@ -274,7 +274,7 @@ class _BloomAppState extends State<BloomApp> {
       title: 'Carnet album souvenir',
       theme: AppTheme.light,
       routerConfig: _router,
-      scaffoldMessengerKey: _messengerKey,
+      scaffoldMessengerKey: appMessengerKey,
       debugShowCheckedModeBanner: false,
       builder: (context, child) {
         // Beaucoup de boutons/tuiles ont une hauteur fixe (ex.

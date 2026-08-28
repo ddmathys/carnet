@@ -11,6 +11,7 @@ import 'package:record/record.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import '../../core/models/tag_model.dart';
+import '../../core/services/app_messenger.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/memory_query_service.dart';
@@ -1365,6 +1366,23 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       }
 
       if (mounted) context.go('/memories');
+      // Confirmation "partagé avec qui" — seulement si le souvenir porte
+      // effectivement un tag partagé. Ne bloque pas la navigation (sauvegarde
+      // optimiste, voir plus haut) : le SnackBar passe par la clé globale
+      // (survit au context.go, contrairement à ScaffoldMessenger.of(context)
+      // qui serait coupé net) et arrive un instant après sur l'écran suivant.
+      if (sharedWith.isNotEmpty) {
+        TagService.resolveCollaborators(tagIds).then((names) {
+          final label = sharedWith
+              .map((uid) => (names[uid]?.displayName.isNotEmpty ?? false)
+                  ? names[uid]!.displayName
+                  : (names[uid]?.email ?? uid))
+              .join(', ');
+          appMessengerKey.currentState?.showSnackBar(
+            SnackBar(content: Text('Partagé avec $label')),
+          );
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
