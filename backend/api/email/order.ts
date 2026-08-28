@@ -145,14 +145,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: adminOk && userOk, adminOk, userOk })
 }
 
-function row(label: string, value: string): string {
+// Exportés : réutilisés par notify/[action].ts pour le rappel admin
+// "commandes en attente de validation" (même habillage visuel).
+export function row(label: string, value: string): string {
   return `<tr>
     <td style="padding:8px 0;border-bottom:1px solid #eee;color:#888;font-size:13px;">${label}</td>
     <td style="padding:8px 0;border-bottom:1px solid #eee;font-size:13px;">${value}</td>
   </tr>`
 }
 
-function wrap(body: string): string {
+export function wrap(body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8"/></head>
 <body style="margin:0;padding:0;background:#f5ece0;font-family:Arial,sans-serif;">
 <table width="100%" cellpadding="0" cellspacing="0" style="padding:40px 0;">

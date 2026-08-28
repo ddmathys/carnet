@@ -3,16 +3,22 @@ import { FieldValue } from 'firebase-admin/firestore'
 import { requireAuth } from '../../lib/verify'
 import { db, messaging } from '../../lib/firebase'
 import { presignGet } from '../../lib/r2'
+import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
+import { row, wrap } from '../email/order'
 
 // « Souvenir du jour » : la notification qui ressort une photo au hasard, façon
 // Google Photos. URLs :
-//   GET  /api/notify/cron     → balaie les utilisateurs abonnés et envoie (cron only)
-//   GET  /api/notify/test     → même chose pour UN utilisateur, envoi immédiat
-//                               (diagnostic admin, protégé par CRON_SECRET)
-//   POST /api/notify/send-now → même chose pour SOI-MÊME (bouton "Envoyer
-//                               maintenant" du profil), protégé par le token
-//                               Firebase de l'utilisateur — pas de CRON_SECRET
-//                               côté client.
+//   GET  /api/notify/cron          → balaie les utilisateurs abonnés et envoie (cron only)
+//   GET  /api/notify/test          → même chose pour UN utilisateur, envoi immédiat
+//                                    (diagnostic admin, protégé par CRON_SECRET)
+//   POST /api/notify/send-now      → même chose pour SOI-MÊME (bouton "Envoyer
+//                                    maintenant" du profil), protégé par le token
+//                                    Firebase de l'utilisateur — pas de CRON_SECRET
+//                                    côté client.
+//   GET  /api/notify/orders-pending → rappel admin quotidien (mail) : commandes
+//                                    reçues mais pas encore marquées payées —
+//                                    pour ne pas laisser un client sans réponse
+//                                    (cron only, voir vercel.json).
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
 // plafonne à 12 fonctions serverless.
@@ -284,12 +290,75 @@ async function handleSendNow(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, memoryId: memory.id, ...result })
 }
 
+/** Rappel admin quotidien : commandes reçues (`status === 'received'`) mais
+ * pas encore marquées payées — « en attente de validation ». Un seul mail
+ * récapitulatif (pas un par commande), envoyé seulement s'il y en a au moins
+ * une — pas de mail vide tous les jours pour dire "rien à signaler". */
+async function handleOrdersPending(req: VercelRequest, res: VercelResponse) {
+  if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' })
+
+  const snap = await db.collection('orders').where('status', '==', 'received').get()
+  if (snap.empty) return res.status(200).json({ ok: true, pending: 0, sent: false })
+
+  const now = Date.now()
+  const rows = snap.docs
+    .map((d) => {
+      const o = d.data() as Record<string, any>
+      const createdAt = toDate(o.createdAt)
+      const days = createdAt ? Math.floor((now - createdAt.getTime()) / 86400000) : null
+      return {
+        ref: `#${d.id.slice(0, 8).toUpperCase()}`,
+        name: `${o.firstName ?? ''} ${o.lastName ?? ''}`.trim() || '—',
+        item:
+          o.productType === 'poster'
+            ? `Tirage ${String(o.posterSize ?? '')}`
+            : String(o.bookTitle ?? 'Livre'),
+        price: `CHF ${Number(o.price ?? 0).toFixed(2)}`,
+        days,
+      }
+    })
+    // La plus ancienne (donc la plus urgente) en premier.
+    .sort((a, b) => (b.days ?? 0) - (a.days ?? 0))
+
+  const listHtml = rows
+    .map((r) =>
+      row(
+        `<strong>${r.ref}</strong>`,
+        `${r.name} · ${r.item} · ${r.price}` +
+          (r.days !== null ? ` · depuis ${r.days} j` : '')
+      )
+    )
+    .join('')
+
+  const count = rows.length
+  const html = wrap(`
+    <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">
+      ⏳ ${count} commande${count > 1 ? 's' : ''} en attente de validation — n'attends pas !
+    </p>
+    ${listHtml}
+    <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
+      Une fois le paiement reçu, marque la commande « payée » dans l'app pour
+      lancer l'impression. Ce rappel revient chaque jour tant qu'une commande
+      reste en attente.
+    </p>
+  `)
+
+  const sent = await sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `⏳ ${count} commande${count > 1 ? 's' : ''} en attente de validation`,
+    html,
+  })
+
+  return res.status(200).json({ ok: true, pending: count, sent })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
   if (action === 'cron') return handleCron(req, res)
   if (action === 'test') return handleTest(req, res)
   if (action === 'send-now') return handleSendNow(req, res)
+  if (action === 'orders-pending') return handleOrdersPending(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

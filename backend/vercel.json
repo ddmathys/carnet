@@ -7,6 +7,7 @@
   ],
   "crons": [
     { "path": "/api/prodigi/poll", "schedule": "0 8 * * *" },
-    { "path": "/api/notify/cron", "schedule": "0 7 * * *" }
+    { "path": "/api/notify/cron", "schedule": "0 7 * * *" },
+    { "path": "/api/notify/orders-pending", "schedule": "0 8 * * *" }
   ]
 }
