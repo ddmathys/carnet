@@ -55,6 +55,7 @@ class BookHistoryService {
     required String storagePath,
     required int memoriesCount,
     String? orderId,
+    String? coverPhotoUrl,
   }) async {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     if (uid == null) return;
@@ -71,6 +72,7 @@ class BookHistoryService {
         'memoriesCount': memoriesCount,
         'createdAt': FieldValue.serverTimestamp(),
         'orderId': orderId,
+        'coverPhotoUrl': coverPhotoUrl,
       });
     } catch (_) {
       // ignore — l'entrée d'historique est best-effort

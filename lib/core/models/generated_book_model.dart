@@ -16,6 +16,9 @@ class GeneratedBookModel {
   final int memoriesCount;
   final DateTime createdAt;
   final String? orderId; // si format == 'printed'
+  // Vignette (photo de couverture choisie à la génération) — affichage seul
+  // (« Mes livres »), sans usage impression. Null si couverture sans photo.
+  final String? coverPhotoUrl;
 
   const GeneratedBookModel({
     required this.id,
@@ -30,6 +33,7 @@ class GeneratedBookModel {
     required this.memoriesCount,
     required this.createdAt,
     this.orderId,
+    this.coverPhotoUrl,
   });
 
   bool get isPrinted => format == 'printed';
@@ -51,6 +55,7 @@ class GeneratedBookModel {
           ? (d['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
       orderId: d['orderId'],
+      coverPhotoUrl: d['coverPhotoUrl'],
     );
   }
 
@@ -66,5 +71,6 @@ class GeneratedBookModel {
         'memoriesCount': memoriesCount,
         'createdAt': Timestamp.fromDate(createdAt),
         'orderId': orderId,
+        'coverPhotoUrl': coverPhotoUrl,
       };
 }

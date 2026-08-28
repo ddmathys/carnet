@@ -86,6 +86,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Map<String, String> _locationComments = {};
   Set<String> _selectedMemoryIds = {};
   String? _coverPhotoUrl;
+  // Photo du DOS (4ᵉ de couverture, optionnelle) — même sélecteur que la
+  // couverture. Sans elle, le dos reste un aplat de couleur (jamais blanc).
+  String? _backCoverPhotoUrl;
   // Si vrai, la photo de couverture n'est pas répétée dans les pages du livre.
   bool _excludeCoverPhotoFromBook = false;
   // URLs de photos résolues par souvenir (R2 signé + Firebase). Sans ça, le
@@ -530,6 +533,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       locationComments: _locationComments,
       coverPhotoUrl: _coverPhotoUrl,
       excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
+      backCoverPhotoUrl: _backCoverPhotoUrl,
       customTitle:
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null,
       backendUrl: AppConfig.backendUrl,
@@ -650,6 +654,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         pdfUrl: uploaded.url,
         storagePath: uploaded.key,
         memoriesCount: memoriesCount,
+        coverPhotoUrl: _coverPhotoUrl,
       );
     } catch (_) {
       // Silencieux — le partage a déjà eu lieu
@@ -694,6 +699,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         locationComments: _locationComments,
         coverPhotoUrl: _coverPhotoUrl,
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
+        backCoverPhotoUrl: _backCoverPhotoUrl,
         customTitle: customTitle,
         backendUrl: AppConfig.backendUrl,
         coverVideosQrUrl: await _coverVideosQrUrl(),
@@ -768,6 +774,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         storagePath: uploaded.key,
         memoriesCount: _selectedMemories.length,
         orderId: orderId,
+        coverPhotoUrl: _coverPhotoUrl,
       );
 
       if (!mounted) return;
@@ -1182,72 +1189,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           ],
         ),
         const SizedBox(height: 10),
-        SizedBox(
-          height: 78,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            itemCount: allUrls.length,
-            itemBuilder: (_, i) {
-              final url = allUrls[i];
-              final isSelected = _coverPhotoUrl == url;
-              return GestureDetector(
-                onTap: () => setState(() {
-                  _coverPhotoUrl = isSelected ? null : url;
-                }),
-                child: Container(
-                  margin: const EdgeInsets.only(right: 8),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    border: isSelected
-                        ? Border.all(color: AppColors.sage, width: 2.5)
-                        : null,
-                  ),
-                  child: Stack(
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(isSelected ? 6 : 8),
-                        child: CachedNetworkImage(
-                          imageUrl: url,
-                          width: 70,
-                          height: 70,
-                          fit: BoxFit.cover,
-                          placeholder: (_, __) => Container(
-                            width: 70,
-                            height: 70,
-                            color: AppColors.background,
-                            child: const Center(
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2)),
-                          ),
-                          errorWidget: (_, __, ___) => Container(
-                            width: 70,
-                            height: 70,
-                            color: AppColors.background,
-                            child: const Icon(Icons.broken_image_outlined,
-                                color: AppColors.softGray, size: 20),
-                          ),
-                        ),
-                      ),
-                      if (isSelected)
-                        Positioned(
-                          right: 3,
-                          top: 3,
-                          child: Container(
-                            decoration: const BoxDecoration(
-                              color: AppColors.sage,
-                              shape: BoxShape.circle,
-                            ),
-                            padding: const EdgeInsets.all(2),
-                            child: const Icon(Icons.check,
-                                color: Colors.white, size: 12),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              );
-            },
-          ),
+        _photoStrip(
+          urls: allUrls,
+          selectedUrl: _coverPhotoUrl,
+          onTapUrl: (url) => setState(() {
+            _coverPhotoUrl = _coverPhotoUrl == url ? null : url;
+          }),
         ),
         if (_coverPhotoUrl != null) ...[
           const SizedBox(height: 6),
@@ -1286,7 +1233,117 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
           ),
         ],
+
+        // ── Photo de dos (4ᵉ de couverture, optionnelle) ──────────────────
+        // Sans choix ici, le dos reste un aplat de la couleur du livre —
+        // jamais blanc, mais pas obligé de porter une photo non plus.
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            const Icon(Icons.crop_portrait_outlined,
+                size: 16, color: AppColors.textMedium),
+            const SizedBox(width: 6),
+            const Text(
+              'Photo au dos du livre (facultatif)',
+              style: TextStyle(
+                  color: AppColors.textMedium,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        _photoStrip(
+          urls: allUrls,
+          selectedUrl: _backCoverPhotoUrl,
+          onTapUrl: (url) => setState(() {
+            _backCoverPhotoUrl = _backCoverPhotoUrl == url ? null : url;
+          }),
+        ),
+        if (_backCoverPhotoUrl != null) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Photo de dos sélectionnée · Tape à nouveau pour annuler',
+            style: TextStyle(
+                color: AppColors.sage.withOpacity(0.8),
+                fontSize: 11,
+                fontStyle: FontStyle.italic),
+          ),
+        ],
       ],
+    );
+  }
+
+  /// Bandeau horizontal de vignettes photo, avec coche sur celle sélectionnée
+  /// — partagé entre le sélecteur de couverture et celui du dos.
+  Widget _photoStrip({
+    required List<String> urls,
+    required String? selectedUrl,
+    required ValueChanged<String> onTapUrl,
+  }) {
+    return SizedBox(
+      height: 78,
+      child: ListView.builder(
+        scrollDirection: Axis.horizontal,
+        itemCount: urls.length,
+        itemBuilder: (_, i) {
+          final url = urls[i];
+          final isSelected = selectedUrl == url;
+          return GestureDetector(
+            onTap: () => onTapUrl(url),
+            child: Container(
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(8),
+                border: isSelected
+                    ? Border.all(color: AppColors.sage, width: 2.5)
+                    : null,
+              ),
+              child: Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(isSelected ? 6 : 8),
+                    child: CachedNetworkImage(
+                      imageUrl: url,
+                      width: 70,
+                      height: 70,
+                      fit: BoxFit.cover,
+                      placeholder: (_, __) => Container(
+                        width: 70,
+                        height: 70,
+                        color: AppColors.background,
+                        child: const Center(
+                            child: CircularProgressIndicator(strokeWidth: 2)),
+                      ),
+                      errorWidget: (_, __, ___) => Container(
+                        width: 70,
+                        height: 70,
+                        color: AppColors.background,
+                        child: const Icon(Icons.broken_image_outlined,
+                            color: AppColors.softGray, size: 20),
+                      ),
+                    ),
+                  ),
+                  if (isSelected)
+                    Positioned(
+                      right: 3,
+                      top: 3,
+                      child: Container(
+                        decoration: const BoxDecoration(
+                          color: AppColors.sage,
+                          shape: BoxShape.circle,
+                        ),
+                        padding: const EdgeInsets.all(2),
+                        child: const Icon(Icons.check,
+                            color: Colors.white, size: 12),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -1679,10 +1736,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         }),
         onChanged: (ids) => setState(() {
           _selectedMemoryIds = ids;
-          // Reset cover photo if it no longer belongs to selected memories
-          if (_coverPhotoUrl != null) {
+          // Reset cover photo(s) if they no longer belong to selected memories
+          if (_coverPhotoUrl != null || _backCoverPhotoUrl != null) {
             final allUrls = _allPhotoUrls;
             if (!allUrls.contains(_coverPhotoUrl)) _coverPhotoUrl = null;
+            if (!allUrls.contains(_backCoverPhotoUrl)) _backCoverPhotoUrl = null;
           }
         }),
         onMemoryUpdated: _applyMemoryLayoutUpdate,

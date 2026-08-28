@@ -67,7 +67,7 @@ class BookPricing {
 
   /// Estimation du nombre de pages AVANT génération du PDF (fallback ; dès que
   /// l'aperçu est généré on utilise le vrai compte). ~4 photos par page + 1 page
-  /// par souvenir-texte + la couverture.
+  /// par souvenir-texte + couverture + dos.
   static int estimatePages(List<MemoryModel> memories) {
     int pages = 0;
     for (final m in memories) {
@@ -82,7 +82,7 @@ class BookPricing {
         pages += 1; // page texte
       }
     }
-    return 1 + pages; // + couverture
+    return 2 + pages; // + couverture + dos
   }
 
   /// Nombre de pages réellement imprimé : PAIR par précaution (règle non

@@ -134,6 +134,9 @@ class OrderModel {
   // commande — voir poster_generate_screen.dart — ce champ est gardé pour
   // affichage/traçabilité admin).
   final List<String>? posterMemoryIds;
+  // Vignette du tirage (photo « en vedette », ou 1ʳᵉ photo à défaut) —
+  // affichage seul, sans usage impression. Null pour un livre.
+  final String? posterPhotoUrl;
 
   const OrderModel({
     required this.id,
@@ -173,6 +176,7 @@ class OrderModel {
     this.posterHangerColor,
     this.posterCaption,
     this.posterMemoryIds,
+    this.posterPhotoUrl,
   });
 
   bool get isPoster => productType == 'poster';
@@ -311,6 +315,7 @@ class OrderModel {
       posterMemoryIds: (d['posterMemoryIds'] as List<dynamic>?)
           ?.map((e) => e.toString())
           .toList(),
+      posterPhotoUrl: d['posterPhotoUrl'],
     );
   }
 
@@ -341,5 +346,6 @@ class OrderModel {
     'posterHangerColor': posterHangerColor,
     'posterCaption': posterCaption,
     'posterMemoryIds': posterMemoryIds,
+    'posterPhotoUrl': posterPhotoUrl,
   };
 }

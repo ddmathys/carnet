@@ -371,6 +371,9 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         posterHangerColor: _color,
         posterCaption: _captionCtrl.text.trim().isNotEmpty ? _captionCtrl.text.trim() : null,
         posterMemoryIds: _uniqueMemories.map((m) => m.id).toList(),
+        posterPhotoUrl: _photoUrls.isNotEmpty
+            ? _photoUrls[_featured.isNotEmpty ? _featured.first : 0]
+            : null,
       );
       final orderId = await OrderService.createOrder(order);
 

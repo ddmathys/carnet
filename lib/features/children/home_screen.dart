@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
@@ -214,10 +215,13 @@ class _HomeScreenState extends State<HomeScreen> {
           SliverToBoxAdapter(child: _growthShortcuts(context)),
         ],
 
-        // 4) Les livres déjà faits (PDF générés et livres commandés).
-        _sectionHeader('Mes livres', 'Tout voir',
-            onAction: () => context.push('/books')),
-        SliverToBoxAdapter(child: _booksRail(context)),
+        // 4) Les livres déjà faits (PDF générés et livres commandés) — la
+        // section entière (titre compris) ne s'affiche que s'il y en a.
+        SliverToBoxAdapter(child: _booksSection(context)),
+
+        // 4b) Les tirages commandés (posters) — même principe, section à part
+        // puisque ce sont deux produits distincts (voir OrderModel.isPoster).
+        SliverToBoxAdapter(child: _postersSection(context)),
 
         // 5) Créer un livre — tout en bas, l'aboutissement.
         SliverToBoxAdapter(
@@ -390,38 +394,107 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Rangée « Mes livres » : PDF générés et livres commandés, du plus récent au
-  /// plus ancien. Vide → une invitation discrète à en créer un.
-  Widget _booksRail(BuildContext context) {
+  /// Section « Mes livres » (titre + étagère) : PDF générés et livres
+  /// commandés, du plus récent au plus ancien. N'affiche RIEN (pas même le
+  /// titre) tant qu'il n'y a aucun livre.
+  Widget _booksSection(BuildContext context) {
     return StreamBuilder<List<GeneratedBookModel>>(
       stream: BookHistoryService.streamForUser(),
       builder: (context, snap) {
         final books = snap.data ?? const <GeneratedBookModel>[];
-        if (books.isEmpty) {
-          return const Padding(
-            padding: EdgeInsets.fromLTRB(22, 2, 22, 6),
-            child: Text(
-              'Aucun livre pour l\'instant — compose-en un depuis tes tags.',
-              style: TextStyle(color: AppColors.textMedium, fontSize: 13),
+        if (books.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionHeaderInline('Mes livres', 'Tout voir',
+                onAction: () => context.push('/books')),
+            SizedBox(
+              height: 176,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+                itemCount: books.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                itemBuilder: (_, i) => _BookCard(
+                  book: books[i],
+                  onTap: () => context.push('/books'),
+                ),
+              ),
             ),
-          );
-        }
-        return SizedBox(
-          height: 176,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
-            itemCount: books.length,
-            separatorBuilder: (_, __) => const SizedBox(width: 14),
-            itemBuilder: (_, i) => _BookCard(
-              book: books[i],
-              onTap: () => context.push('/books'),
-            ),
-          ),
+          ],
         );
       },
     );
   }
+
+  /// Section « Mes tirages » (titre + étagère) : posters commandés, du plus
+  /// récent au plus ancien. N'affiche RIEN tant qu'il n'y a aucun tirage.
+  Widget _postersSection(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return const SizedBox.shrink();
+    return StreamBuilder<List<OrderModel>>(
+      stream: OrderService.userOrdersStream(uid),
+      builder: (context, snap) {
+        final posters = (snap.data ?? const <OrderModel>[])
+            .where((o) => o.isPoster)
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+        if (posters.isEmpty) return const SizedBox.shrink();
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionHeaderInline('Mes tirages', 'Tout voir',
+                onAction: () => context.push('/orders')),
+            SizedBox(
+              height: 176,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+                itemCount: posters.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 14),
+                itemBuilder: (_, i) => _PosterCard(
+                  order: posters[i],
+                  onTap: () => context.push('/orders/${posters[i].id}'),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Même habillage que `_sectionHeader`, mais en widget simple (pas un
+  /// sliver) : ces deux sections vivent DANS un SliverToBoxAdapter, pour
+  /// pouvoir s'effacer entièrement (titre compris) le temps que le flux
+  /// Firestore réponde ou si la liste est vide.
+  Widget _sectionHeaderInline(String title, String trailing,
+          {VoidCallback? onAction}) =>
+      Padding(
+        padding: const EdgeInsets.fromLTRB(22, 16, 22, 8),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(title,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.textMedium,
+                    letterSpacing: 1.2)),
+            GestureDetector(
+              onTap: onAction,
+              child: Text(trailing,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight:
+                          onAction != null ? FontWeight.w600 : FontWeight.w400,
+                      color: onAction != null
+                          ? AppColors.sageDark
+                          : AppColors.textMedium)),
+            ),
+          ],
+        ),
+      );
 
   Widget _growthShortcuts(BuildContext context) {
     return Padding(
@@ -652,12 +725,8 @@ class _BookCard extends StatelessWidget {
             Container(
               width: 118,
               height: 132,
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                gradient: const LinearGradient(
-                  colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
                 borderRadius: BorderRadius.circular(10),
                 boxShadow: [
                   BoxShadow(
@@ -667,39 +736,47 @@ class _BookCard extends StatelessWidget {
                   ),
                 ],
               ),
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    book.title,
-                    maxLines: 3,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontFamily: 'Fraunces',
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w600,
-                      height: 1.2,
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.18),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(
-                      book.isPrinted ? 'commandé' : 'PDF',
-                      style: const TextStyle(
+              child: _CoverThumb(
+                photoUrl: book.coverPhotoUrl,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        book.title,
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'Fraunces',
                           color: Colors.white,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600),
-                    ),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                          shadows: [
+                            Shadow(color: Colors.black45, blurRadius: 4),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.28),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          book.isPrinted ? 'commandé' : 'PDF',
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
             const SizedBox(height: 6),
@@ -710,6 +787,199 @@ class _BookCard extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Fond d'une carte étagère (livre ou tirage) : la photo de couverture en
+/// plein cadre + un voile sombre en bas (le texte posé dessus reste lisible
+/// quelle que soit la photo) ; à défaut de photo, le dégradé brun de marque —
+/// jamais de blanc nu, c'est justement ce qu'on corrige.
+class _CoverThumb extends StatelessWidget {
+  final String? photoUrl;
+  final Widget child;
+  const _CoverThumb({required this.photoUrl, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (photoUrl == null || photoUrl!.isEmpty) {
+      return Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: child,
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CachedNetworkImage(
+          imageUrl: photoUrl!,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => const ColoredBox(color: Color(0xFF6B4A32)),
+          errorWidget: (_, __, ___) => const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          ),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.55)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+}
+
+// ── Tirage (carte de l'étagère « Mes tirages ») ──────────────────────────────
+
+class _PosterCard extends StatelessWidget {
+  final OrderModel order;
+  final VoidCallback onTap;
+  const _PosterCard({required this.order, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 118,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 118,
+              height: 132,
+              clipBehavior: Clip.antiAlias,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10),
+                boxShadow: [
+                  BoxShadow(
+                    color: const Color(0xFF1F3D2B).withOpacity(0.25),
+                    blurRadius: 12,
+                    offset: const Offset(0, 6),
+                  ),
+                ],
+              ),
+              child: _PosterThumb(
+                photoUrl: order.posterPhotoUrl,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        order.posterSize ?? 'Tirage',
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontFamily: 'Fraunces',
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          height: 1.2,
+                          shadows: [
+                            Shadow(color: Colors.black45, blurRadius: 4),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.28),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          order.statusLabel,
+                          style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '${order.memoryCount} souvenir${order.memoryCount > 1 ? 's' : ''}',
+              style: const TextStyle(fontSize: 11.5, color: AppColors.textMedium),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Même principe que `_CoverThumb`, dégradé vert sauge (couleur du produit
+/// tirage, cf. `_CreatePosterCta`) plutôt que brun (livre) quand pas de photo.
+class _PosterThumb extends StatelessWidget {
+  final String? photoUrl;
+  final Widget child;
+  const _PosterThumb({required this.photoUrl, required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    if (photoUrl == null || photoUrl!.isEmpty) {
+      return Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: child,
+      );
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        CachedNetworkImage(
+          imageUrl: photoUrl!,
+          fit: BoxFit.cover,
+          placeholder: (_, __) => const ColoredBox(color: Color(0xFF3A6648)),
+          errorWidget: (_, __, ___) => const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+            ),
+          ),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.55)],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+            ),
+          ),
+        ),
+        child,
+      ],
     );
   }
 }

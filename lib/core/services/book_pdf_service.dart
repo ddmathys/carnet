@@ -148,6 +148,10 @@ class BookPdfService {
     required List<MemoryModel> memories,
     Map<String, String> locationComments = const {},
     String? coverPhotoUrl,
+    // Photo du DOS (4ᵉ de couverture) — optionnelle, même sélecteur que la
+    // couverture. Sans elle, le dos reste un aplat de couleur (jamais blanc).
+    String? backCoverPhotoUrl,
+    bool excludeBackCoverPhotoFromBook = false,
     String? customTitle,
     String? customSubtitle,
     String backendUrl = '',
@@ -231,6 +235,7 @@ class BookPdfService {
     final urlsToFetch = {
       ...photoEntries.map((e) => e.url),
       if (coverPhotoUrl != null) coverPhotoUrl,
+      if (backCoverPhotoUrl != null) backCoverPhotoUrl,
     }.toList();
     Future<void> fetchAll(Iterable<String> urls) async {
       final results = await _runBounded(urls.toList(), (url) async {
@@ -266,13 +271,18 @@ class BookPdfService {
 
     final coverPhotoBytes =
         coverPhotoUrl != null ? bytesByUrl[coverPhotoUrl] : null;
+    final backCoverPhotoBytes =
+        backCoverPhotoUrl != null ? bytesByUrl[backCoverPhotoUrl] : null;
     // Photos affichées dans le livre. Option : exclure la photo de couverture
-    // pour ne pas la répéter à l'intérieur.
+    // (avant/dos) pour ne pas la répéter à l'intérieur.
     final successfulPhotos = photoEntries.where((e) {
       if (!bytesByUrl.containsKey(e.url)) return false;
       if (excludeCoverPhotoFromBook &&
           coverPhotoUrl != null &&
           e.url == coverPhotoUrl) return false;
+      if (excludeBackCoverPhotoFromBook &&
+          backCoverPhotoUrl != null &&
+          e.url == backCoverPhotoUrl) return false;
       return true;
     }).toList();
     final shownPhotoMemoIds = successfulPhotos.map((e) => e.memory.id).toSet();
@@ -495,12 +505,24 @@ class BookPdfService {
       ));
     }
 
+    // Couverture avant + contenu — SANS le dos, qui se pose toujours en toute
+    // dernière page (voir plus bas) : c'est aussi le dénominateur affiché sur
+    // chaque page ("3 / totalPages"), inchangé par l'ajout du dos.
     final totalPages = 1 +
         photoPages.length +
         textOnlyMemories.length +
         growthChapters.length;
-    final finalPageCount =
-        !padForPrint ? totalPages : _validPageCount(coverType, totalPages);
+    // + 1 dos : avant ce +1, la dernière page du PDF (donc du DOS imprimé
+    // chez Prodigi, cf. generateForNotebook) était soit une page de bourrage
+    // crème, soit — pire, quand aucun bourrage n'était nécessaire — une vraie
+    // page de contenu qui débordait silencieusement sur le dos.
+    final withBackCoverTotal = totalPages + 1;
+    final finalPageCount = !padForPrint
+        ? withBackCoverTotal
+        : _validPageCount(coverType, withBackCoverTotal);
+    // Bourrage éventuel, posé AVANT le dos (qui doit rester la toute dernière
+    // page du document, jamais une page blanche).
+    final paddingCount = finalPageCount - withBackCoverTotal;
     // A4 full-bleed — margins handled inside each widget
     final fmt = PdfPageFormat(_a4W, _a4H, marginAll: 0);
 
@@ -584,15 +606,26 @@ class BookPdfService {
       }
 
       // 4. Pages blanches de bourrage pour atteindre un nombre de pages valide
-      //    (pair — cf. _validPageCount). Uniquement pour l'impression.
+      //    (pair — cf. _validPageCount). Uniquement pour l'impression. Posées
+      //    AVANT le dos (étape 5), qui doit rester la toute dernière page.
       if (padForPrint) {
-        for (int p = totalPages; p < finalPageCount; p++) {
+        for (int p = 0; p < paddingCount; p++) {
           doc.addPage(pw.Page(
             pageFormat: fmt,
             build: (_) => pw.Container(color: _cream),
           ));
         }
       }
+
+      // 5. Dos (4ᵉ de couverture) — TOUJOURS la toute dernière page.
+      doc.addPage(pw.Page(
+        pageFormat: fmt,
+        build: (_) => _backCoverPageNotebook(
+          cover: pdfCover,
+          pR: playfairR,
+          photoBytes: backCoverPhotoBytes,
+        ),
+      ));
 
       return doc.save();
     }
@@ -1148,6 +1181,76 @@ class BookPdfService {
               ),
             ),
           ),
+      ],
+    );
+  }
+
+  /// Dos du livre (4ᵉ de couverture) — TOUJOURS la toute dernière page du
+  /// document (voir generateForNotebook : Prodigi imprime la dernière page du
+  /// PDF sur le dos, sans gabarit wraparound à fournir). Avant ce widget,
+  /// cette page était soit une page de bourrage crème, soit — pire — une
+  /// vraie page de contenu qui débordait silencieusement sur le dos.
+  ///
+  /// [photoBytes] optionnelle : photo choisie par l'utilisateur pour le dos
+  /// (même sélecteur que la couverture, voir book_generate_screen.dart). Sans
+  /// choix, un aplat de la couleur de couverture avec juste la marque — jamais
+  /// blanc.
+  static pw.Widget _backCoverPageNotebook({
+    required PdfColor cover,
+    required pw.Font pR,
+    Uint8List? photoBytes,
+  }) {
+    const w = _a4W;
+    const h = _a4H;
+
+    pw.Widget wordmarkBadge({required bool onPhoto}) => pw.Container(
+          padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: onPhoto
+              ? const pw.BoxDecoration(
+                  color: PdfColors.white,
+                  borderRadius: pw.BorderRadius.all(pw.Radius.circular(99)),
+                )
+              : null,
+          child: pw.Text(
+            'carnet.',
+            style: pw.TextStyle(
+              font: pR,
+              fontSize: 12,
+              fontStyle: pw.FontStyle.italic,
+              letterSpacing: 1.2,
+              color: onPhoto ? cover : PdfColors.white,
+            ),
+          ),
+        );
+
+    if (photoBytes != null) {
+      return pw.Stack(
+        children: [
+          pw.SizedBox(
+            width: w,
+            height: h,
+            child: pw.Image(pw.MemoryImage(photoBytes), fit: pw.BoxFit.cover),
+          ),
+          pw.Positioned(
+            bottom: _safe + 14,
+            left: 0,
+            right: 0,
+            child: pw.Center(child: wordmarkBadge(onPhoto: true)),
+          ),
+        ],
+      );
+    }
+
+    // Pas de photo choisie : aplat de la couleur de couverture, marque
+    // centrée — toujours de la couleur du livre, jamais du blanc nu.
+    return pw.Stack(
+      children: [
+        pw.SizedBox(width: w, height: h, child: pw.Container(color: cover)),
+        pw.SizedBox(
+          width: w,
+          height: h,
+          child: pw.Center(child: wordmarkBadge(onPhoto: false)),
+        ),
       ],
     );
   }
