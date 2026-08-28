@@ -13,6 +13,7 @@ import '../../core/constants/milestone_types.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
+import '../../core/services/photo_service.dart';
 import '../../core/services/tag_service.dart';
 import '../memories/widgets/memory_polaroid.dart';
 import '../memories/widgets/import_media_cta.dart';
@@ -840,6 +841,7 @@ class _BookCard extends StatelessWidget {
                 ],
               ),
               child: _CoverThumb(
+                photoKey: book.coverPhotoKey,
                 photoUrl: book.coverPhotoUrl,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -898,55 +900,64 @@ class _BookCard extends StatelessWidget {
 /// plein cadre + un voile sombre en bas (le texte posé dessus reste lisible
 /// quelle que soit la photo) ; à défaut de photo, le dégradé brun de marque —
 /// jamais de blanc nu, c'est justement ce qu'on corrige.
+///
+/// [photoKey] (clé R2, prioritaire) est résolu en URL signée à l'affichage —
+/// jamais stockée telle quelle (elle expirerait après 1h, voir
+/// generated_book_model.dart). [photoUrl] reste pour les photos Firebase
+/// héritées (URL permanente, utilisée directement).
 class _CoverThumb extends StatelessWidget {
+  final String? photoKey;
   final String? photoUrl;
   final Widget child;
-  const _CoverThumb({required this.photoUrl, required this.child});
+  const _CoverThumb(
+      {required this.photoKey, required this.photoUrl, required this.child});
+
+  static const _fallback = BoxDecoration(
+    gradient: LinearGradient(
+      colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    if (photoUrl == null || photoUrl!.isEmpty) {
-      return Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: child,
+    if (photoKey != null && photoKey!.isNotEmpty) {
+      return FutureBuilder<Map<String, String>>(
+        future: PhotoService.signOwnPhotoKeys([photoKey!]),
+        builder: (context, snap) {
+          final url = snap.data?[photoKey];
+          return url != null
+              ? _withPhoto(url)
+              : Container(decoration: _fallback, child: child);
+        },
       );
     }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CachedNetworkImage(
-          imageUrl: photoUrl!,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => const ColoredBox(color: Color(0xFF6B4A32)),
-          errorWidget: (_, __, ___) => const DecoratedBox(
+    if (photoUrl != null && photoUrl!.isNotEmpty) return _withPhoto(photoUrl!);
+    return Container(decoration: _fallback, child: child);
+  }
+
+  Widget _withPhoto(String url) => Stack(
+        fit: StackFit.expand,
+        children: [
+          CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => const ColoredBox(color: Color(0xFF6B4A32)),
+            errorWidget: (_, __, ___) => const DecoratedBox(decoration: _fallback),
+          ),
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+                colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.55)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
           ),
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.55)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-          ),
-        ),
-        child,
-      ],
-    );
-  }
+          child,
+        ],
+      );
 }
 
 // ── Tirage (carte de l'étagère « Mes tirages ») ──────────────────────────────
@@ -980,6 +991,7 @@ class _PosterCard extends StatelessWidget {
                 ],
               ),
               child: _PosterThumb(
+                photoKey: order.posterPhotoKey,
                 photoUrl: order.posterPhotoUrl,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
@@ -1036,55 +1048,61 @@ class _PosterCard extends StatelessWidget {
 
 /// Même principe que `_CoverThumb`, dégradé vert sauge (couleur du produit
 /// tirage, cf. `_CreatePosterCta`) plutôt que brun (livre) quand pas de photo.
+/// Même remarque sur [photoKey] (résolu à l'affichage, jamais stocké en URL
+/// signée) vs [photoUrl] (photo Firebase héritée, permanente).
 class _PosterThumb extends StatelessWidget {
+  final String? photoKey;
   final String? photoUrl;
   final Widget child;
-  const _PosterThumb({required this.photoUrl, required this.child});
+  const _PosterThumb(
+      {required this.photoKey, required this.photoUrl, required this.child});
+
+  static const _fallback = BoxDecoration(
+    gradient: LinearGradient(
+      colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
+      begin: Alignment.topLeft,
+      end: Alignment.bottomRight,
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
-    if (photoUrl == null || photoUrl!.isEmpty) {
-      return Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-          ),
-        ),
-        child: child,
+    if (photoKey != null && photoKey!.isNotEmpty) {
+      return FutureBuilder<Map<String, String>>(
+        future: PhotoService.signOwnPhotoKeys([photoKey!]),
+        builder: (context, snap) {
+          final url = snap.data?[photoKey];
+          return url != null
+              ? _withPhoto(url)
+              : Container(decoration: _fallback, child: child);
+        },
       );
     }
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        CachedNetworkImage(
-          imageUrl: photoUrl!,
-          fit: BoxFit.cover,
-          placeholder: (_, __) => const ColoredBox(color: Color(0xFF3A6648)),
-          errorWidget: (_, __, ___) => const DecoratedBox(
+    if (photoUrl != null && photoUrl!.isNotEmpty) return _withPhoto(photoUrl!);
+    return Container(decoration: _fallback, child: child);
+  }
+
+  Widget _withPhoto(String url) => Stack(
+        fit: StackFit.expand,
+        children: [
+          CachedNetworkImage(
+            imageUrl: url,
+            fit: BoxFit.cover,
+            placeholder: (_, __) => const ColoredBox(color: Color(0xFF3A6648)),
+            errorWidget: (_, __, ___) => const DecoratedBox(decoration: _fallback),
+          ),
+          DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
+                colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.55)],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
               ),
             ),
           ),
-        ),
-        DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Colors.black.withOpacity(0.05), Colors.black.withOpacity(0.55)],
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-            ),
-          ),
-        ),
-        child,
-      ],
-    );
-  }
+          child,
+        ],
+      );
 }
 
 // « Créer un livre » : le bandeau d'aboutissement, en bas du dashboard.

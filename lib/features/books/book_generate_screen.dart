@@ -95,6 +95,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // sélecteur de couverture était vide pour les souvenirs passés sur R2 (il ne
   // lisait que les URLs Firebase).
   final Map<String, List<String>> _photoUrlsByMemory = {};
+  // URL (signée, R2) → clé R2 d'origine — permet de retrouver la clé de la
+  // couverture choisie pour l'historique (voir BookHistoryService.recordBook
+  // : on y stocke la CLÉ, jamais l'URL signée qui expire après 1h). Absent
+  // pour une photo Firebase héritée (l'URL elle-même est alors permanente).
+  final Map<String, String> _keyByUrl = {};
 
   // Aperçu WYSIWYG : on génère les MÊMES octets PDF que le téléchargement et on
   // affiche chaque page rastérisée → aucune différence possible avec le rendu
@@ -654,7 +659,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         pdfUrl: uploaded.url,
         storagePath: uploaded.key,
         memoriesCount: memoriesCount,
-        coverPhotoUrl: _coverPhotoUrl,
+        coverPhotoKey: _coverPhotoUrl != null ? _keyByUrl[_coverPhotoUrl] : null,
+        coverPhotoUrl:
+            _coverPhotoUrl != null && !_keyByUrl.containsKey(_coverPhotoUrl!)
+                ? _coverPhotoUrl
+                : null,
       );
     } catch (_) {
       // Silencieux — le partage a déjà eu lieu
@@ -774,7 +783,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         storagePath: uploaded.key,
         memoriesCount: _selectedMemories.length,
         orderId: orderId,
-        coverPhotoUrl: _coverPhotoUrl,
+        coverPhotoKey: _coverPhotoUrl != null ? _keyByUrl[_coverPhotoUrl] : null,
+        coverPhotoUrl:
+            _coverPhotoUrl != null && !_keyByUrl.containsKey(_coverPhotoUrl!)
+                ? _coverPhotoUrl
+                : null,
       );
 
       if (!mounted) return;
@@ -1116,8 +1129,21 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Future<void> _resolvePhotos(List<MemoryModel> memories) async {
     for (final m in memories) {
       try {
-        final urls = await PhotoService.resolvePhotoUrls(m);
-        if (urls.isNotEmpty) _photoUrlsByMemory[m.id] = urls;
+        if (m.mediaKeys.isNotEmpty) {
+          // key→url (photo-play) plutôt que resolvePhotoUrls : on a besoin de
+          // la clé pour l'historique, pas juste de l'URL d'affichage.
+          final keyToUrl = await PhotoService.signedUrlsForMemory(m.id);
+          if (keyToUrl.isNotEmpty) {
+            _photoUrlsByMemory[m.id] = keyToUrl.values.toList();
+            for (final e in keyToUrl.entries) {
+              _keyByUrl[e.value] = e.key;
+            }
+          }
+        } else if (m.mediaUrls.isNotEmpty) {
+          _photoUrlsByMemory[m.id] = m.mediaUrls; // Firebase, permanent
+        } else if (m.photoUrl != null && m.photoUrl!.isNotEmpty) {
+          _photoUrlsByMemory[m.id] = [m.photoUrl!];
+        }
       } catch (_) {}
     }
     if (!mounted) return;

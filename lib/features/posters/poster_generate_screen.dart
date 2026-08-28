@@ -49,9 +49,19 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   // (QR code) et au décompte affiché, pas au collage lui-même.
   List<MemoryModel> _uniqueMemories = [];
   List<String> _photoUrls = [];
+  // URL (signée, R2) → clé R2 d'origine — permet de retrouver la clé de la
+  // photo "en vedette" pour l'historique (OrderModel.posterPhotoKey, jamais
+  // l'URL signée qui expire après 1h). Absent pour une photo Firebase
+  // héritée (l'URL elle-même est alors permanente).
+  final Map<String, String> _keyByUrl = {};
   List<Uint8List> _photoBytes = [];
   List<({int w, int h})?> _photoDims = [];
   final Set<int> _featured = {};
+  // Photo « en vedette » (ou 1ʳᵉ à défaut) — celle qui sert de vignette du
+  // tirage dans l'historique (voir OrderModel.posterPhotoKey/Url).
+  String? get _featuredPhotoUrl => _photoUrls.isNotEmpty
+      ? _photoUrls[_featured.isNotEmpty ? _featured.first : 0]
+      : null;
   // Photo désignée par PosterQualityService comme responsable du blocage
   // qualité d'une taille tapée par l'utilisateur — mise en évidence dans
   // l'aperçu du collage (étape 0) le temps qu'il/elle agisse dessus.
@@ -149,7 +159,22 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       final uniqueIds = {for (final r in refs) r.memoryId};
       final urlsByMemory = <String, List<String>>{};
       for (final id in uniqueIds) {
-        urlsByMemory[id] = await PhotoService.resolvePhotoUrls(byId[id]!);
+        final m = byId[id]!;
+        if (m.mediaKeys.isNotEmpty) {
+          // key→url (photo-play) plutôt que resolvePhotoUrls : on a besoin de
+          // la clé pour l'historique, pas juste de l'URL d'affichage.
+          final keyToUrl = await PhotoService.signedUrlsForMemory(id);
+          urlsByMemory[id] = keyToUrl.values.toList();
+          for (final e in keyToUrl.entries) {
+            _keyByUrl[e.value] = e.key;
+          }
+        } else if (m.mediaUrls.isNotEmpty) {
+          urlsByMemory[id] = m.mediaUrls; // Firebase, permanent
+        } else if (m.photoUrl != null && m.photoUrl!.isNotEmpty) {
+          urlsByMemory[id] = [m.photoUrl!];
+        } else {
+          urlsByMemory[id] = const [];
+        }
       }
 
       final urls = <String>[];
@@ -371,8 +396,12 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         posterHangerColor: _color,
         posterCaption: _captionCtrl.text.trim().isNotEmpty ? _captionCtrl.text.trim() : null,
         posterMemoryIds: _uniqueMemories.map((m) => m.id).toList(),
-        posterPhotoUrl: _photoUrls.isNotEmpty
-            ? _photoUrls[_featured.isNotEmpty ? _featured.first : 0]
+        posterPhotoKey: _featuredPhotoUrl != null
+            ? _keyByUrl[_featuredPhotoUrl]
+            : null,
+        posterPhotoUrl: _featuredPhotoUrl != null &&
+                !_keyByUrl.containsKey(_featuredPhotoUrl!)
+            ? _featuredPhotoUrl
             : null,
       );
       final orderId = await OrderService.createOrder(order);

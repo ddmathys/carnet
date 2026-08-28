@@ -18,6 +18,11 @@ class GeneratedBookModel {
   final String? orderId; // si format == 'printed'
   // Vignette (photo de couverture choisie à la génération) — affichage seul
   // (« Mes livres »), sans usage impression. Null si couverture sans photo.
+  // Clé R2 (photo récente) : résolue en URL signée à l'affichage — jamais une
+  // URL signée stockée telle quelle, elle expire au bout d'1h (photo-play/
+  // photo-sign, backend/api/video/[action].ts). `coverPhotoUrl` reste pour
+  // les photos Firebase héritées (URL permanente, pas de clé R2 à résoudre).
+  final String? coverPhotoKey;
   final String? coverPhotoUrl;
 
   const GeneratedBookModel({
@@ -33,6 +38,7 @@ class GeneratedBookModel {
     required this.memoriesCount,
     required this.createdAt,
     this.orderId,
+    this.coverPhotoKey,
     this.coverPhotoUrl,
   });
 
@@ -55,6 +61,7 @@ class GeneratedBookModel {
           ? (d['createdAt'] as Timestamp).toDate()
           : DateTime.now(),
       orderId: d['orderId'],
+      coverPhotoKey: d['coverPhotoKey'],
       coverPhotoUrl: d['coverPhotoUrl'],
     );
   }
@@ -71,6 +78,7 @@ class GeneratedBookModel {
         'memoriesCount': memoriesCount,
         'createdAt': Timestamp.fromDate(createdAt),
         'orderId': orderId,
+        'coverPhotoKey': coverPhotoKey,
         'coverPhotoUrl': coverPhotoUrl,
       };
 }

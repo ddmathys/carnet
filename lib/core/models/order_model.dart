@@ -135,7 +135,12 @@ class OrderModel {
   // affichage/traçabilité admin).
   final List<String>? posterMemoryIds;
   // Vignette du tirage (photo « en vedette », ou 1ʳᵉ photo à défaut) —
-  // affichage seul, sans usage impression. Null pour un livre.
+  // affichage seul, sans usage impression. Null pour un livre. Clé R2 :
+  // résolue en URL signée à l'affichage — jamais une URL signée stockée
+  // telle quelle, elle expire au bout d'1h (voir generated_book_model.dart
+  // pour la même remarque côté livre). `posterPhotoUrl` reste pour les
+  // photos Firebase héritées (URL permanente).
+  final String? posterPhotoKey;
   final String? posterPhotoUrl;
 
   const OrderModel({
@@ -176,6 +181,7 @@ class OrderModel {
     this.posterHangerColor,
     this.posterCaption,
     this.posterMemoryIds,
+    this.posterPhotoKey,
     this.posterPhotoUrl,
   });
 
@@ -315,6 +321,7 @@ class OrderModel {
       posterMemoryIds: (d['posterMemoryIds'] as List<dynamic>?)
           ?.map((e) => e.toString())
           .toList(),
+      posterPhotoKey: d['posterPhotoKey'],
       posterPhotoUrl: d['posterPhotoUrl'],
     );
   }
@@ -346,6 +353,7 @@ class OrderModel {
     'posterHangerColor': posterHangerColor,
     'posterCaption': posterCaption,
     'posterMemoryIds': posterMemoryIds,
+    'posterPhotoKey': posterPhotoKey,
     'posterPhotoUrl': posterPhotoUrl,
   };
 }
