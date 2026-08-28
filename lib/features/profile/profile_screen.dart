@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
+import '../../core/services/backend_client.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/notification_service.dart';
 
@@ -18,6 +19,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _editing = false;
   bool _saving = false;
   String? _error;
+  bool _deletingAccount = false;
 
   // Notifications « souvenir du jour ».
   NotifyFrequency _notifyFrequency = NotifyFrequency.none;
@@ -113,6 +115,108 @@ class _ProfileScreenState extends State<ProfileScreen> {
   Future<void> _signOut() async {
     // Avant le signOut, tant qu'on connaît encore l'uid : cet appareil ne doit
     // plus recevoir les souvenirs du compte qu'on quitte.
+    await NotificationService.forgetDevice();
+    await FirebaseAuth.instance.signOut();
+    if (mounted) context.go('/auth');
+  }
+
+  // Suppression DÉFINITIVE du compte et de toutes les données (souvenirs,
+  // médias, carnets, tags possédés) — voir backend/api/notebook/[action].ts
+  // (action delete-account) pour le détail exact de ce qui est effacé. Seule
+  // exception : les commandes déjà payées sont anonymisées, pas supprimées
+  // (obligations comptables), comme documenté sur dmathys.dev/delete-account.html.
+  Future<void> _confirmDeleteAccount() async {
+    var understood = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Supprimer définitivement ton compte ?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Cette action est IRRÉVERSIBLE. Seront supprimés sans '
+                'exception : tous tes souvenirs (photos, vidéos, mémos '
+                'vocaux), les mesures de croissance, tes carnets et tags, '
+                'ton profil et ton compte de connexion.\n\n'
+                'Exception : les commandes déjà payées sont conservées de '
+                'façon anonyme (prix, date) pour nos obligations comptables '
+                '— tes photos et coordonnées en sont retirées.',
+                style: TextStyle(color: AppColors.textMedium, height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: () =>
+                    setDialogState(() => understood = !understood),
+                borderRadius: BorderRadius.circular(8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Checkbox(
+                      value: understood,
+                      activeColor: AppColors.error,
+                      onChanged: (v) =>
+                          setDialogState(() => understood = v ?? false),
+                    ),
+                    const Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: Text(
+                          'J\'ai compris, tout sera supprimé définitivement.',
+                          style: TextStyle(
+                              fontSize: 13, color: AppColors.textDark),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler',
+                  style: TextStyle(color: AppColors.textMedium)),
+            ),
+            ElevatedButton(
+              onPressed: understood ? () => Navigator.pop(ctx, true) : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                disabledBackgroundColor: AppColors.error.withOpacity(0.35),
+              ),
+              child: const Text('Supprimer définitivement'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true) await _deleteAccount();
+  }
+
+  Future<void> _deleteAccount() async {
+    setState(() => _deletingAccount = true);
+    final result = await BackendClient.postJson(
+      '/api/notebook/delete-account',
+      const {},
+      timeout: const Duration(seconds: 55),
+    );
+    if (!mounted) return;
+    if (result == null) {
+      setState(() => _deletingAccount = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+              'Échec de la suppression — vérifie ta connexion et réessaie.'),
+        ),
+      );
+      return;
+    }
+    // Le compte Firebase Auth a déjà été supprimé côté serveur ; on nettoie
+    // juste la session locale avant de renvoyer vers l'écran de connexion.
     await NotificationService.forgetDevice();
     await FirebaseAuth.instance.signOut();
     if (mounted) context.go('/auth');
@@ -385,6 +489,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ],
+            const SizedBox(height: 12),
+            TextButton.icon(
+              onPressed: _deletingAccount ? null : _confirmDeleteAccount,
+              icon: _deletingAccount
+                  ? const SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.error),
+                    )
+                  : const Icon(Icons.delete_forever_outlined,
+                      size: 18, color: AppColors.error),
+              label: Text(
+                _deletingAccount
+                    ? 'Suppression en cours…'
+                    : 'Supprimer mon compte',
+                style: const TextStyle(color: AppColors.error),
+              ),
+            ),
           ],
         ),
       ),
