@@ -19,6 +19,7 @@ import '../memories/widgets/import_media_cta.dart';
 import '../memories/widgets/delete_memory.dart';
 import '../tags/tag_picker_sheet.dart';
 import '../tags/share_tag_sheet.dart';
+import '../tags/shared_tags_sheet.dart';
 
 /// Dashboard : importer un média (le geste principal), les derniers souvenirs,
 /// les tags qui les organisent, les livres déjà faits — et, tout en bas, la
@@ -187,6 +188,7 @@ class _HomeScreenState extends State<HomeScreen> {
             initial: _initial,
             onProfile: () => context.push('/profile'),
             onSpace: () => _showMonEspace(context),
+            onShared: () => _showSharedTagsSheet(context),
           ),
         ),
         SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
@@ -618,6 +620,22 @@ class _HomeScreenState extends State<HomeScreen> {
     return e.isNotEmpty ? e[0].toUpperCase() : '·';
   }
 
+  /// Tags à moi effectivement partagés (au moins un collaborateur) — les
+  /// seuls que je peux gérer (voir TagModel.isOwner, même règle que le
+  /// backend pour créer un lien d'invitation).
+  void _showSharedTagsSheet(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
+    final owned = _myTags
+        .where((t) => t.isOwner(uid) && t.sharedWith.isNotEmpty)
+        .toList();
+    showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (_) => SharedTagsSheet(tags: owned),
+    );
+  }
+
   void _showMonEspace(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
@@ -675,10 +693,12 @@ class _TopBar extends StatelessWidget {
   final String initial;
   final VoidCallback onProfile;
   final VoidCallback onSpace;
+  final VoidCallback onShared;
   const _TopBar({
     required this.initial,
     required this.onProfile,
     required this.onSpace,
+    required this.onShared,
   });
 
   @override
@@ -714,6 +734,19 @@ class _TopBar extends StatelessWidget {
               ],
             ),
             const Spacer(),
+            GestureDetector(
+              onTap: onShared,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(
+                    color: AppColors.sageTint, shape: BoxShape.circle),
+                child: const Icon(Icons.people_alt_outlined,
+                    size: 17, color: AppColors.sageDark),
+              ),
+            ),
+            const SizedBox(width: 10),
             GestureDetector(
               onTap: onSpace,
               behavior: HitTestBehavior.opaque,

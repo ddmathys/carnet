@@ -29,6 +29,29 @@ class MemoryPolaroid extends StatelessWidget {
     this.onDelete,
   });
 
+  /// Pastille « Partagé » — texte, pas juste une icône, pour rester lisible
+  /// sans avoir à deviner ce qu'un pictogramme veut dire (contrairement aux
+  /// icônes vidéo/audio, jugées suffisamment explicites telles quelles).
+  Widget _sharedBadge() => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: AppColors.sageDark.withOpacity(0.92),
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.link, size: 10, color: Colors.white),
+            SizedBox(width: 3),
+            Text('Partagé',
+                style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w700)),
+          ],
+        ),
+      );
+
   Widget _miniIcon(String e) => Container(
         width: 22,
         height: 22,
@@ -64,6 +87,9 @@ class MemoryPolaroid extends StatelessWidget {
     // Firebase — les deux comptent.
     final hasAudio = (memory.audioKey?.isNotEmpty ?? false) ||
         (memory.audioUrl?.isNotEmpty ?? false);
+    // `sharedWith` du souvenir est déjà la réunion des collaborateurs de ses
+    // tags (voir tag_model.dart) — pas besoin de recroiser avec les tags ici.
+    final isShared = memory.sharedWith.isNotEmpty;
 
     return Transform.rotate(
       angle: tilt,
@@ -147,17 +173,17 @@ class MemoryPolaroid extends StatelessWidget {
                             ),
                           ),
                         ),
-                      if (hasVideo || hasAudio)
+                      if (hasVideo || hasAudio || isShared)
                         Positioned(
                           top: 8,
                           right: 8,
-                          child: Row(
+                          child: Wrap(
+                            spacing: 4,
+                            alignment: WrapAlignment.end,
                             children: [
+                              if (isShared) _sharedBadge(),
                               if (hasVideo) _miniIcon('🎬'),
-                              if (hasAudio) ...[
-                                const SizedBox(width: 4),
-                                _miniIcon('🎙'),
-                              ],
+                              if (hasAudio) _miniIcon('🎙'),
                             ],
                           ),
                         ),
