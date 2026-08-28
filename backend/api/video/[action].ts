@@ -95,6 +95,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // les vidéos (les mémos vocaux, eux, ont déjà leur propre QR sur la page
       // du souvenir dans le livre). Absent = reel de poster : vidéos + audio.
       const videosOnly = reel.videosOnly === true
+      // Sélection fine choisie à la commande (poster-reel-create) — si
+      // absente (reel de livre, ou ancien reel créé avant cette fonctionnalité),
+      // on retombe sur "tout inclure" pour ces souvenirs, comportement d'avant.
+      const selectedVideoKeys = Array.isArray(reel.selectedVideoKeys)
+        ? new Set((reel.selectedVideoKeys as unknown[]).filter((x): x is string => typeof x === 'string'))
+        : null
+      const selectedAudioMemoryIds = Array.isArray(reel.selectedAudioMemoryIds)
+        ? new Set((reel.selectedAudioMemoryIds as unknown[]).filter((x): x is string => typeof x === 'string'))
+        : null
 
       const medias: { title: string; url: string; kind: 'video' | 'audio' }[] = []
       for (const memoryId of memoryIds) {
@@ -103,11 +112,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const mem = memSnap.data() as Record<string, unknown>
         const title = typeof mem.title === 'string' ? mem.title : ''
         for (const key of videoKeysOf(mem)) {
+          if (selectedVideoKeys && !selectedVideoKeys.has(key)) continue
           const url = await presignGet(key, 3600)
           medias.push({ title, url, kind: 'video' })
         }
         const audioKey = videosOnly ? '' : audioKeyOf(mem)
-        if (audioKey) {
+        if (audioKey && (!selectedAudioMemoryIds || selectedAudioMemoryIds.has(memoryId))) {
           const url = await presignGet(audioKey, 3600)
           medias.push({ title, url, kind: 'audio' })
         }
@@ -361,10 +371,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const mem = await memoryIfMember(memoryId, user.uid, user.email)
       if (!mem) return res.status(403).json({ error: `Accès refusé au souvenir ${memoryId}` })
     }
+    // Sélection fine cochée côté app (poster_generate_screen.dart) : quelles
+    // clés vidéo précises et de quels souvenirs le mémo vocal. Optionnelle —
+    // absente/vide, le reader (poster-video-reel) retombe sur "tout inclure"
+    // pour ne pas casser un ancien client qui n'enverrait pas ces champs.
+    const videoKeys = Array.isArray(body.videoKeys)
+      ? (body.videoKeys as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined
+    const audioMemoryIds = Array.isArray(body.audioMemoryIds)
+      ? (body.audioMemoryIds as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined
     const reelId = randomUUID()
     await db.collection('posterReels').doc(reelId).set({
       userId: user.uid,
       memoryIds,
+      ...(videoKeys ? { selectedVideoKeys: videoKeys } : {}),
+      ...(audioMemoryIds ? { selectedAudioMemoryIds: audioMemoryIds } : {}),
       createdAt: new Date(),
     })
     return res.status(200).json({ reelId })

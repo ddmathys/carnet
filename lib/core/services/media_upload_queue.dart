@@ -97,6 +97,17 @@ class MediaUploadQueue extends ChangeNotifier {
     _run(job);
   }
 
+  /// Comme [enqueue], mais attend la fin de l'envoi et dit si tout est
+  /// parti (`true`) ou si au moins un média a échoué (`false`) — utilisé par
+  /// l'écran de création pour garder le bouton "Enregistrer" indisponible
+  /// tant que les photos/vidéos ne sont pas réellement envoyées, plutôt que
+  /// de naviguer en supposant que ça a marché.
+  Future<bool> runAndWait(MediaUploadJob job) {
+    _pending++;
+    notifyListeners();
+    return _run(job);
+  }
+
   /// Relance tous les travaux échoués.
   void retryFailed() {
     final jobs = List<MediaUploadJob>.of(_failed);
@@ -108,13 +119,19 @@ class MediaUploadQueue extends ChangeNotifier {
     }
   }
 
-  Future<void> _run(MediaUploadJob job) async {
+  Future<bool> _run(MediaUploadJob job) async {
     try {
-      // Compression + upload des photos (vers R2, clés) ET du mémo vocal.
-      final photoFuture = PhotoService.uploadMultiplePhotosToR2(
-        photos: job.localPhotos,
-        notebookId: job.notebookId,
-      );
+      // Compression + upload des photos (vers R2, clés), un par un plutôt que
+      // via PhotoService.uploadMultiplePhotosToR2 : on a besoin de savoir
+      // PRÉCISÉMENT quel fichier a échoué (index aligné sur job.localPhotos)
+      // pour pouvoir le remettre en file — un échec silencieux ici est
+      // exactement le bug qui faisait disparaître des photos sans prévenir.
+      final photoFuture = Future.wait(job.localPhotos.map(
+        (f) => PhotoService.uploadMemoryPhotoToR2(
+          photo: f,
+          notebookId: job.notebookId,
+        ),
+      ));
       // Audio → R2 (clé). Nouveau mémo → upload ; sinon rien à uploader.
       final Future<String?> audioFuture = job.localAudioPath != null
           ? AudioService.uploadMemoryAudioToR2(
@@ -193,14 +210,31 @@ class MediaUploadQueue extends ChangeNotifier {
       _videoProgress = 0;
       notifyListeners();
 
-      final newKeys = await photoFuture;
+      // Résultats alignés sur job.localPhotos : null = échec de CE fichier
+      // précis (au lieu d'être simplement absent de la liste, comme avant).
+      final photoResults = await photoFuture;
+      final newKeys = photoResults.whereType<String>().toList();
+      final failedPhotos = <File>[
+        for (var i = 0; i < job.localPhotos.length; i++)
+          if (photoResults[i] == null) job.localPhotos[i]
+      ];
+      if (failedPhotos.isNotEmpty) {
+        _lastError = 'Échec de l\'envoi de ${failedPhotos.length} photo(s)';
+      }
+
       final uploadedAudioKey = await audioFuture;
+      // Le nouveau mémo a échoué → on garde l'ancien tel quel (ne PAS l'effacer
+      // juste parce que le remplaçant n'est pas arrivé) et on remet le chemin
+      // local en file pour réessai.
+      final audioFailed = job.localAudioPath != null && uploadedAudioKey == null;
+      if (audioFailed) _lastError = 'Échec de l\'envoi du mémo vocal';
       await Future.wait(deletions);
 
       // Audio final : nouveau (R2) ; sinon conservé (clé R2 ou ancienne URL) ;
       // sinon rien (retiré).
-      final keepOldAudio = job.localAudioPath == null && !job.audioRemoved;
-      final finalAudioKey = job.localAudioPath != null
+      final keepOldAudio =
+          audioFailed || (job.localAudioPath == null && !job.audioRemoved);
+      final finalAudioKey = (job.localAudioPath != null && !audioFailed)
           ? uploadedAudioKey
           : (keepOldAudio ? job.existingAudioKey : null);
       final finalAudioUrl = keepOldAudio ? job.existingAudioUrl : null;
@@ -234,18 +268,20 @@ class MediaUploadQueue extends ChangeNotifier {
       PhotoService.invalidateSignedCache(job.memoryId);
       AudioService.invalidateSignedCache(job.memoryId);
 
-      // Échec partiel d'upload vidéo → on signale (bannière « Réessayer ») en
-      // remettant en file UNIQUEMENT les clips manquants. Les médias déjà
-      // sauvegardés (photos, audio, vidéos réussies) sont préservés tels quels.
-      if (failedVideoPaths.isNotEmpty) {
+      // Échec partiel (photo, mémo et/ou vidéo) → on signale (bannière
+      // « Réessayer ») en remettant en file UNIQUEMENT ce qui manque. Les
+      // médias déjà sauvegardés (photos, audio, vidéos réussies) sont
+      // préservés tels quels.
+      final ok = failedPhotos.isEmpty && !audioFailed && failedVideoPaths.isEmpty;
+      if (!ok) {
         _failed.add(MediaUploadJob(
           memoryId: job.memoryId,
           notebookId: job.notebookId,
-          localPhotos: const [],
+          localPhotos: failedPhotos,
           existingPhotoUrls: legacyUrls,
           removedPhotoUrls: const [],
           existingPhotoKeys: allKeys,
-          localAudioPath: null,
+          localAudioPath: audioFailed ? job.localAudioPath : null,
           existingAudioUrl: finalAudioUrl,
           existingAudioKey: finalAudioKey,
           audioRemoved: false,
@@ -257,10 +293,12 @@ class MediaUploadQueue extends ChangeNotifier {
           removedVideoKeys: const [],
         ));
       }
+      return ok;
     } catch (e) {
       debugPrint('MediaUploadQueue: échec upload souvenir ${job.memoryId} — $e');
       _lastError = VideoService.lastFailureReason ?? 'Envoi interrompu';
       _failed.add(job);
+      return false;
     } finally {
       _pending--;
       notifyListeners();

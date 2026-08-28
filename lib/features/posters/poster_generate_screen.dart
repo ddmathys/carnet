@@ -48,6 +48,13 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   // Souvenirs DISTINCTS parmi les photos choisies — sert au "reel" vidéo
   // (QR code) et au décompte affiché, pas au collage lui-même.
   List<MemoryModel> _uniqueMemories = [];
+  // Sélection fine de ce que le QR promet : quelles vidéos précises (clés R2)
+  // et de quels souvenirs le mémo vocal — tout est coché par défaut (même
+  // comportement qu'avant l'ajout de ce choix), l'utilisateur en retire s'il
+  // ne veut pas que TOUT ce qui a une vidéo/un mémo dans la sélection photo
+  // finisse dans le reel.
+  final Set<String> _selectedVideoKeys = {};
+  final Set<String> _selectedAudioMemoryIds = {};
   List<String> _photoUrls = [];
   // URL (signée, R2) → clé R2 d'origine — permet de retrouver la clé de la
   // photo "en vedette" pour l'historique (OrderModel.posterPhotoKey, jamais
@@ -114,13 +121,25 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   List<String> get _allowedSizes => PosterFormatRules.allowedSizes(_layout);
 
   /// Vrai si au moins un des souvenirs choisis a une vidéo ou un mémo vocal —
-  /// seul cas où le QR (lien vers le "reel") a une destination réelle. Un
-  /// tirage 100% photos n'imprime pas de QR mort. `audioKey` seulement (pas
-  /// l'ancien `audioUrl` Firebase) : même convention que le backend
-  /// (`audioKeyOf` dans lib/access.ts), pour que ce que promet le QR soit
-  /// toujours ce que le reel peut effectivement servir.
-  bool get _hasMedia =>
+  /// détermine si la section de choix fin (case à cocher par vidéo/mémo)
+  /// est affichée du tout. `audioKey` seulement (pas l'ancien `audioUrl`
+  /// Firebase) : même convention que le backend (`audioKeyOf` dans
+  /// lib/access.ts), pour que ce que promet le QR soit toujours ce que le
+  /// reel peut effectivement servir.
+  bool get _hasSelectableMedia =>
       _uniqueMemories.any((m) => m.videoKeys.isNotEmpty || m.audioKey != null);
+
+  /// Vrai si la sélection FINE (cases cochées, voir _selectedVideoKeys /
+  /// _selectedAudioMemoryIds) contient encore au moins un élément — seul cas
+  /// où le QR (lien vers le "reel") a une destination réelle. Un tirage sans
+  /// rien coché n'imprime pas de QR mort.
+  bool get _hasMedia =>
+      _selectedVideoKeys.isNotEmpty || _selectedAudioMemoryIds.isNotEmpty;
+
+  String _memoryMediaLabel(MemoryModel m, String kind) {
+    final title = m.title?.trim();
+    return (title != null && title.isNotEmpty) ? '$kind — $title' : kind;
+  }
 
   /// À appeler (dans un setState) après TOUT changement du collage : si la
   /// taille choisie est devenue trop petite pour le nombre de cases, on
@@ -197,6 +216,12 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       if (!mounted) return;
       setState(() {
         _uniqueMemories = [for (final id in uniqueIds) byId[id]!];
+        _selectedVideoKeys
+          ..clear()
+          ..addAll(_uniqueMemories.expand((m) => m.videoKeys));
+        _selectedAudioMemoryIds
+          ..clear()
+          ..addAll(_uniqueMemories.where((m) => m.audioKey != null).map((m) => m.id));
         _photoUrls = urls;
         _photoBytes = bytes;
         _photoDims = dims;
@@ -325,7 +350,13 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       if (hasMedia) {
         final reelRes = await BackendClient.postJson(
           '/api/video/poster-reel-create',
-          {'memoryIds': _uniqueMemories.map((m) => m.id).toList()},
+          {
+            'memoryIds': _uniqueMemories.map((m) => m.id).toList(),
+            // Sélection fine cochée à l'étape précédente — sans ça, le reel
+            // inclurait TOUTES les vidéos/mémos des souvenirs choisis.
+            'videoKeys': _selectedVideoKeys.toList(),
+            'audioMemoryIds': _selectedAudioMemoryIds.toList(),
+          },
           timeout: const Duration(seconds: 20),
         );
         final reelId = reelRes?['reelId'] as String?;
@@ -639,11 +670,58 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
           ),
         ),
         Text(
-          _hasMedia
-              ? 'Affiché dans la bande du bas, à côté du QR code (vidéos/mémos vocaux des souvenirs choisis).'
-              : 'Affiché dans la bande du bas. Pas de vidéo ni de mémo vocal dans ces souvenirs : pas de QR code imprimé.',
+          !_hasSelectableMedia
+              ? 'Affiché dans la bande du bas. Pas de vidéo ni de mémo vocal dans ces souvenirs : pas de QR code imprimé.'
+              : _hasMedia
+                  ? 'Affiché dans la bande du bas, à côté du QR code (vidéos/mémos vocaux cochés ci-dessous).'
+                  : 'Affiché dans la bande du bas. Tout est décoché ci-dessous : pas de QR code imprimé.',
           style: const TextStyle(fontSize: 11.5, color: AppColors.textMedium),
         ),
+        if (_hasSelectableMedia) ...[
+          const SizedBox(height: 20),
+          const Text('Vidéos et mémos vocaux liés au QR code',
+              style: TextStyle(
+                  fontFamily: 'PlayfairDisplay',
+                  fontSize: 15,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textDark)),
+          const SizedBox(height: 4),
+          const Text(
+            'En scannant le QR, la personne verra ce qui est coché ici. Décoche ce que tu ne veux pas y inclure.',
+            style: TextStyle(fontSize: 11.5, color: AppColors.textMedium, height: 1.3),
+          ),
+          const SizedBox(height: 8),
+          for (final m in _uniqueMemories) ...[
+            for (var vi = 0; vi < m.videoKeys.length; vi++)
+              _MediaCheckRow(
+                label: _memoryMediaLabel(m,
+                    m.videoKeys.length > 1 ? 'Vidéo ${vi + 1}' : 'Vidéo'),
+                icon: Icons.videocam_outlined,
+                selected: _selectedVideoKeys.contains(m.videoKeys[vi]),
+                onChanged: (v) => setState(() {
+                  final key = m.videoKeys[vi];
+                  if (v) {
+                    _selectedVideoKeys.add(key);
+                  } else {
+                    _selectedVideoKeys.remove(key);
+                  }
+                }),
+              ),
+            if (m.audioKey != null)
+              _MediaCheckRow(
+                label: _memoryMediaLabel(m, 'Mémo vocal'),
+                icon: Icons.mic_none,
+                selected: _selectedAudioMemoryIds.contains(m.id),
+                onChanged: (v) => setState(() {
+                  if (v) {
+                    _selectedAudioMemoryIds.add(m.id);
+                  } else {
+                    _selectedAudioMemoryIds.remove(m.id);
+                  }
+                }),
+              ),
+          ],
+        ],
         const SizedBox(height: 24),
         ElevatedButton(
           onPressed: () => setState(() => _step = 1),
@@ -856,6 +934,49 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   }
 }
 
+/// Une ligne à cocher pour une vidéo ou un mémo vocal précis du reel derrière
+/// le QR code (voir la section "Vidéos et mémos vocaux liés au QR code").
+class _MediaCheckRow extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final ValueChanged<bool> onChanged;
+  const _MediaCheckRow({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () => onChanged(!selected),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(
+          children: [
+            Checkbox(
+              value: selected,
+              activeColor: AppColors.sageDark,
+              onChanged: (v) => onChanged(v ?? false),
+            ),
+            Icon(icon, size: 16, color: AppColors.textMedium),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, color: AppColors.textDark)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Aperçu de la bande du bas, fidèle à ce que dessine PosterPdfService.generate
 /// (texte à gauche, QR à droite si `hasMedia`) — jusqu'ici invisible avant
 /// commande, seulement décrit par un texte d'aide. Se met à jour en direct
@@ -886,7 +1007,7 @@ class _BandPreview extends StatelessWidget {
                     fontFamily: 'PlayfairDisplay',
                     fontWeight: FontWeight.w700,
                     fontSize: 11,
-                    color: AppColors.textDark,
+                    color: AppColors.ink,
                   ),
                 );
               },
@@ -898,10 +1019,10 @@ class _BandPreview extends StatelessWidget {
               aspectRatio: 1,
               child: Container(
                 decoration: BoxDecoration(
-                  border: Border.all(color: AppColors.textDark, width: 1),
+                  border: Border.all(color: AppColors.ink, width: 1),
                   borderRadius: BorderRadius.circular(2),
                 ),
-                child: const Icon(Icons.qr_code_2, size: 14, color: AppColors.textDark),
+                child: const Icon(Icons.qr_code_2, size: 14, color: AppColors.ink),
               ),
             ),
           ],

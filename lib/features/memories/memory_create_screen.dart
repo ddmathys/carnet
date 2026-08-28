@@ -133,6 +133,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
   bool _loading = false;
+  // Id du souvenir créé lors d'un premier essai qui a échoué à l'envoi des
+  // médias (voir _save) — un réessai doit mettre à jour ce doc, pas en créer
+  // un second.
+  String? _createdMemoryId;
 
   // Photos (multi)
   final List<File> _localPhotos = [];
@@ -1207,14 +1211,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ? double.tryParse(_heightController.text.replaceAll(',', '.'))
           : null;
 
-      // ── Sauvegarde optimiste (façon WhatsApp) ─────────────────────────────
+      // ── Écriture texte puis attente des médias ────────────────────────────
       // On écrit d'abord le souvenir en base AVEC les médias déjà connus
       // (photos existantes en édition, audio existant conservé). Les NOUVEAUX
-      // médias (photos locales, mémo vocal fraîchement enregistré) sont laissés
-      // de côté : ils partent en arrière-plan via MediaUploadQueue, qui
-      // complétera le document une fois l'upload terminé. La liste écoute le
-      // flux Firestore en temps réel → le souvenir apparaît tout de suite et
-      // ses photos arrivent toutes seules ensuite.
+      // médias (photos locales, mémo vocal fraîchement enregistré, vidéos)
+      // sont ensuite envoyés via MediaUploadQueue.runAndWait, ATTENDU avant
+      // de quitter l'écran (le bouton Enregistrer reste indisponible pendant
+      // ce temps) : un média qui échoue doit le dire tout de suite, pas
+      // disparaître silencieusement une fois qu'on a déjà changé d'écran.
+      // Si tout part bien, le document Firestore est complété par la queue
+      // et la liste (écoute temps réel) affiche le souvenir avec ses médias.
       // `_existingPhotoUrls` mélange d'anciennes URLs Firebase et des URLs R2
       // signées (temporaires) → on sépare : les URLs signées ne doivent jamais
       // être écrites en base, seule leur CLÉ R2 (via `_existingKeyByUrl`) l'est.
@@ -1312,10 +1318,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       if (_isEditing) {
         memoryId = widget.memoryId!;
         await col.doc(memoryId).update(payload);
+      } else if (_createdMemoryId != null) {
+        // Réessai après un échec d'envoi de médias (voir plus bas) : le doc
+        // existe déjà, on met juste à jour ses champs texte.
+        memoryId = _createdMemoryId!;
+        await col.doc(memoryId).update(payload);
       } else {
         // doc() génère l'id côté client → pas besoin d'attendre le serveur.
         final ref = col.doc();
         memoryId = ref.id;
+        _createdMemoryId = memoryId;
         await ref.set({
           ...payload,
           'aiNarration': null,
@@ -1335,7 +1347,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         });
       } catch (_) {}
 
-      // Y a-t-il des médias à uploader/supprimer en arrière-plan ?
+      // Y a-t-il des médias à uploader/supprimer ?
       final hasMediaWork = _localPhotos.isNotEmpty ||
           _localAudioPath != null ||
           _localVideoPaths.isNotEmpty ||
@@ -1344,7 +1356,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _removedVideoKeys.isNotEmpty ||
           (_audioRemoved && _existingAudioUrl != null);
       if (hasMediaWork) {
-        MediaUploadQueue.instance.enqueue(MediaUploadJob(
+        // On ATTEND la fin de l'envoi avant de quitter l'écran : le bouton
+        // Enregistrer reste indisponible (_loading déjà true) tant que les
+        // photos/vidéos ne sont pas réellement parties, pour ne jamais
+        // donner l'impression que c'est enregistré alors qu'un média a
+        // échoué en silence.
+        final ok = await MediaUploadQueue.instance.runAndWait(MediaUploadJob(
           memoryId: memoryId,
           notebookId: spaceId,
           localPhotos: List<File>.of(_localPhotos),
@@ -1363,14 +1380,23 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           existingVideoDurations: knownVideoDurations,
           removedVideoKeys: List<String>.of(_removedVideoKeys),
         ));
+        if (!ok) {
+          if (!mounted) return;
+          setState(() => _loading = false);
+          _showSnack(
+            '${MediaUploadQueue.instance.lastError ?? "Échec de l'envoi"} — '
+            'le texte est enregistré, réessaie pour les photos/vidéos.',
+          );
+          return;
+        }
       }
 
       if (mounted) context.go('/memories');
       // Confirmation "partagé avec qui" — seulement si le souvenir porte
-      // effectivement un tag partagé. Ne bloque pas la navigation (sauvegarde
-      // optimiste, voir plus haut) : le SnackBar passe par la clé globale
-      // (survit au context.go, contrairement à ScaffoldMessenger.of(context)
-      // qui serait coupé net) et arrive un instant après sur l'écran suivant.
+      // effectivement un tag partagé. Ne bloque pas la navigation : le
+      // SnackBar passe par la clé globale (survit au context.go, contrairement
+      // à ScaffoldMessenger.of(context) qui serait coupé net) et arrive un
+      // instant après sur l'écran suivant.
       if (sharedWith.isNotEmpty) {
         TagService.resolveCollaborators(tagIds).then((names) {
           final label = sharedWith
