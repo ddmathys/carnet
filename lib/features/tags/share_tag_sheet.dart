@@ -7,7 +7,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/tag_model.dart';
-import '../../core/services/user_service.dart';
 import '../../core/services/tag_service.dart';
 
 /// Ouvre la feuille de partage d'un ou plusieurs tags.
@@ -76,14 +75,19 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
       for (final t in widget.tags) ...t.sharedWith,
     };
     if (uids.isEmpty) return;
-    final infos = <String, _CollabInfo>{};
-    await Future.wait(uids.map((uid) async {
-      final data = await UserService.getUserInfo(uid);
-      infos[uid] = _CollabInfo(
-        email: data?['email'] as String? ?? uid,
-        displayName: data?['displayName'] as String? ?? '',
-      );
-    }));
+    // Résolu côté backend (Admin SDK) — la règle Firestore `users` ne permet
+    // plus à un client de lire le document d'un autre utilisateur.
+    final resolved =
+        await TagService.resolveCollaborators([for (final t in widget.tags) t.id]);
+    final infos = <String, _CollabInfo>{
+      for (final uid in uids)
+        uid: _CollabInfo(
+          email: resolved[uid]?.email.isNotEmpty == true
+              ? resolved[uid]!.email
+              : uid,
+          displayName: resolved[uid]?.displayName ?? '',
+        ),
+    };
     if (mounted) setState(() => _collabInfos = infos);
   }
 

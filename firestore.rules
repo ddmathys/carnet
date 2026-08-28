@@ -125,9 +125,17 @@ service cloud.firestore {
 
     // ── Users (profil + abonnement) ─────────────────────────────────────────
     match /users/{userId} {
-      // Lecture par tout utilisateur connecté : nécessaire pour retrouver un
-      // compte par email lors du partage et afficher les collaborateurs.
-      allow read: if isAuth();
+      // Resserré (28.08.26) : avant, tout utilisateur connecté pouvait lire
+      // N'IMPORTE QUEL document users/{userId} (email, fcmTokens…). La
+      // justification d'origine — « retrouver un compte par email lors du
+      // partage » — décrivait un chemin mort (UserService.findUidByEmail
+      // n'était appelé nulle part ; le partage réel se fait par lien/token,
+      // voir backend/api/tag/[action].ts::join). Le seul vrai besoin restant
+      // — afficher les collaborateurs d'un tag partagé — est maintenant
+      // résolu côté backend (Admin SDK, action `collaborators` du même
+      // fichier), qui ré-autorise tag par tag avant de révéler quoi que ce
+      // soit. Chacun ne lit donc plus que son propre document.
+      allow read: if isAuth() && request.auth.uid == userId;
 
       // subscriptionTier ne peut être écrit que par le backend (Admin SDK)
       // ou l'admin — jamais par l'utilisateur lui-même.

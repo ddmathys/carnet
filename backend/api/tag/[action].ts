@@ -28,6 +28,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'invite') return invite(res, user.uid, body)
   if (action === 'join') return join(res, user.uid, user.email, body)
+  if (action === 'collaborators') return collaborators(res, user.uid, body)
   return res.status(404).json({ error: 'Action inconnue' })
 }
 
@@ -173,4 +174,53 @@ async function join(
     label: joinedLabels.join(' · '),
     labels: joinedLabels,
   })
+}
+
+// ── collaborators ────────────────────────────────────────────────────────────
+
+// Résout email/displayName des collaborateurs de tags donnés — pour la feuille
+// de partage, qui affiche qui a déjà rejoint. La règle Firestore `users`
+// interdit maintenant de lire le document d'un autre utilisateur directement
+// depuis le client (elle ne permettait plus de distinguer un vrai
+// collaborateur d'un uid deviné) ; ce endpoint ré-autorise côté serveur avec
+// l'Admin SDK, tag par tag, avant de révéler quoi que ce soit sur ses membres.
+async function collaborators(
+  res: VercelResponse,
+  uid: string,
+  body: Record<string, unknown>
+) {
+  const tagIds = Array.isArray(body.tagIds)
+    ? (body.tagIds as unknown[]).filter(
+        (t): t is string => typeof t === 'string' && t.length > 0
+      )
+    : []
+  if (tagIds.length === 0) return res.status(200).json({ users: {} })
+
+  const targetUids = new Set<string>()
+  for (const tagId of tagIds) {
+    const snap = await db.collection('tags').doc(tagId).get()
+    if (!snap.exists) continue
+    const tag = snap.data() as Record<string, any>
+    const sharedWith: string[] = Array.isArray(tag.sharedWith)
+      ? tag.sharedWith
+      : []
+    const isMember = tag.userId === uid || sharedWith.includes(uid)
+    if (!isMember) continue // ce tag n'appartient pas à l'appelant : ignoré
+    if (tag.userId) targetUids.add(String(tag.userId))
+    for (const u of sharedWith) targetUids.add(u)
+  }
+  targetUids.delete(uid) // pas besoin de se renvoyer soi-même
+
+  const users: Record<string, { email: string; displayName: string }> = {}
+  await Promise.all(
+    [...targetUids].map(async (u) => {
+      const doc = await db.collection('users').doc(u).get()
+      const data = doc.data() as Record<string, any> | undefined
+      users[u] = {
+        email: String(data?.email ?? ''),
+        displayName: String(data?.displayName ?? ''),
+      }
+    })
+  )
+  return res.status(200).json({ users })
 }

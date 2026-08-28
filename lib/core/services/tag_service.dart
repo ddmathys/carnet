@@ -396,6 +396,28 @@ class TagService {
     );
   }
 
+  /// Résout email/displayName des collaborateurs des tags donnés — via le
+  /// backend (Admin SDK). Depuis le resserrement de la règle Firestore
+  /// `users` (chacun ne peut plus lire que son propre document), c'est le
+  /// seul moyen d'afficher qui a rejoint dans la feuille de partage.
+  static Future<Map<String, ({String email, String displayName})>>
+      resolveCollaborators(List<String> tagIds) async {
+    if (tagIds.isEmpty) return {};
+    final data = await BackendClient.postJson(
+      '/api/tag/collaborators',
+      {'tagIds': tagIds},
+      timeout: const Duration(seconds: 20),
+    );
+    final users = data?['users'] as Map<String, dynamic>? ?? {};
+    return {
+      for (final e in users.entries)
+        e.key: (
+          email: (e.value['email'] as String?) ?? '',
+          displayName: (e.value['displayName'] as String?) ?? '',
+        ),
+    };
+  }
+
   /// Rejoint un tag via le token d'un lien d'invitation.
   static Future<({String tagId, String label})?> joinByToken(String token) async {
     final data = await BackendClient.postJson(

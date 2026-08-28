@@ -21,35 +21,6 @@ class UserService {
     }, SetOptions(merge: true));
   }
 
-  // Find a user UID by email address. Returns null if not found.
-  static Future<String?> findUidByEmail(String email) async {
-    final snap = await _db
-        .collection('users')
-        .where('email', isEqualTo: email.toLowerCase().trim())
-        .limit(1)
-        .get();
-    return snap.docs.isEmpty ? null : snap.docs.first.id;
-  }
-
-  // Get user info map from Firestore.
-  static Future<Map<String, dynamic>?> getUserInfo(String uid) async {
-    final doc = await _db.collection('users').doc(uid).get();
-    return doc.data();
-  }
-
-  // Get display info (email + name) for multiple UIDs.
-  static Future<Map<String, _UserInfo>> resolveUsers(List<String> uids) async {
-    final result = <String, _UserInfo>{};
-    await Future.wait(uids.map((uid) async {
-      final data = await getUserInfo(uid);
-      result[uid] = _UserInfo(
-        email: data?['email'] as String? ?? uid,
-        displayName: data?['displayName'] as String? ?? '',
-      );
-    }));
-    return result;
-  }
-
   // When a user logs in, grant them access to notebooks they were invited to.
   static Future<void> resolvePendingInvites() async {
     final user = FirebaseAuth.instance.currentUser;
@@ -68,11 +39,4 @@ class UserService {
       });
     }
   }
-}
-
-class _UserInfo {
-  final String email;
-  final String displayName;
-  const _UserInfo({required this.email, required this.displayName});
-  String get label => displayName.isNotEmpty ? '$displayName ($email)' : email;
 }
