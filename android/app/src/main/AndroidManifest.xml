@@ -4,7 +4,10 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.CAMERA"/>
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32"/>
-    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/>
+    <!-- Pas de READ_MEDIA_IMAGES : la sélection de médias passe par le Photo
+         Picker système (useAndroidPhotoPicker, main.dart), qui donne accès
+         aux fichiers choisis sans cette permission large — Play Console la
+         flague sinon comme "autorisation non déclarée/injustifiée". -->
     <!-- Android 13+ : afficher une notification demande l'accord explicite de
          l'utilisateur, réclamé depuis le profil ou à la création du compte. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
