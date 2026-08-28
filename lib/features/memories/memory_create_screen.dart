@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/memory_query_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/shared_media_service.dart';
@@ -122,6 +123,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool _dateNeedsConfirmation = true; // new memories require explicit date
   final _titleController = TextEditingController();
   final _locationController = TextEditingController();
+  final _locationFocusNode = FocusNode();
+  // Lieux déjà saisis par l'utilisateur, du plus fréquent au moins fréquent —
+  // alimente la liste déroulante du champ lieu. Vide tant que non chargé
+  // (le champ reste alors un simple texte libre).
+  List<String> _knownLocations = [];
   final _textController = TextEditingController();
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
@@ -141,6 +147,32 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     super.initState();
     _isEditing ? _loadForEdit() : _loadNew();
     _loadVideoDurationCap();
+    _loadKnownLocations();
+  }
+
+  /// Lieux déjà utilisés par l'utilisateur, comptés par nombre de souvenirs
+  /// et triés du plus fréquent au moins fréquent — alimente la liste
+  /// déroulante du champ lieu (voir _locationAutocompleteField).
+  Future<void> _loadKnownLocations() async {
+    try {
+      final memories = await MemoryQueryService.visible().first;
+      final counts = <String, int>{};
+      for (final m in memories) {
+        final loc = m.location?.trim();
+        if (loc == null || loc.isEmpty) continue;
+        counts[loc] = (counts[loc] ?? 0) + 1;
+      }
+      final sorted = counts.keys.toList()
+        ..sort((a, b) {
+          final byCount = counts[b]!.compareTo(counts[a]!);
+          return byCount != 0
+              ? byCount
+              : a.toLowerCase().compareTo(b.toLowerCase());
+        });
+      if (mounted) setState(() => _knownLocations = sorted);
+    } catch (_) {
+      // best-effort — le champ reste un simple texte libre si ça échoue
+    }
   }
 
   // Récupère la durée max par clip et le nombre max de vidéos par souvenir.
@@ -161,6 +193,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   void dispose() {
     _titleController.dispose();
     _locationController.dispose();
+    _locationFocusNode.dispose();
     _textController.dispose();
     _weightController.dispose();
     _heightController.dispose();
@@ -1624,10 +1657,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           const Text('📍', style: TextStyle(fontSize: 13)),
           const SizedBox(width: 8),
           Expanded(
-            child: TextField(
-              controller: _locationController,
-              textCapitalization: TextCapitalization.sentences,
-              onChanged: (_) => setState(_syncAutoTags),
+            child: _locationAutocompleteField(
               style: const TextStyle(
                   fontFamily: 'Outfit',
                   fontWeight: FontWeight.w600,
@@ -2181,6 +2211,32 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     });
   }
 
+  /// Bascule mesure de croissance ⇄ souvenir normal — un simple `Switch`
+  /// plutôt qu'un lien texte, moins ambigu qu'un tap sur une étiquette.
+  /// [on] reflète l'état déjà connu par l'appelant (évite de relire
+  /// `_selectedCategory` deux fois pour la même info).
+  Widget _growthToggleRow({required bool on}) {
+    return Row(
+      children: [
+        const Icon(Icons.monitor_weight_outlined,
+            size: 16, color: AppColors.sage),
+        const SizedBox(width: 8),
+        const Expanded(
+          child: Text(
+            'Mesure de croissance (taille/poids)',
+            style: TextStyle(color: AppColors.textDark, fontSize: 13),
+          ),
+        ),
+        Switch(
+          value: on,
+          activeTrackColor: AppColors.sage,
+          onChanged: (v) => setState(
+              () => _selectedCategory = v ? 'taille_poids' : 'anecdote'),
+        ),
+      ],
+    );
+  }
+
   Widget _buildTaillePoidsForm() {
     final weightVal =
         double.tryParse(_weightController.text.replaceAll(',', '.'));
@@ -2206,17 +2262,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          TextButton.icon(
-            onPressed: () => setState(() => _selectedCategory = 'anecdote'),
-            icon: const Icon(Icons.arrow_back,
-                size: 16, color: AppColors.textMedium),
-            label: const Text(
-              'Revenir à un souvenir normal',
-              style: TextStyle(color: AppColors.textMedium, fontSize: 13),
-            ),
-            style: TextButton.styleFrom(
-                padding: EdgeInsets.zero, minimumSize: Size.zero),
-          ),
+          _growthToggleRow(on: true),
           const SizedBox(height: 10),
           _FormCard(children: [
             _SectionTitle('📊 MESURES', error: _measurementMissing),
@@ -2360,17 +2406,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           // ce souvenir-ci. La mesure devient un souvenir à part entière
           // (type taille_poids) — pas des champs ajoutés à celui-ci — pour
           // ne pas l'exclure du rendu photo normal du livre.
-          TextButton.icon(
-            onPressed: () => setState(() => _selectedCategory = 'taille_poids'),
-            icon: const Icon(Icons.monitor_weight_outlined,
-                size: 16, color: AppColors.sage),
-            label: const Text(
-              'Ajouter une mesure de croissance (taille/poids)',
-              style: TextStyle(color: AppColors.sage, fontSize: 13),
-            ),
-            style: TextButton.styleFrom(
-                padding: EdgeInsets.zero, minimumSize: Size.zero),
-          ),
+          _growthToggleRow(on: false),
           const SizedBox(height: 4),
           _FormCard(children: [
             _buildDateSection(),
@@ -2710,12 +2746,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       children: [
         _SectionTitle('📍 LIEU', error: _locationRequiredEmpty),
         const SizedBox(height: 8),
-        TextField(
-          controller: _locationController,
-          textCapitalization: TextCapitalization.sentences,
-          // Le lieu devient un tag : on le suit à la frappe (le tag précédent
-          // est remplacé, sauf si l'utilisateur l'avait retiré à la main).
-          onChanged: (_) => setState(_syncAutoTags),
+        _locationAutocompleteField(
           decoration: InputDecoration(
             hintText: 'Ex : Zoo de Genève, Paris, Maison…',
             enabledBorder: _locationRequiredEmpty ? _errorBorder : null,
@@ -2723,6 +2754,43 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  /// Champ lieu avec liste déroulante des lieux déjà utilisés (voir
+  /// _loadKnownLocations), du plus fréquent au moins fréquent. Le premier
+  /// souvenir sur un lieu reste du texte libre (rien à suggérer encore) ;
+  /// ensuite, taper fait apparaître les lieux existants qui correspondent —
+  /// champ vide = tous les lieux connus, pour pouvoir aussi parcourir sans
+  /// taper. Partagé entre le formulaire principal et le pill de relecture
+  /// (_editLocationPill) — jamais affichés en même temps, donc pas de
+  /// conflit à partager _locationController/_locationFocusNode entre les deux.
+  Widget _locationAutocompleteField({
+    required InputDecoration decoration,
+    TextStyle? style,
+  }) {
+    return Autocomplete<String>(
+      textEditingController: _locationController,
+      focusNode: _locationFocusNode,
+      optionsBuilder: (value) {
+        final query = value.text.trim().toLowerCase();
+        if (query.isEmpty) return _knownLocations;
+        return _knownLocations.where((l) => l.toLowerCase().contains(query));
+      },
+      onSelected: (_) => setState(_syncAutoTags),
+      fieldViewBuilder: (context, controller, focusNode, onFieldSubmitted) {
+        return TextField(
+          controller: controller,
+          focusNode: focusNode,
+          textCapitalization: TextCapitalization.sentences,
+          // Le lieu devient un tag : on le suit à la frappe (le tag précédent
+          // est remplacé, sauf si l'utilisateur l'avait retiré à la main).
+          onChanged: (_) => setState(_syncAutoTags),
+          onSubmitted: (_) => onFieldSubmitted(),
+          style: style,
+          decoration: decoration,
+        );
+      },
     );
   }
 

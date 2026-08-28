@@ -111,12 +111,17 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Les 6 derniers souvenirs — filtrés si des tags sont cochés.
+  ///
+  /// Triés par DATE D'AJOUT (createdAt), pas par la date du souvenir : un
+  /// souvenir tout juste importé (ex. une vieille photo d'enfance) doit
+  /// apparaître en premier ici, même si sa date le placerait ailleurs dans
+  /// le carnet chronologique (`/memories`, qui lui reste trié par `date`).
   void _applyFilter() {
     final selected = _selectedTags;
     final all = _memoriesById.values
         .where((m) => memoryMatchesTags(m, selected))
         .toList()
-      ..sort((a, b) => b.date.compareTo(a.date));
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     _recentMemories = all.take(6).toList();
   }
 
@@ -341,7 +346,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Les 6 derniers souvenirs (du filtre courant), en polaroïdes.
+  /// Les 6 derniers souvenirs (du filtre courant), en polaroïdes — le tout
+  /// premier (le plus récemment ajouté) est mis en avant en grand plutôt que
+  /// noyé dans la grille, pour que "je viens d'importer quelque chose" se
+  /// voie vraiment sans avoir à chercher.
   Widget _recentMemoriesGrid(BuildContext context) {
     if (_recentMemories.isEmpty) {
       return const Padding(
@@ -352,28 +360,82 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
+    final featured = _recentMemories.first;
+    final rest = _recentMemories.skip(1).toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 18,
-          crossAxisSpacing: 14,
-          childAspectRatio: 0.66,
-        ),
-        itemCount: _recentMemories.length,
-        itemBuilder: (_, i) {
-          final m = _recentMemories[i];
-          return MemoryPolaroid(
-            memory: m,
-            cat: _safeCat(m.type),
-            tilt: (i % 2 == 0) ? -0.02 : 0.02,
-            onTap: () => context.push('/memory/${m.id}'),
-            onDelete: () => _deleteMemory(m),
-          );
-        },
+      child: Column(
+        children: [
+          SizedBox(
+            height: 230,
+            child: Stack(
+              children: [
+                Positioned.fill(
+                  child: MemoryPolaroid(
+                    memory: featured,
+                    cat: _safeCat(featured.type),
+                    tilt: 0,
+                    onTap: () => context.push('/memory/${featured.id}'),
+                    onDelete: () => _deleteMemory(featured),
+                  ),
+                ),
+                Positioned(
+                  top: 14,
+                  right: 14,
+                  child: Transform.rotate(
+                    angle: 0.05,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: AppColors.sageDark,
+                        borderRadius: BorderRadius.circular(99),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.25),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: const Text(
+                        '🆕 Dernier ajouté',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (rest.isNotEmpty) ...[
+            const SizedBox(height: 18),
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                mainAxisSpacing: 18,
+                crossAxisSpacing: 14,
+                childAspectRatio: 0.66,
+              ),
+              itemCount: rest.length,
+              itemBuilder: (_, i) {
+                final m = rest[i];
+                return MemoryPolaroid(
+                  memory: m,
+                  cat: _safeCat(m.type),
+                  tilt: (i % 2 == 0) ? -0.02 : 0.02,
+                  onTap: () => context.push('/memory/${m.id}'),
+                  onDelete: () => _deleteMemory(m),
+                );
+              },
+            ),
+          ],
+        ],
       ),
     );
   }

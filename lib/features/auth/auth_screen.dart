@@ -106,7 +106,13 @@ class _AuthScreenState extends State<AuthScreen> {
       // Avec Google, rien ne distingue une inscription d'une connexion — sauf
       // ce drapeau renvoyé par Firebase.
       _justSignedUp = credential.additionalUserInfo?.isNewUser ?? false;
-    } catch (_) {
+    } catch (e) {
+      // Cause la plus fréquente sur Android : aucune empreinte SHA-1 de
+      // l'app enregistrée dans Firebase pour cette clé de signature
+      // (google-services.json a alors un oauth_client vide côté Android, et
+      // Google Sign-In échoue systématiquement avec ApiException 10). Loggé
+      // en clair (pas juste avalé) pour pouvoir diagnostiquer sans device.
+      debugPrint('Google Sign-In error: $e');
       if (mounted) {
         setState(() {
           _error = 'Erreur Google Sign-In';
@@ -131,7 +137,7 @@ class _AuthScreenState extends State<AuthScreen> {
   /// sur iOS, la demande système ne se pose qu'une fois : refusée, elle ne
   /// revient plus, et il faut aller la chercher dans les réglages du téléphone.
   Future<void> _offerNotifications() async {
-    final wants = await showModalBottomSheet<bool>(
+    final chosen = await showModalBottomSheet<NotifyFrequency>(
       context: context,
       isScrollControlled: true,
       backgroundColor: AppColors.surface,
@@ -180,7 +186,8 @@ class _AuthScreenState extends State<AuthScreen> {
               SizedBox(
                 width: double.infinity,
                 child: FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
+                  onPressed: () =>
+                      Navigator.pop(ctx, NotifyFrequency.daily),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.sageDark,
                     padding: const EdgeInsets.symmetric(vertical: 14),
@@ -188,11 +195,20 @@ class _AuthScreenState extends State<AuthScreen> {
                   child: const Text('Oui, chaque jour'),
                 ),
               ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () =>
+                      Navigator.pop(ctx, NotifyFrequency.weekly),
+                  child: const Text('Une fois par semaine'),
+                ),
+              ),
               const SizedBox(height: 6),
               SizedBox(
                 width: double.infinity,
                 child: TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
+                  onPressed: () => Navigator.pop(ctx, null),
                   child: const Text('Plus tard',
                       style: TextStyle(color: AppColors.textMedium)),
                 ),
@@ -202,9 +218,9 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
       ),
     );
-    if (wants != true) return;
+    if (chosen == null) return;
     // C'est ce set qui déclenche la demande système d'Android / iOS.
-    await NotificationService.setFrequency(NotifyFrequency.daily);
+    await NotificationService.setFrequency(chosen);
   }
 
   Future<void> _resetPassword() async {

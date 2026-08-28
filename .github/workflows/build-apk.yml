@@ -62,6 +62,22 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
+      # Empreinte SHA-1/SHA-256 de la clé de signature release — à enregistrer
+      # dans Firebase (Paramètres du projet → app Android → Ajouter une
+      # empreinte) pour que Google Sign-In fonctionne sur l'APK signé
+      # distribué (google-services.json a un oauth_client vide tant qu'aucune
+      # empreinte n'y est associée → Google Sign-In échoue systématiquement).
+      # Une empreinte n'est pas un secret (c'est justement ce qu'on donne à
+      # Google), donc l'afficher en clair dans les logs ne pose pas de risque.
+      - name: Empreinte de la clé de signature (diagnostic Google Sign-In)
+        run: |
+          keytool -list -v \
+            -keystore "$RUNNER_TEMP/carnet-release.p12" \
+            -storetype PKCS12 \
+            -storepass "${{ secrets.ANDROID_KEYSTORE_PASSWORD }}" \
+            -alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
+            | grep -E "SHA1:|SHA256:"
+
       - name: Publier l'APK (artefact GitHub Actions, 30 jours)
         uses: actions/upload-artifact@v4
         with:
