@@ -78,6 +78,25 @@ jobs:
             -alias "${{ secrets.ANDROID_KEY_ALIAS }}" \
             | grep -E "SHA1:|SHA256:"
 
+      # Format exigé par Google Play (l'APK ci-dessus reste pour la
+      # distribution directe dmathys.dev/download). Même clé de signature —
+      # nécessaire pour que l'app publiée corresponde à la même app_id une
+      # fois Play App Signing activé (Play re-signe ensuite avec sa propre
+      # clé, mais l'upload initial doit être signé avec CETTE clé release).
+      - name: Build App Bundle (AAB, signé) — pour Google Play
+        run: flutter build appbundle --release --build-number=${{ github.run_number }}
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/carnet-release.p12
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+
+      - name: Publier l'AAB (artefact GitHub Actions, 30 jours)
+        uses: actions/upload-artifact@v4
+        with:
+          name: carnet-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          retention-days: 30
+
       - name: Publier l'APK (artefact GitHub Actions, 30 jours)
         uses: actions/upload-artifact@v4
         with:
