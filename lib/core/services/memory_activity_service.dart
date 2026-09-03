@@ -1,17 +1,22 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import '../models/memory_activity_model.dart';
 
-/// Fil d'activité "quelqu'un a ajouté des photos/vidéos" sur les souvenirs
-/// partagés — chaque destinataire (propriétaire + collaborateurs, l'auteur du
-/// geste compris) doit "valider" (fermer) la notification de son côté.
+/// Fil d'activité "photos/vidéos ajoutées à un souvenir" — s'applique aussi
+/// bien à un souvenir partagé (chaque collaborateur voit l'activité des
+/// autres) qu'à un souvenir perso (l'auteur voit sa propre confirmation :
+/// médias ajoutés, date, souvenir concerné). Chaque destinataire doit
+/// "valider" (fermer) la notification de son côté.
 class MemoryActivityService {
   static final _col = FirebaseFirestore.instance.collection('memoryActivities');
 
   /// Enregistre une activité. `recipients` doit déjà inclure l'auteur — voir
   /// l'appelant (memory_create_screen.dart::_save) pour le calcul exact.
   /// Best-effort : ne bloque jamais la sauvegarde du souvenir lui-même si ça
-  /// échoue (même philosophie que BookHistoryService.recordBook).
+  /// échoue (même philosophie que BookHistoryService.recordBook) — mais
+  /// l'erreur est quand même tracée (debugPrint) pour rester diagnosticable,
+  /// contrairement à l'ancien catch totalement silencieux.
   static Future<void> record({
     required String memoryId,
     required String memoryTitle,
@@ -21,7 +26,7 @@ class MemoryActivityService {
     required List<String> recipients,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null || recipients.length < 2) return;
+    if (user == null || recipients.isEmpty) return;
     final label = (user.displayName?.isNotEmpty ?? false)
         ? user.displayName!
         : (user.email ?? 'Quelqu\'un');
@@ -38,9 +43,8 @@ class MemoryActivityService {
         'seenBy': <String>[],
         'createdAt': FieldValue.serverTimestamp(),
       });
-    } catch (_) {
-      // Best-effort — le souvenir est déjà enregistré, une activité manquée
-      // n'est pas une raison de faire échouer la sauvegarde.
+    } catch (e) {
+      debugPrint('MemoryActivityService.record a échoué : $e');
     }
   }
 

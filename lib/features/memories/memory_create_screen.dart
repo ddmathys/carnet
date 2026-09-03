@@ -1389,10 +1389,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
       if (mounted) context.go('/memories');
 
-      // Fil d'activité (bannière dashboard) : prévient l'auteur ET les
-      // collaborateurs qu'un souvenir partagé a reçu des médias — voir
-      // MemoryActivityService (skip automatiquement si `recipients` ne
-      // contient que l'auteur seul, cas d'un souvenir non partagé).
+      // Fil d'activité (bannière dashboard) : confirme à l'auteur (et aux
+      // collaborateurs éventuels) qu'un souvenir a reçu des médias — souvenir
+      // partagé ou perso, toujours notifié (voir MemoryActivityService).
       // `_localPhotos`/`_localVideoPaths` = médias LOCAUX ajoutés dans CETTE
       // sauvegarde (delta), pas le total du souvenir.
       final photosAdded = _localPhotos.length;
