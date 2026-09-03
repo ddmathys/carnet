@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { FieldValue } from 'firebase-admin/firestore'
 import { requireAuth } from '../../lib/verify'
 import { auth, db, messaging } from '../../lib/firebase'
-import { presignGet } from '../../lib/r2'
+import { deleteObject, presignGet } from '../../lib/r2'
 import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
 import { row, wrap } from '../email/order'
 
@@ -33,6 +33,17 @@ import { row, wrap } from '../email/order'
 //                                    Firebase). Non authentifié (l'utilisateur
 //                                    n'est PAS connecté à ce moment) — ne
 //                                    JAMAIS révéler si le compte existe.
+//                                    Throttlé par email (voir RESET_THROTTLE_MS)
+//                                    pour empêcher le spam d'un email arbitraire
+//                                    (trouvé à l'audit sécurité du 03.09.26).
+//   POST /api/notify/order-cancel  → le CLIENT annule sa commande avant
+//                                    paiement (bouton "Annuler la commande").
+//                                    Authentifiée, vérifie ownership + statut
+//                                    'received'. Remplace un delete Firestore
+//                                    direct côté client, bloqué par les règles
+//                                    (orders : delete admin-only) — le bouton
+//                                    était cassé pour un vrai client (trouvé à
+//                                    l'audit UX du 03.09.26).
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
 // plafonne à 12 fonctions serverless.
@@ -429,6 +440,10 @@ async function handleOrderReceived(req: VercelRequest, res: VercelResponse) {
  * révéler l'inexistence d'un compte par ce biais est une fuite classique
  * (email enumeration) — Firebase Auth a la même protection activée sur ce
  * projet (`emailPrivacyConfig.enableImprovedEmailPrivacy`). */
+// Un envoi par email toutes les 60s max — sans ça, endpoint public ouvert au
+// spam d'un email arbitraire (harcèlement, ou épuisement du quota Resend).
+const RESET_THROTTLE_MS = 60_000
+
 async function handleResetPassword(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
@@ -436,6 +451,16 @@ async function handleResetPassword(req: VercelRequest, res: VercelResponse) {
   if (!email || !email.includes('@')) {
     return res.status(400).json({ error: 'Email invalide' })
   }
+
+  // Réponse 200 identique dans TOUS les cas (throttlé, compte inexistant,
+  // envoi réussi) — ne jamais laisser deviner l'état réel depuis l'extérieur.
+  const throttleRef = db.collection('passwordResetThrottle').doc(email.toLowerCase())
+  const throttleSnap = await throttleRef.get()
+  const lastSentAt = throttleSnap.data()?.lastSentAt?.toMillis?.() ?? 0
+  if (Date.now() - lastSentAt < RESET_THROTTLE_MS) {
+    return res.status(200).json({ ok: true })
+  }
+  await throttleRef.set({ lastSentAt: FieldValue.serverTimestamp() })
 
   try {
     const link = await auth.generatePasswordResetLink(email)
@@ -466,6 +491,44 @@ async function handleResetPassword(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true })
 }
 
+/** Le client annule sa commande avant paiement — mêmes conditions que le
+ * bouton côté app (`status == 'received'`), vérifiées ici aussi puisque
+ * l'app ne peut plus faire confiance à ses propres règles Firestore pour
+ * ça (delete réservé à l'admin). Supprime le PDF sur R2 (déjà généré à la
+ * création de la commande) puis le document. */
+async function handleOrderCancel(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const user = await requireAuth(req, res)
+  if (!user) return
+
+  const orderId = (req.body?.orderId ?? '') as string
+  if (!orderId) return res.status(400).json({ error: 'Missing orderId' })
+
+  const ref = db.collection('orders').doc(orderId)
+  const snap = await ref.get()
+  if (!snap.exists) return res.status(404).json({ error: 'Commande introuvable' })
+  const order = snap.data() as Record<string, any>
+  if (order.userId !== user.uid) {
+    return res.status(403).json({ error: 'Cette commande ne t\'appartient pas' })
+  }
+  if (order.status !== 'received') {
+    return res.status(400).json({ error: 'Cette commande ne peut plus être annulée' })
+  }
+
+  if (typeof order.pdfUrl === 'string' && order.pdfUrl) {
+    try {
+      const key = new URL(order.pdfUrl).searchParams.get('key')
+      if (key) await deleteObject(key)
+    } catch {
+      // pdfUrl mal formée ou déjà absente sur R2 — pas bloquant, on supprime
+      // quand même la commande.
+    }
+  }
+  await ref.delete()
+
+  return res.status(200).json({ ok: true })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
@@ -475,6 +538,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'orders-pending') return handleOrdersPending(req, res)
   if (action === 'order-received') return handleOrderReceived(req, res)
   if (action === 'reset-password') return handleResetPassword(req, res)
+  if (action === 'order-cancel') return handleOrderCancel(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

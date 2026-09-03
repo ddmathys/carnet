@@ -39,8 +39,8 @@ class BookPricing {
   // couvrir le suivi de la commande et les frais annexes. Le plancher protège
   // ces petites commandes ; au-delà, c'est le pourcentage qui prend le relais
   // (gros livres = marge plus élevée).
-  static const double marginRate = 0.20;
-  static const double marginFloor = 8.0;
+  static const double marginRate = 0.40;
+  static const double marginFloor = 10.0;
 
   /// Coût d'impression estimé (impression + livraison) pour une couverture et
   /// un nombre de pages donnés.

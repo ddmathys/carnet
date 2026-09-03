@@ -356,6 +356,20 @@ class _AuthScreenState extends State<AuthScreen> {
                             style: const TextStyle(
                                 color: AppColors.error, fontSize: 12.5))),
                   ]),
+                  // "Email ou mot de passe incorrect" ne distingue jamais
+                  // (volontairement, anti-énumération) un vrai mauvais mot de
+                  // passe d'un compte créé uniquement via Google, qui n'en a
+                  // jamais eu — rappel discret plutôt que de laisser deviner
+                  // (confusion vécue par David le 03.09.26).
+                  if (_isLogin) ...[
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Connecté d\'habitude avec Google ? Utilise le bouton '
+                      'ci-dessous.',
+                      style:
+                          TextStyle(color: AppColors.textMedium, fontSize: 12),
+                    ),
+                  ],
                 ],
                 if (_resetSent) ...[
                   const SizedBox(height: 12),

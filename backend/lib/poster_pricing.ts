@@ -59,8 +59,8 @@ const CATALOG: Record<PosterSize, Partial<Record<PosterOrientation, PosterCatalo
 // Même taux/marge/arrondi que lib/pricing.ts, pour rester cohérent visuellement
 // avec le prix des livres (un seul modèle de marge dans toute l'app).
 const USD_TO_CHF = 0.9
-const MARGIN_RATE = 0.2
-const MARGIN_FLOOR = 8.0
+const MARGIN_RATE = 0.4
+const MARGIN_FLOOR = 10.0
 
 export function posterCatalogEntry(
   size: PosterSize,

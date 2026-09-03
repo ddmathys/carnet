@@ -1238,9 +1238,7 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
     final router = GoRouter.of(context);
     setState(() => _deleting = true);
     try {
-      // PDF (sur R2, ou Firebase pour les commandes d'avant la bascule) puis le
-      // document Firestore — une seule vérité, dans OrderService.
-      await OrderService.deleteOrder(widget.order);
+      await OrderService.cancelOrder(widget.order.id);
       router.go('/orders');
     } catch (e) {
       if (mounted) {

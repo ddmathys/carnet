@@ -31,8 +31,8 @@ class PosterCatalogEntry {
 
 class PosterPricing {
   static const double _usdToChf = 0.90;
-  static const double marginRate = 0.20;
-  static const double marginFloor = 8.0;
+  static const double marginRate = 0.40;
+  static const double marginFloor = 10.0;
 
   static const Map<String, Map<String, PosterCatalogEntry>> _catalog = {
     'A4': {

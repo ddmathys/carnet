@@ -29,8 +29,8 @@ const BASE_PRICE_USD: Record<CoverType, number> = { soft: 10.97, hard: 13.48, la
 const EXTRA_PAGE_USD: Record<CoverType, number> = { soft: 0.3, hard: 0.25, layflat: 0.49 }
 const SHIPPING_USD: Record<CoverType, number> = { soft: 18.71, hard: 17.49, layflat: 18.75 }
 
-const MARGIN_RATE = 0.2
-const MARGIN_FLOOR = 8.0
+const MARGIN_RATE = 0.4
+const MARGIN_FLOOR = 10.0
 
 export type CoverType = 'hard' | 'soft' | 'layflat'
 

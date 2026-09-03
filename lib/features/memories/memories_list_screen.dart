@@ -1,9 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
-import 'package:video_player/video_player.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
@@ -11,7 +9,6 @@ import '../../core/constants/milestone_types.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
-import '../../core/services/video_service.dart';
 import '../tags/share_tag_sheet.dart';
 import '../tags/tag_picker_sheet.dart';
 import 'widgets/memory_polaroid.dart';
@@ -34,8 +31,16 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   final Set<String> _filterLabels = {};
   final _searchController = TextEditingController();
   String _searchQuery = '';
-  List<TagModel> _tags = [];
+  // Mes tags + ceux qu'on m'a partagés (même principe que home_screen.dart
+  // `_allTags`) — avant, cet écran ne listait que `streamMine()` : un
+  // collaborateur invité voyait bien les souvenirs partagés dans la grille,
+  // mais ne pouvait jamais filtrer dessus ni cocher `initialTagId` à
+  // l'arrivée d'un lien de partage (trouvé à l'audit UX du 03.09.26).
+  List<TagModel> _myTags = [];
+  List<TagModel> _sharedTags = [];
+  List<TagModel> get _tags => [..._myTags, ..._sharedTags];
   StreamSubscription? _tagsSub;
+  StreamSubscription? _sharedTagsSub;
 
   @override
   void initState() {
@@ -43,23 +48,36 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
     _tagsSub = TagService.streamMine().listen((tags) {
       if (!mounted) return;
       setState(() {
-        _tags = tags;
-        // Arrivée depuis un tag précis (partage rejoint, CTA livre) : il est
-        // coché d'emblée, mais reste modifiable comme n'importe quel filtre.
-        final initial = widget.initialTagId;
-        if (initial != null && _filterLabels.isEmpty) {
-          for (final t in tags) {
-            if (t.id == initial) _filterLabels.add(t.label);
-          }
-        }
+        _myTags = tags;
+        _applyInitialTag(tags);
       });
     });
+    _sharedTagsSub = TagService.streamSharedWithMe().listen((tags) {
+      if (!mounted) return;
+      setState(() {
+        _sharedTags = tags;
+        _applyInitialTag(tags);
+      });
+    });
+  }
+
+  // Arrivée depuis un tag précis (partage rejoint, CTA livre) : il est coché
+  // d'emblée, mais reste modifiable comme n'importe quel filtre. Le tag peut
+  // venir de l'un ou l'autre flux (mien ou partagé) — d'où l'appel depuis les
+  // deux listeners.
+  void _applyInitialTag(List<TagModel> tags) {
+    final initial = widget.initialTagId;
+    if (initial == null || _filterLabels.isNotEmpty) return;
+    for (final t in tags) {
+      if (t.id == initial) _filterLabels.add(t.label);
+    }
   }
 
   @override
   void dispose() {
     _searchController.dispose();
     _tagsSub?.cancel();
+    _sharedTagsSub?.cancel();
     super.dispose();
   }
 
@@ -532,302 +550,6 @@ class _BookCta extends StatelessWidget {
             ),
             const Icon(Icons.chevron_right, color: AppColors.amber, size: 18),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-
-/// Un média d'un souvenir : photo (URL directe) ou vidéo (clé R2 à résoudre).
-class _MediaItem {
-  final bool isVideo;
-  final String? photoUrl;
-  final String? videoKey;
-  const _MediaItem.photo(this.photoUrl)
-      : isVideo = false,
-        videoKey = null;
-  const _MediaItem.video(this.videoKey)
-      : isVideo = true,
-        photoUrl = null;
-}
-
-/// Petite pastille « icône + nombre » (compteur photos ou vidéos sur la vignette).
-class _MediaCountBadge extends StatelessWidget {
-  final IconData icon;
-  final int count;
-  const _MediaCountBadge({required this.icon, required this.count});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-      decoration: BoxDecoration(
-        color: Colors.black54,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: Colors.white),
-          const SizedBox(width: 4),
-          Text('$count',
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w600)),
-        ],
-      ),
-    );
-  }
-}
-
-/// Visualiseur plein écran : photos (zoom) et vidéos (lecture inline) dans une
-/// même galerie balayable. Les URLs vidéo sont reconstruites depuis les clés R2.
-class _MediaViewer extends StatefulWidget {
-  final List<_MediaItem> items;
-  final int initialIndex;
-  final String memoryId;
-  const _MediaViewer(
-      {required this.items,
-      required this.initialIndex,
-      required this.memoryId});
-
-  @override
-  State<_MediaViewer> createState() => _MediaViewerState();
-}
-
-class _MediaViewerState extends State<_MediaViewer> {
-  late final PageController _page;
-  late int _current;
-  // clé R2 → URL signée de lecture (absente = non autorisé / non résolu).
-  Map<String, String> _videoUrls = {};
-  bool _resolvingVideos = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _current = widget.initialIndex;
-    _page = PageController(initialPage: widget.initialIndex);
-    _resolveVideos();
-  }
-
-  Future<void> _resolveVideos() async {
-    final hasVideo = widget.items.any((m) => m.isVideo && m.videoKey != null);
-    if (!hasVideo) return;
-    setState(() => _resolvingVideos = true);
-    final urls = await VideoService.playbackUrls(widget.memoryId);
-    if (!mounted) return;
-    setState(() {
-      _videoUrls = urls;
-      _resolvingVideos = false;
-    });
-  }
-
-  @override
-  void dispose() {
-    _page.dispose();
-    super.dispose();
-  }
-
-  Widget _buildPhoto(String url) => InteractiveViewer(
-        minScale: 1,
-        maxScale: 4,
-        child: Center(
-          child: CachedNetworkImage(
-            imageUrl: url,
-            fit: BoxFit.contain,
-            placeholder: (_, __) => const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            ),
-            errorWidget: (_, __, ___) => const Icon(
-              Icons.broken_image_outlined,
-              color: Colors.white54,
-              size: 64,
-            ),
-          ),
-        ),
-      );
-
-  Widget _buildVideo(_MediaItem item, bool active) {
-    if (_resolvingVideos && !_videoUrls.containsKey(item.videoKey)) {
-      return const Center(child: CircularProgressIndicator(color: Colors.white));
-    }
-    final url = _videoUrls[item.videoKey];
-    if (url == null) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, color: Colors.white54, size: 56),
-            SizedBox(height: 12),
-            Text('Vidéo indisponible',
-                style: TextStyle(color: Colors.white54)),
-          ],
-        ),
-      );
-    }
-    return _VideoPage(url: url, active: active);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Stack(
-        children: [
-          PageView.builder(
-            controller: _page,
-            itemCount: widget.items.length,
-            onPageChanged: (i) => setState(() => _current = i),
-            itemBuilder: (_, i) {
-              final item = widget.items[i];
-              return item.isVideo
-                  ? _buildVideo(item, _current == i)
-                  : _buildPhoto(item.photoUrl!);
-            },
-          ),
-          // Close button
-          SafeArea(
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Padding(
-                padding: const EdgeInsets.all(4),
-                child: IconButton(
-                  icon: const Icon(Icons.close, color: Colors.white, size: 28),
-                  onPressed: () => Navigator.pop(context),
-                ),
-              ),
-            ),
-          ),
-          // Page dots (only if multiple media)
-          if (widget.items.length > 1)
-            Positioned(
-              bottom: 28,
-              left: 0,
-              right: 0,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                  widget.items.length,
-                  (i) => AnimatedContainer(
-                    duration: const Duration(milliseconds: 150),
-                    width: _current == i ? 18 : 6,
-                    height: 6,
-                    margin: const EdgeInsets.symmetric(horizontal: 3),
-                    decoration: BoxDecoration(
-                      color: _current == i ? Colors.white : Colors.white38,
-                      borderRadius: BorderRadius.circular(3),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Lecteur vidéo inline (une page du visualiseur). Se met en pause dès qu'on
-/// balaie vers un autre média (`active` passe à false).
-class _VideoPage extends StatefulWidget {
-  final String url;
-  final bool active;
-  const _VideoPage({required this.url, required this.active});
-
-  @override
-  State<_VideoPage> createState() => _VideoPageState();
-}
-
-class _VideoPageState extends State<_VideoPage> {
-  VideoPlayerController? _controller;
-  bool _ready = false;
-  bool _error = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _init();
-  }
-
-  Future<void> _init() async {
-    try {
-      final c = VideoPlayerController.networkUrl(Uri.parse(widget.url));
-      await c.initialize();
-      if (!mounted) {
-        c.dispose();
-        return;
-      }
-      c.addListener(() {
-        if (mounted) setState(() {});
-      });
-      setState(() {
-        _controller = c;
-        _ready = true;
-      });
-    } catch (_) {
-      if (mounted) setState(() => _error = true);
-    }
-  }
-
-  @override
-  void didUpdateWidget(_VideoPage old) {
-    super.didUpdateWidget(old);
-    // Pause automatique quand on quitte cette page du carrousel.
-    if (old.active && !widget.active) _controller?.pause();
-  }
-
-  @override
-  void dispose() {
-    _controller?.dispose();
-    super.dispose();
-  }
-
-  void _togglePlay() {
-    final c = _controller;
-    if (c == null) return;
-    setState(() => c.value.isPlaying ? c.pause() : c.play());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_error) {
-      return const Center(
-        child: Icon(Icons.error_outline, color: Colors.white54, size: 56),
-      );
-    }
-    final c = _controller;
-    if (!_ready || c == null) {
-      return const Center(child: CircularProgressIndicator(color: Colors.white));
-    }
-    final playing = c.value.isPlaying;
-    return GestureDetector(
-      onTap: _togglePlay,
-      child: Center(
-        child: AspectRatio(
-          aspectRatio: c.value.aspectRatio == 0 ? 16 / 9 : c.value.aspectRatio,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              VideoPlayer(c),
-              Align(
-                alignment: Alignment.bottomCenter,
-                child: VideoProgressIndicator(c, allowScrubbing: true),
-              ),
-              // Icône play visible à l'arrêt (tap n'importe où pour (re)lancer).
-              if (!playing)
-                Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.black38,
-                    shape: BoxShape.circle,
-                  ),
-                  padding: const EdgeInsets.all(8),
-                  child: const Icon(Icons.play_arrow,
-                      color: Colors.white, size: 48),
-                ),
-            ],
-          ),
         ),
       ),
     );

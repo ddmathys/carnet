@@ -103,9 +103,15 @@ service cloud.firestore {
       allow read: if isAuth() && memberOfMemory(resource.data);
       allow create: if isAuth()
         && request.resource.data.get('userId', '') == request.auth.uid;
+      // `userId` immuable après création : sans ça, un collaborateur invité
+      // sur un tag (donc membre via `sharedWith`, pas propriétaire) pouvait
+      // réécrire `userId` vers son propre uid ET vider `sharedWith` en un
+      // seul update — volant le souvenir à son vrai propriétaire (trouvé lors
+      // de l'audit sécurité du 03.09.26).
       allow update: if isAuth()
         && memberOfMemory(resource.data)
-        && memberOfMemory(request.resource.data);
+        && memberOfMemory(request.resource.data)
+        && request.resource.data.get('userId', '') == resource.data.get('userId', '');
       allow delete: if isAuth() && memberOfMemory(resource.data);
     }
 

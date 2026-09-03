@@ -153,6 +153,21 @@ class OrderService {
     }
   }
 
+  /// Le client annule sa commande avant paiement ("Annuler la commande").
+  /// Passe par le backend (Admin SDK) car le client n'a pas le droit de
+  /// supprimer `orders` directement (Firestore rules : delete admin-only) —
+  /// avant ce fix, ce bouton échouait silencieusement pour un vrai client.
+  static Future<void> cancelOrder(String orderId) async {
+    final data = await BackendClient.postJson(
+      '/api/notify/order-cancel',
+      {'orderId': orderId},
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? 'Échec de l\'annulation');
+    }
+  }
+
   /// Relit le vrai statut d'une commande chez Prodigi (admin, ou le client
   /// pour la sienne) — utile pour un rafraîchissement manuel sans attendre
   /// le cron quotidien.

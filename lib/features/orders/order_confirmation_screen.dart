@@ -50,7 +50,7 @@ class OrderConfirmationScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 12),
                 const Text(
-                  'Le paiement déclenchera la commande de votre livre.',
+                  'Le paiement déclenchera la commande de ton livre.',
                   style: TextStyle(
                       fontSize: 15, color: AppColors.textMedium, height: 1.6),
                   textAlign: TextAlign.center,
@@ -70,7 +70,7 @@ class OrderConfirmationScreen extends StatelessWidget {
                       SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'L\'équipe Carnet vous contactera rapidement pour les '
+                          'L\'équipe Carnet te contactera rapidement pour les '
                           'instructions de paiement.',
                           style: TextStyle(
                               fontSize: 13,

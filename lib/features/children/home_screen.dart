@@ -11,6 +11,7 @@ import '../../core/models/tag_model.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/book_history_service.dart';
+import '../books/pdf_viewer_screen.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/photo_service.dart';
@@ -490,7 +491,15 @@ class _HomeScreenState extends State<HomeScreen> {
                 separatorBuilder: (_, __) => const SizedBox(width: 14),
                 itemBuilder: (_, i) => _BookCard(
                   book: books[i],
-                  onTap: () => context.push('/books'),
+                  // Avant : renvoyait toujours vers la LISTE (/books) au lieu
+                  // du livre tapé — incohérent avec _PosterCard, qui lui
+                  // ouvre bien SA commande. Même geste que
+                  // book_history_screen.dart::_open (trouvé à l'audit UX du
+                  // 03.09.26).
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => PdfViewerScreen(
+                        title: books[i].title, url: books[i].pdfUrl),
+                  )),
                 ),
               ),
             ),

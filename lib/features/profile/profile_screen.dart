@@ -488,6 +488,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   style: TextStyle(color: AppColors.sage),
                 ),
               ),
+            ] else if (user.email != null) ...[
+              const SizedBox(height: 12),
+              TextButton(
+                onPressed: () => _showAddPasswordDialog(context, user.email!),
+                child: const Text(
+                  'Ajouter un mot de passe',
+                  style: TextStyle(color: AppColors.sage),
+                ),
+              ),
             ],
             const SizedBox(height: 12),
             TextButton.icon(
@@ -670,13 +679,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   void _showChangePasswordDialog(BuildContext context, String email) {
+    _showPasswordEmailDialog(
+      context,
+      email: email,
+      title: 'Réinitialiser le mot de passe',
+    );
+  }
+
+  /// Compte connecté uniquement via Google : aucun mot de passe n'existe sur
+  /// ce compte, donc "Se connecter" avec un mot de passe échoue toujours,
+  /// sans que rien dans le profil ne l'explique ni ne propose d'y remédier
+  /// (trouvé à l'audit UX du 03.09.26). Réutilise le même envoi — le lien de
+  /// réinitialisation Firebase fonctionne aussi bien pour AJOUTER un premier
+  /// mot de passe à un compte qui n'en a pas.
+  void _showAddPasswordDialog(BuildContext context, String email) {
+    _showPasswordEmailDialog(
+      context,
+      email: email,
+      title: 'Ajouter un mot de passe',
+      body: 'Ton compte est connecté uniquement via Google. Un email te '
+          'permettra de définir un mot de passe, pour pouvoir aussi te '
+          'connecter avec.',
+    );
+  }
+
+  void _showPasswordEmailDialog(
+    BuildContext context, {
+    required String email,
+    required String title,
+    String? body,
+  }) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Réinitialiser le mot de passe'),
+        title: Text(title),
         content: Text(
-          'Un email de réinitialisation sera envoyé à $email.',
+          body ?? 'Un email de réinitialisation sera envoyé à $email.',
           style: const TextStyle(color: AppColors.textMedium, height: 1.5),
         ),
         actions: [
@@ -688,12 +727,23 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ElevatedButton(
             onPressed: () async {
               Navigator.pop(ctx);
-              await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+              // Passe par le backend (Resend) plutôt que
+              // FirebaseAuth.sendPasswordResetEmail : le relai email par
+              // défaut de Firebase Auth n'arrivait pas chez David (03.09.26) —
+              // même fix que auth_screen.dart, ce dialogue utilisait encore
+              // l'ancien chemin.
+              final data = await BackendClient.postJson(
+                '/api/notify/reset-password',
+                {'email': email},
+              );
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Email envoyé ! Vérifie ta boîte mail.'),
-                    backgroundColor: AppColors.sage,
+                  SnackBar(
+                    content: Text(data?['ok'] == true
+                        ? 'Email envoyé ! Vérifie ta boîte mail.'
+                        : 'Une erreur est survenue. Réessaie.'),
+                    backgroundColor:
+                        data?['ok'] == true ? AppColors.sage : AppColors.error,
                   ),
                 );
               }

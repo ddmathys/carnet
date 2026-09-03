@@ -56,7 +56,6 @@ class MemoryCreateScreen extends StatefulWidget {
 }
 
 class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
-  int _step = 1;
   bool get _isEditing => widget.memoryId != null;
 
   bool _ready = false;
@@ -218,7 +217,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       setState(() {
         _allTags = tags;
         _selectedCategory = 'anecdote';
-        _step = 1;
         _ready = true;
         final initial = widget.initialTagId;
         if (initial != null) {
@@ -404,7 +402,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _existingVideoKeys.addAll(videoKeys);
       _existingVideoDurations.addAll(videoDurations);
       _dateNeedsConfirmation = false; // editing: date already confirmed
-      _step = 1;
       if (data['type'] == 'taille_poids') {
         if (weightKg != null) _weightController.text = weightKg.toStringAsFixed(1);
         if (heightCm != null) _heightController.text = heightCm.toStringAsFixed(1);
@@ -1171,8 +1168,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   // La description est désormais facultative (demande de David) : on ne bloque
   // plus l'enregistrement dessus. Requis pour un souvenir : titre + lieu + date.
-  bool get _descriptionRequiredEmpty => false;
-
   // Bordure rouge pour les champs obligatoires non remplis.
   OutlineInputBorder get _errorBorder => OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
