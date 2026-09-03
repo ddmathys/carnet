@@ -14,6 +14,7 @@ import '../../core/models/tag_model.dart';
 import '../../core/services/app_messenger.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/media_upload_queue.dart';
+import '../../core/services/memory_activity_service.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
@@ -1387,6 +1388,26 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       }
 
       if (mounted) context.go('/memories');
+
+      // Fil d'activité (bannière dashboard) : prévient l'auteur ET les
+      // collaborateurs qu'un souvenir partagé a reçu des médias — voir
+      // MemoryActivityService (skip automatiquement si `recipients` ne
+      // contient que l'auteur seul, cas d'un souvenir non partagé).
+      // `_localPhotos`/`_localVideoPaths` = médias LOCAUX ajoutés dans CETTE
+      // sauvegarde (delta), pas le total du souvenir.
+      final photosAdded = _localPhotos.length;
+      final videosAdded = _localVideoPaths.length;
+      if (photosAdded > 0 || videosAdded > 0) {
+        MemoryActivityService.record(
+          memoryId: memoryId,
+          memoryTitle: titleValue,
+          kind: _isEditing ? 'edited' : 'created',
+          photosAdded: photosAdded,
+          videosAdded: videosAdded,
+          recipients: {...sharedWith, ownerUid, uid}.toList(),
+        );
+      }
+
       // Confirmation "partagé avec qui" — seulement si le souvenir porte
       // effectivement un tag partagé. Ne bloque pas la navigation : le
       // SnackBar passe par la clé globale (survit au context.go, contrairement

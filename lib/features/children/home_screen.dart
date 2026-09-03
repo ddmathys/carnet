@@ -9,8 +9,10 @@ import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/models/generated_book_model.dart';
+import '../../core/models/memory_activity_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/book_history_service.dart';
+import '../../core/services/memory_activity_service.dart';
 import '../books/pdf_viewer_screen.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
@@ -193,6 +195,8 @@ class _HomeScreenState extends State<HomeScreen> {
             onShared: () => _showSharedTagsSheet(context),
           ),
         ),
+        const SliverToBoxAdapter(child: _ActivityBanner()),
+
         SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
 
         _ActiveOrdersBanner(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
@@ -1413,6 +1417,134 @@ class _EmptyState extends StatelessWidget {
               textAlign: TextAlign.center,
               style: TextStyle(
                   color: AppColors.textMedium, height: 1.6, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── Fil d'activité (souvenirs partagés) ──────────────────────────────────────
+
+/// "Karin a ajouté 3 photos à « Vacances »" — une carte par activité non
+/// encore validée, tout en haut du dashboard. Chaque destinataire (l'auteur
+/// du geste compris) valide de son côté ; ça n'affecte personne d'autre.
+class _ActivityBanner extends StatelessWidget {
+  const _ActivityBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<MemoryActivityModel>>(
+      stream: MemoryActivityService.streamPending(),
+      builder: (context, snap) {
+        final activities = snap.data ?? const <MemoryActivityModel>[];
+        if (activities.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+          child: Column(
+            children: [
+              for (final a in activities)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: _ActivityCard(activity: a),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ActivityCard extends StatelessWidget {
+  final MemoryActivityModel activity;
+  const _ActivityCard({required this.activity});
+
+  String get _mediaLabel {
+    final parts = <String>[];
+    if (activity.photosAdded > 0) {
+      parts.add(
+          '${activity.photosAdded} photo${activity.photosAdded > 1 ? 's' : ''}');
+    }
+    if (activity.videosAdded > 0) {
+      parts.add(
+          '${activity.videosAdded} vidéo${activity.videosAdded > 1 ? 's' : ''}');
+    }
+    return parts.join(' et ');
+  }
+
+  String get _title =>
+      activity.memoryTitle.isNotEmpty ? activity.memoryTitle : 'un souvenir';
+
+  String get _verb => activity.isCreated ? 'a créé un souvenir avec' : 'a ajouté';
+
+  String get _relativeTime {
+    final diff = DateTime.now().difference(activity.createdAt);
+    if (diff.inMinutes < 1) return 'à l\'instant';
+    if (diff.inMinutes < 60) return 'il y a ${diff.inMinutes} min';
+    if (diff.inHours < 24) return 'il y a ${diff.inHours} h';
+    return 'il y a ${diff.inDays} j';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => context.push('/memory/${activity.memoryId}'),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.sageTint,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.sage.withOpacity(0.3)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 2),
+              child: Icon(Icons.notifications_active_outlined,
+                  color: AppColors.sageDark, size: 18),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text.rich(
+                    TextSpan(
+                      style: const TextStyle(
+                          fontSize: 13, color: AppColors.textDark, height: 1.4),
+                      children: [
+                        TextSpan(
+                            text: activity.actorLabel,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w700)),
+                        TextSpan(text: ' $_verb $_mediaLabel à « '),
+                        TextSpan(
+                            text: _title,
+                            style:
+                                const TextStyle(fontWeight: FontWeight.w600)),
+                        const TextSpan(text: ' »'),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(_relativeTime,
+                      style: const TextStyle(
+                          fontSize: 11.5, color: AppColors.textMedium)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => MemoryActivityService.markSeen(activity.id),
+              behavior: HitTestBehavior.opaque,
+              child: const Padding(
+                padding: EdgeInsets.all(4),
+                child: Icon(Icons.check_circle_outline,
+                    color: AppColors.sageDark, size: 20),
+              ),
             ),
           ],
         ),

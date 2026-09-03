@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:go_router/go_router.dart';
 import 'welcome_slides.dart';
 
 /// Onboarding immersif affiché aux utilisateurs non connectés : 4 diapositives

@@ -165,6 +165,26 @@ service cloud.firestore {
       allow update, delete: if isAdmin();
     }
 
+    // ── Activités (fil "Karin a ajouté 3 photos à…") ─────────────────────────
+    // Créée par n'importe quel destinataire au nom de son propre geste
+    // (`actorUid == auth.uid`), lisible/modifiable seulement par les
+    // destinataires (`recipients`, figé au moment de l'action — ne suit pas
+    // les partages ultérieurs). `update` restreint à `seenBy` uniquement :
+    // un destinataire ne peut que s'ajouter lui-même à l'accusé de lecture,
+    // jamais modifier le contenu de l'activité.
+    match /memoryActivities/{activityId} {
+      allow create: if isAuth()
+        && request.resource.data.get('actorUid', '') == request.auth.uid
+        && request.auth.uid in request.resource.data.get('recipients', []);
+      allow read: if isAuth()
+        && request.auth.uid in resource.data.get('recipients', []);
+      allow update: if isAuth()
+        && request.auth.uid in resource.data.get('recipients', [])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seenBy'])
+        && request.auth.uid in request.resource.data.get('seenBy', []);
+      allow delete: if false;
+    }
+
     // ── Reels (vidéos consolidées derrière un QR imprimé) ───────────────────
     // Deux usages : le QR d'un poster (`poster-reel-create`) et celui de la
     // COUVERTURE d'un livre (`book-reel-create`, `videosOnly: true`).
