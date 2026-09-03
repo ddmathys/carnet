@@ -3,6 +3,10 @@
     {
       "source": "/download/carnet.apk",
       "destination": "https://firebasestorage.googleapis.com/v0/b/bloom-bcb1f.firebasestorage.app/o/public%2Fcarnet.apk?alt=media"
+    },
+    {
+      "source": "/download/carnet.aab",
+      "destination": "https://firebasestorage.googleapis.com/v0/b/bloom-bcb1f.firebasestorage.app/o/public%2Fcarnet.aab?alt=media"
     }
   ]
 }
