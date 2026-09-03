@@ -1,8 +1,11 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
+import '../../core/config/app_config.dart';
 import '../../core/services/migration_service.dart';
 import '../../core/services/notification_service.dart';
 import '../../core/services/user_service.dart';
@@ -223,6 +226,15 @@ class _AuthScreenState extends State<AuthScreen> {
     await NotificationService.setFrequency(chosen);
   }
 
+  /// Passe par le backend (Resend) plutôt que
+  /// `FirebaseAuth.sendPasswordResetEmail` : le relai email par défaut de
+  /// Firebase Auth (domaine `*.firebaseapp.com` partagé entre des millions de
+  /// projets) atterrit trop souvent en spam ou n'arrive jamais — signalé par
+  /// David le 03.09.26. Le lien généré reste le vrai lien Firebase
+  /// (`Admin SDK generatePasswordResetLink`, backend uniquement) ; seul
+  /// l'envoi change. Pas de token Firebase à ce stade (utilisateur
+  /// déconnecté) : appel HTTP direct, pas `BackendClient` (qui exige un
+  /// utilisateur connecté).
   Future<void> _resetPassword() async {
     final email = _emailCtrl.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -234,17 +246,26 @@ class _AuthScreenState extends State<AuthScreen> {
       _error = null;
     });
     try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
+      final response = await http
+          .post(
+            Uri.parse('${AppConfig.backendUrl}/api/notify/reset-password'),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode({'email': email}),
+          )
+          .timeout(const Duration(seconds: 20));
       if (mounted) {
         setState(() {
-          _resetSent = true;
+          _resetSent = response.statusCode == 200;
+          _error = response.statusCode == 200
+              ? null
+              : 'Une erreur est survenue. Réessaie.';
           _loading = false;
         });
       }
-    } on FirebaseAuthException {
+    } catch (_) {
       if (mounted) {
         setState(() {
-          _error = 'Email introuvable.';
+          _error = 'Une erreur est survenue. Réessaie.';
           _loading = false;
         });
       }

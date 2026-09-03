@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { FieldValue } from 'firebase-admin/firestore'
 import { requireAuth } from '../../lib/verify'
-import { db, messaging } from '../../lib/firebase'
+import { auth, db, messaging } from '../../lib/firebase'
 import { presignGet } from '../../lib/r2'
 import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
 import { row, wrap } from '../email/order'
@@ -24,6 +24,15 @@ import { row, wrap } from '../email/order'
 //                                    reçu ma commande" sur le suivi) — passe
 //                                    la commande en statut 'archived' et
 //                                    prévient l'admin par mail.
+//   POST /api/notify/reset-password → lien de réinitialisation de mot de
+//                                    passe, envoyé via Resend au lieu du
+//                                    relai email par défaut de Firebase Auth
+//                                    (peu fiable — atterrit souvent en spam
+//                                    ou n'arrive jamais, domaine d'envoi
+//                                    partagé entre des millions de projets
+//                                    Firebase). Non authentifié (l'utilisateur
+//                                    n'est PAS connecté à ce moment) — ne
+//                                    JAMAIS révéler si le compte existe.
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
 // plafonne à 12 fonctions serverless.
@@ -414,6 +423,49 @@ async function handleOrderReceived(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, sent })
 }
 
+/** Génère le vrai lien de réinitialisation Firebase (Admin SDK — même
+ * mécanisme que l'envoi automatique de Firebase, juste pas son email) et
+ * l'envoie via Resend. Réponse 200 identique que le compte existe ou non :
+ * révéler l'inexistence d'un compte par ce biais est une fuite classique
+ * (email enumeration) — Firebase Auth a la même protection activée sur ce
+ * projet (`emailPrivacyConfig.enableImprovedEmailPrivacy`). */
+async function handleResetPassword(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+
+  const email = ((req.body?.email ?? '') as string).trim()
+  if (!email || !email.includes('@')) {
+    return res.status(400).json({ error: 'Email invalide' })
+  }
+
+  try {
+    const link = await auth.generatePasswordResetLink(email)
+    const html = wrap(`
+      <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">
+        Voici ton lien pour réinitialiser ton mot de passe Carnet 👇
+      </p>
+      <p style="margin:0 0 20px;">
+        <a href="${link}"
+           style="display:inline-block;background:#4a7c59;color:#fff;padding:12px 24px;
+                  border-radius:8px;text-decoration:none;font-weight:600;">
+          Réinitialiser mon mot de passe
+        </a>
+      </p>
+      <p style="margin:0;font-size:13px;color:#888;line-height:1.6;">
+        Si tu n'es pas à l'origine de cette demande, ignore simplement ce mail —
+        rien ne se passera.
+      </p>
+    `)
+    await sendEmail({ to: email, subject: 'Réinitialise ton mot de passe — Carnet', html })
+  } catch (e: any) {
+    // 'auth/user-not-found' : silencieux, volontaire (voir doc ci-dessus).
+    if (e?.code !== 'auth/user-not-found') {
+      console.error('[notify/reset-password]', e)
+    }
+  }
+
+  return res.status(200).json({ ok: true })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
@@ -422,6 +474,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'send-now') return handleSendNow(req, res)
   if (action === 'orders-pending') return handleOrdersPending(req, res)
   if (action === 'order-received') return handleOrderReceived(req, res)
+  if (action === 'reset-password') return handleResetPassword(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }
