@@ -3,6 +3,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/tag_service.dart';
 import 'share_tag_sheet.dart';
+import 'tag_picker_sheet.dart';
 
 /// Vue d'ensemble : quels tags (à moi) sont partagés, et avec qui — point
 /// d'entrée central au partage depuis le dashboard. Avant, il fallait
@@ -12,7 +13,14 @@ class SharedTagsSheet extends StatefulWidget {
   /// Déjà filtrés par l'appelant : tags dont je suis propriétaire ET
   /// effectivement partagés (sharedWith non vide) — voir home_screen.dart.
   final List<TagModel> tags;
-  const SharedTagsSheet({super.key, required this.tags});
+
+  /// TOUS mes tags (partagés ou non) — source du sélecteur « Partager un
+  /// nouveau tag ». Avant, la seule façon de démarrer un NOUVEAU partage
+  /// était de deviner qu'il fallait aller filtrer par tag dans « Mes
+  /// souvenirs » : cette feuille ne montrait que les tags déjà partagés,
+  /// sans aucun moyen d'en partager un de plus depuis ici.
+  final List<TagModel> ownedTags;
+  const SharedTagsSheet({super.key, required this.tags, required this.ownedTags});
 
   @override
   State<SharedTagsSheet> createState() => _SharedTagsSheetState();
@@ -47,6 +55,22 @@ class _SharedTagsSheetState extends State<SharedTagsSheet> {
     final info = _collabs[uid];
     if (info == null) return uid;
     return info.displayName.isNotEmpty ? info.displayName : info.email;
+  }
+
+  Future<void> _shareNewTag() async {
+    final selected = await showTagPickerSheet(
+      context,
+      tags: widget.ownedTags,
+      initialLabels: const {},
+      title: 'Quel tag partager ?',
+    );
+    if (selected == null || selected.isEmpty || !mounted) return;
+    final toShare = widget.ownedTags
+        .where((t) => selected.contains(t.label.trim()))
+        .toList();
+    if (toShare.isEmpty || !mounted) return;
+    Navigator.pop(context);
+    showShareTagSheet(context, toShare);
   }
 
   @override
@@ -84,13 +108,26 @@ class _SharedTagsSheetState extends State<SharedTagsSheet> {
               'Qui voit quoi — tape un tag pour renvoyer le lien.',
               style: TextStyle(fontSize: 12.5, color: AppColors.textMedium),
             ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: widget.ownedTags.isEmpty ? null : _shareNewTag,
+                icon: const Icon(Icons.add, size: 18),
+                label: const Text('Partager un nouveau tag'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.sageDark,
+                  side: const BorderSide(color: AppColors.sageDark),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                ),
+              ),
+            ),
             const SizedBox(height: 16),
             if (widget.tags.isEmpty)
               const Padding(
-                padding: EdgeInsets.symmetric(vertical: 20),
+                padding: EdgeInsets.symmetric(vertical: 12),
                 child: Text(
-                  'Aucun tag partagé pour l\'instant — partage-en un depuis '
-                  'le filtre par tag.',
+                  'Aucun tag partagé pour l\'instant.',
                   style: TextStyle(color: AppColors.textMedium, fontSize: 13.5),
                 ),
               )

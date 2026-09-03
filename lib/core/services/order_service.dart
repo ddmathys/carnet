@@ -137,6 +137,22 @@ class OrderService {
     return data;
   }
 
+  /// Le client confirme avoir reçu sa commande expédiée ("J'ai bien reçu ma
+  /// commande") : passe le statut à 'archived' côté backend (Admin SDK — le
+  /// client n'a pas le droit d'écrire `orders` directement, voir
+  /// firestore.rules) et prévient l'admin par mail. Lève une exception si le
+  /// backend refuse (commande pas encore expédiée, ou pas la sienne).
+  static Future<void> confirmDelivery(String orderId) async {
+    final data = await BackendClient.postJson(
+      '/api/notify/order-received',
+      {'orderId': orderId},
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? 'Échec de la confirmation');
+    }
+  }
+
   /// Relit le vrai statut d'une commande chez Prodigi (admin, ou le client
   /// pour la sienne) — utile pour un rafraîchissement manuel sans attendre
   /// le cron quotidien.

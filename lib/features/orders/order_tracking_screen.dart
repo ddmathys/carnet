@@ -385,6 +385,7 @@ class _PrintStatusBanner extends StatefulWidget {
 
 class _PrintStatusBannerState extends State<_PrintStatusBanner> {
   bool _checking = false;
+  bool _confirmingReceived = false;
 
   /// Au-delà de ce délai depuis la dernière relecture, on redemande le statut
   /// à Prodigi dès l'ouverture de l'écran. Le cron backend ne passe qu'une
@@ -428,9 +429,29 @@ class _PrintStatusBannerState extends State<_PrintStatusBanner> {
     }
   }
 
+  Future<void> _confirmReceived() async {
+    setState(() => _confirmingReceived = true);
+    try {
+      await OrderService.confirmDelivery(widget.order.id);
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Erreur : ${e.toString().replaceFirst('Exception: ', '')}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _confirmingReceived = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final o = widget.order;
+    // 'archived' : le client a déjà confirmé — `printStage` (statut Prodigi
+    // brut) reste 'shipped' pour toujours après ça, donc ce cas doit être
+    // vérifié EN PREMIER, sinon la carte "En route vers toi" ne disparaît
+    // jamais après confirmation.
+    if (o.isDelivered) return _delivered();
     switch (o.printStage) {
       case 'error':
         return _blocked(
@@ -445,6 +466,28 @@ class _PrintStatusBannerState extends State<_PrintStatusBanner> {
       default:
         return const SizedBox.shrink();
     }
+  }
+
+  Widget _delivered() {
+    return _card(
+      accent: AppColors.success,
+      children: const [
+        Row(
+          children: [
+            Icon(Icons.check_circle, size: 18, color: AppColors.success),
+            SizedBox(width: 10),
+            Expanded(
+              child: Text('Reçue, merci !',
+                  style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textDark)),
+            ),
+          ],
+        ),
+        SizedBox(height: 10),
+      ],
+    );
   }
 
   // ── En cours chez l'imprimeur ──────────────────────────────────────────
@@ -542,6 +585,26 @@ class _PrintStatusBannerState extends State<_PrintStatusBanner> {
               fontSize: 11.5, color: AppColors.textMedium, height: 1.4),
         ),
         _refreshRow(o),
+        const SizedBox(height: 8),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            onPressed: _confirmingReceived ? null : _confirmReceived,
+            icon: _confirmingReceived
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.check_circle_outline, size: 18),
+            label: const Text('J\'ai bien reçu ma commande'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.success,
+              side: const BorderSide(color: AppColors.success),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
       ],
     );
   }

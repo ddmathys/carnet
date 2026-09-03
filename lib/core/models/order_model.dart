@@ -210,12 +210,17 @@ class OrderModel {
     'received': 'Commande reçue',
     'paid':     'Payée',
     'shipped':  'Expédiée',
+    // 'archived' : le client a confirmé avoir reçu son colis (bouton "J'ai
+    // bien reçu ma commande") — état terminal, non affiché dans le suivi
+    // client (voir statusFlow) mais visible en console admin.
+    'archived': 'Archivée',
   };
 
   static const _statusEmojis = {
     'received': '📬',
     'paid':     '💚',
     'shipped':  '📦',
+    'archived': '✅',
   };
 
   /// Sous-titre de chaque étape du suivi client — dit ce qu'il se passe
@@ -224,6 +229,7 @@ class OrderModel {
     'received': 'On a reçu ta commande, en attente du paiement.',
     'paid':     'Paiement confirmé — direction l\'atelier d\'impression.',
     'shipped':  'Le colis a quitté l\'atelier, suis-le avec le numéro ci-dessous.',
+    'archived': 'Reçue, merci !',
   };
 
   // Ordered list pour le suivi client : volontairement réduit à 3 étapes.
@@ -231,13 +237,28 @@ class OrderModel {
   // déclenche l'impression, puis l'expédition ("Expédiée"), désormais
   // avancée automatiquement dès que Prodigi signale un colis parti
   // (voir refreshProdigiOrderStatus dans backend/lib/prodigi.ts).
+  // 'archived' (client confirme réception) N'EN FAIT PAS PARTIE : c'est un
+  // état terminal après 'shipped', pas une 4ᵉ étape à afficher dans le
+  // suivi — voir statusIndex/isDelivered ci-dessous et adminStatuses pour la
+  // console admin, qui elle doit pouvoir le sélectionner.
   static const statusFlow = [
     'received',
     'paid',
     'shipped',
   ];
 
-  int get statusIndex => statusFlow.indexOf(status);
+  /// Comme [statusFlow], + 'archived' — pour la console admin (filtre et
+  /// sélecteur de statut), qui a besoin de voir/choisir cet état terminal.
+  static const adminStatuses = [...statusFlow, 'archived'];
+
+  // 'archived' n'est pas dans statusFlow (voir plus haut) : on le traite
+  // comme "au moins aussi avancé que la dernière étape" pour que le suivi
+  // client affiche encore les 3 étapes comme terminées plutôt que rien.
+  int get statusIndex =>
+      statusFlow.contains(status) ? statusFlow.indexOf(status) : statusFlow.length - 1;
+
+  /// Le client a confirmé avoir reçu son colis.
+  bool get isDelivered => status == 'archived';
 
   bool get prodigiHasError => prodigiStatus == 'error';
   int get prodigiRetriesLeft => (3 - prodigiRetryCount).clamp(0, 3);

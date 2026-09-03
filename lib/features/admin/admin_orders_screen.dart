@@ -52,7 +52,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
             child: Row(
               children: [
                 _FilterChip('Toutes', 'all', _filter, (v) => setState(() => _filter = v)),
-                ...OrderModel.statusFlow.map((s) => _FilterChip(
+                ...OrderModel.adminStatuses.map((s) => _FilterChip(
                   _statusShort(s), s, _filter, (v) => setState(() => _filter = v))),
               ],
             ),
@@ -117,6 +117,7 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
     'received' => 'Reçues',
     'paid'     => 'Payées',
     'shipped'  => 'Expédiées',
+    'archived' => 'Archivées',
     _ => s,
   };
 }
@@ -416,7 +417,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6, runSpacing: 6,
-                    children: OrderModel.statusFlow.map((s) {
+                    children: OrderModel.adminStatuses.map((s) {
                       final sel = _selectedStatus == s;
                       return GestureDetector(
                         onTap: () => setState(() => _selectedStatus = s),

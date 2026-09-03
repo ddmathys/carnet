@@ -626,14 +626,14 @@ class _HomeScreenState extends State<HomeScreen> {
   /// backend pour créer un lien d'invitation).
   void _showSharedTagsSheet(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid ?? '';
-    final owned = _myTags
-        .where((t) => t.isOwner(uid) && t.sharedWith.isNotEmpty)
-        .toList();
+    final ownedAll = _myTags.where((t) => t.isOwner(uid)).toList();
+    final owned =
+        ownedAll.where((t) => t.sharedWith.isNotEmpty).toList();
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      builder: (_) => SharedTagsSheet(tags: owned),
+      builder: (_) => SharedTagsSheet(tags: owned, ownedTags: ownedAll),
     );
   }
 
@@ -793,7 +793,7 @@ class _HeroGreeting extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('$greeting 👋',
+          Text(greeting,
               style: const TextStyle(
                 fontFamily: 'Fraunces',
                 fontSize: 28,
@@ -1418,7 +1418,10 @@ class _ActiveOrdersBanner extends StatelessWidget {
   final String uid;
   const _ActiveOrdersBanner({required this.uid});
 
-  static const _doneStatuses = {'paid'};
+  // 'archived' = le client a confirmé avoir reçu son colis (voir
+  // order_tracking_screen.dart, bouton "J'ai bien reçu ma commande") — sans
+  // ça, une commande 'shipped' restait "en cours" indéfiniment, même reçue.
+  static const _doneStatuses = {'paid', 'archived'};
 
   @override
   Widget build(BuildContext context) {

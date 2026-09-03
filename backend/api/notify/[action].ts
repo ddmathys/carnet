@@ -19,6 +19,11 @@ import { row, wrap } from '../email/order'
 //                                    reçues mais pas encore marquées payées —
 //                                    pour ne pas laisser un client sans réponse
 //                                    (cron only, voir vercel.json).
+//   POST /api/notify/order-received → le CLIENT confirme avoir reçu sa
+//                                    commande expédiée (bouton "J'ai bien
+//                                    reçu ma commande" sur le suivi) — passe
+//                                    la commande en statut 'archived' et
+//                                    prévient l'admin par mail.
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
 // plafonne à 12 fonctions serverless.
@@ -352,6 +357,63 @@ async function handleOrdersPending(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, pending: count, sent })
 }
 
+/** Le client confirme avoir reçu sa commande expédiée : passe la commande en
+ * 'archived' (elle sort de la bannière "commandes en cours" du dashboard) et
+ * prévient l'admin par mail — la console admin affiche ensuite le nouveau
+ * statut sans action manuelle nécessaire. Refuse si la commande n'appartient
+ * pas à l'appelant, ou si elle n'est pas (encore) au statut 'shipped' — on ne
+ * veut pas qu'un client archive une commande pas encore expédiée par erreur. */
+async function handleOrderReceived(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const user = await requireAuth(req, res)
+  if (!user) return
+
+  const orderId = (req.body?.orderId ?? '') as string
+  if (!orderId) return res.status(400).json({ error: 'Missing orderId' })
+
+  const ref = db.collection('orders').doc(orderId)
+  const snap = await ref.get()
+  if (!snap.exists) return res.status(404).json({ error: 'Commande introuvable' })
+  const order = snap.data() as Record<string, any>
+  if (order.userId !== user.uid) {
+    return res.status(403).json({ error: 'Cette commande ne t\'appartient pas' })
+  }
+  if (order.status !== 'shipped') {
+    return res.status(400).json({ error: 'Cette commande n\'est pas (encore) expédiée' })
+  }
+
+  await ref.update({
+    status: 'archived',
+    archivedAt: FieldValue.serverTimestamp(),
+    archivedBy: 'client',
+    updatedAt: FieldValue.serverTimestamp(),
+  })
+
+  const ref8 = `#${orderId.slice(0, 8).toUpperCase()}`
+  const item =
+    order.productType === 'poster'
+      ? `Tirage ${String(order.posterSize ?? '')}`
+      : String(order.bookTitle ?? 'Livre')
+  const html = wrap(`
+    <p style="margin:0 0 16px;font-size:16px;color:#2d2d2d;">
+      ✅ ${item} (${ref8}) confirmée reçue par le client.
+    </p>
+    ${row('Client', `${order.firstName ?? ''} ${order.lastName ?? ''}`.trim() || order.userEmail || '—')}
+    ${row('Commande', ref8)}
+    <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
+      Statut mis à jour automatiquement en « Archivée » dans la console admin —
+      rien à faire de ton côté, sauf si quelque chose cloche.
+    </p>
+  `)
+  const sent = await sendEmail({
+    to: ADMIN_EMAIL,
+    subject: `✅ Commande ${ref8} reçue par le client`,
+    html,
+  })
+
+  return res.status(200).json({ ok: true, sent })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
@@ -359,6 +421,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'test') return handleTest(req, res)
   if (action === 'send-now') return handleSendNow(req, res)
   if (action === 'orders-pending') return handleOrdersPending(req, res)
+  if (action === 'order-received') return handleOrderReceived(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }
