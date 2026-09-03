@@ -1,7 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
-/// Une activité (ajout de médias) sur un souvenir partagé, à faire valider
-/// (accusé de lecture) par chaque destinataire indépendamment — voir
+/// Une activité (médias ajoutés et/ou supprimés) sur un souvenir, à faire
+/// valider (accusé de lecture) par chaque destinataire indépendamment — voir
 /// [[project_bloom]] / audit du 03.09.26 : Karin ajoutait des photos sans
 /// jamais savoir si c'était bien enregistré, et David n'était pas prévenu.
 class MemoryActivityModel {
@@ -9,12 +9,16 @@ class MemoryActivityModel {
   final String memoryId;
   final String memoryTitle;
   /// 'created' (nouveau souvenir sur un tag partagé) ou 'edited' (médias
-  /// ajoutés à un souvenir existant).
+  /// ajoutés et/ou supprimés sur un souvenir existant).
   final String kind;
   final String actorUid;
   final String actorLabel;
   final int photosAdded;
   final int videosAdded;
+  /// Médias supprimés lors de CETTE modification (0 par défaut — champ
+  /// absent sur les activités créées avant son ajout, toujours 0 pour 'created').
+  final int photosRemoved;
+  final int videosRemoved;
   /// Qui doit voir cette activité — propriétaire + collaborateurs du
   /// souvenir AU MOMENT de l'action (figé, ne suit pas les partages
   /// ultérieurs, comme les autres snapshots de ce genre dans l'app).
@@ -33,6 +37,8 @@ class MemoryActivityModel {
     required this.actorLabel,
     required this.photosAdded,
     required this.videosAdded,
+    this.photosRemoved = 0,
+    this.videosRemoved = 0,
     required this.recipients,
     required this.seenBy,
     required this.createdAt,
@@ -51,6 +57,8 @@ class MemoryActivityModel {
       actorLabel: d['actorLabel'] ?? '',
       photosAdded: (d['photosAdded'] as num?)?.toInt() ?? 0,
       videosAdded: (d['videosAdded'] as num?)?.toInt() ?? 0,
+      photosRemoved: (d['photosRemoved'] as num?)?.toInt() ?? 0,
+      videosRemoved: (d['videosRemoved'] as num?)?.toInt() ?? 0,
       recipients: List<String>.from(d['recipients'] ?? const []),
       seenBy: List<String>.from(d['seenBy'] ?? const []),
       createdAt: (d['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),

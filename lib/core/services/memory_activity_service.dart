@@ -23,6 +23,8 @@ class MemoryActivityService {
     required String kind,
     required int photosAdded,
     required int videosAdded,
+    int photosRemoved = 0,
+    int videosRemoved = 0,
     required List<String> recipients,
   }) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -39,6 +41,8 @@ class MemoryActivityService {
         'actorLabel': label,
         'photosAdded': photosAdded,
         'videosAdded': videosAdded,
+        'photosRemoved': photosRemoved,
+        'videosRemoved': videosRemoved,
         'recipients': recipients,
         'seenBy': <String>[],
         'createdAt': FieldValue.serverTimestamp(),

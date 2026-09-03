@@ -1390,19 +1390,28 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       if (mounted) context.go('/memories');
 
       // Fil d'activité (bannière dashboard) : confirme à l'auteur (et aux
-      // collaborateurs éventuels) qu'un souvenir a reçu des médias — souvenir
-      // partagé ou perso, toujours notifié (voir MemoryActivityService).
-      // `_localPhotos`/`_localVideoPaths` = médias LOCAUX ajoutés dans CETTE
-      // sauvegarde (delta), pas le total du souvenir.
+      // collaborateurs éventuels) qu'un souvenir a reçu OU perdu des médias —
+      // souvenir partagé ou perso, toujours notifié (voir
+      // MemoryActivityService). `_localPhotos`/`_localVideoPaths` = médias
+      // LOCAUX ajoutés dans CETTE sauvegarde (delta) ; `_removedPhotoUrls`/
+      // `_removedPhotoKeys`/`_removedVideoKeys` = médias existants retirés
+      // dans CETTE sauvegarde (édition seulement) — pas le total du souvenir.
       final photosAdded = _localPhotos.length;
       final videosAdded = _localVideoPaths.length;
-      if (photosAdded > 0 || videosAdded > 0) {
+      final photosRemoved = _removedPhotoUrls.length + _removedPhotoKeys.length;
+      final videosRemoved = _removedVideoKeys.length;
+      if (photosAdded > 0 ||
+          videosAdded > 0 ||
+          photosRemoved > 0 ||
+          videosRemoved > 0) {
         MemoryActivityService.record(
           memoryId: memoryId,
           memoryTitle: titleValue,
           kind: _isEditing ? 'edited' : 'created',
           photosAdded: photosAdded,
           videosAdded: videosAdded,
+          photosRemoved: photosRemoved,
+          videosRemoved: videosRemoved,
           recipients: {...sharedWith, ownerUid, uid}.toList(),
         );
       }

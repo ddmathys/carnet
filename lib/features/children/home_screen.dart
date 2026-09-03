@@ -199,8 +199,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
         SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
 
-        _ActiveOrdersBanner(uid: FirebaseAuth.instance.currentUser?.uid ?? ''),
-
         if (!hasMemories) ...[
           // Pas encore de souvenir : le geste principal reste visible tout de
           // suite, avant l'état vide qui explique quoi faire.
@@ -210,21 +208,19 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           const SliverToBoxAdapter(child: _EmptyState()),
         ] else ...[
-          // 1) Le filtre par tags (date / lieu / événement), le geste
-          // principal (importer) tout en haut de cette section — plus
-          // intuitif qu'un bandeau séparé au-dessus, qui se lisait comme
-          // détaché de « mes souvenirs » plutôt que comme le moyen d'en
-          // ajouter un — puis les souvenirs.
+          // 1) Le geste principal (importer) au-dessus du titre de la
+          // section, puis le filtre par tags (date / lieu / événement), puis
+          // les souvenirs.
+          SliverToBoxAdapter(
+            child: ImportMediaCta(
+                onTap: () => context.push('/memory/new?import=1')),
+          ),
           _sectionHeader(
             _filterLabels.isEmpty
                 ? 'Mes derniers souvenirs'
                 : 'Souvenirs filtrés',
             'Tout voir',
             onAction: () => context.push('/memories'),
-          ),
-          SliverToBoxAdapter(
-            child: ImportMediaCta(
-                onTap: () => context.push('/memory/new?import=1')),
           ),
           SliverToBoxAdapter(child: _filterBar(context)),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
@@ -473,41 +469,63 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   /// Section « Mes livres » (titre + étagère) : PDF générés et livres
-  /// commandés, du plus récent au plus ancien. N'affiche RIEN (pas même le
-  /// titre) tant qu'il n'y a aucun livre.
+  /// commandés, du plus récent au plus ancien. Regroupe aussi juste sous le
+  /// titre le bandeau « commande(s) en cours » — avant, il flottait tout en
+  /// haut du dashboard, sans lien visuel avec les livres/tirages qu'il
+  /// concerne (demande explicite : consolider au même endroit, 03.09.26).
+  /// N'affiche RIEN (pas même le titre) s'il n'y a ni livre ni commande en
+  /// cours — mais le titre reste affiché pour une commande en cours même
+  /// sans livre encore listé (ex. tirage seul, ou livre pas encore généré).
   Widget _booksSection(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
     return StreamBuilder<List<GeneratedBookModel>>(
       stream: BookHistoryService.streamForUser(),
-      builder: (context, snap) {
-        final books = snap.data ?? const <GeneratedBookModel>[];
-        if (books.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionHeaderInline('Mes livres', 'Tout voir',
-                onAction: () => context.push('/books')),
-            SizedBox(
-              height: 176,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
-                itemCount: books.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 14),
-                itemBuilder: (_, i) => _BookCard(
-                  book: books[i],
-                  // Avant : renvoyait toujours vers la LISTE (/books) au lieu
-                  // du livre tapé — incohérent avec _PosterCard, qui lui
-                  // ouvre bien SA commande. Même geste que
-                  // book_history_screen.dart::_open (trouvé à l'audit UX du
-                  // 03.09.26).
-                  onTap: () => Navigator.of(context).push(MaterialPageRoute(
-                    builder: (_) => PdfViewerScreen(
-                        title: books[i].title, url: books[i].pdfUrl),
-                  )),
-                ),
-              ),
-            ),
-          ],
+      builder: (context, bookSnap) {
+        final books = bookSnap.data ?? const <GeneratedBookModel>[];
+        return StreamBuilder<List<OrderModel>>(
+          stream: uid == null
+              ? const Stream<List<OrderModel>>.empty()
+              : OrderService.userOrdersStream(uid),
+          builder: (context, orderSnap) {
+            final activeOrders = (orderSnap.data ?? const <OrderModel>[])
+                .where((o) => !_activeOrderDoneStatuses.contains(o.status))
+                .toList();
+            if (books.isEmpty && activeOrders.isEmpty) {
+              return const SizedBox.shrink();
+            }
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _sectionHeaderInline('Mes livres', 'Tout voir',
+                    onAction: () => context.push('/books')),
+                if (activeOrders.isNotEmpty)
+                  _ActiveOrdersCard(orders: activeOrders),
+                if (books.isNotEmpty)
+                  SizedBox(
+                    height: 176,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+                      itemCount: books.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 14),
+                      itemBuilder: (_, i) => _BookCard(
+                        book: books[i],
+                        // Avant : renvoyait toujours vers la LISTE (/books) au
+                        // lieu du livre tapé — incohérent avec _PosterCard,
+                        // qui lui ouvre bien SA commande. Même geste que
+                        // book_history_screen.dart::_open (trouvé à l'audit
+                        // UX du 03.09.26).
+                        onTap: () =>
+                            Navigator.of(context).push(MaterialPageRoute(
+                          builder: (_) => PdfViewerScreen(
+                              title: books[i].title, url: books[i].pdfUrl),
+                        )),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
         );
       },
     );
@@ -1427,7 +1445,8 @@ class _EmptyState extends StatelessWidget {
 
 // ── Fil d'activité (souvenirs partagés) ──────────────────────────────────────
 
-/// "Karin a ajouté 3 photos à « Vacances »" — une carte par activité non
+/// "Karin a ajouté 3 photos à « Vacances »" (ou "a supprimé 2 photos de",
+/// ajout et suppression pouvant se combiner) — une carte par activité non
 /// encore validée, tout en haut du dashboard. Chaque destinataire (l'auteur
 /// du geste compris) valide de son côté ; ça n'affecte personne d'autre.
 class _ActivityBanner extends StatelessWidget {
@@ -1461,7 +1480,7 @@ class _ActivityCard extends StatelessWidget {
   final MemoryActivityModel activity;
   const _ActivityCard({required this.activity});
 
-  String get _mediaLabel {
+  String get _addedLabel {
     final parts = <String>[];
     if (activity.photosAdded > 0) {
       parts.add(
@@ -1474,10 +1493,35 @@ class _ActivityCard extends StatelessWidget {
     return parts.join(' et ');
   }
 
+  String get _removedLabel {
+    final parts = <String>[];
+    if (activity.photosRemoved > 0) {
+      parts.add(
+          '${activity.photosRemoved} photo${activity.photosRemoved > 1 ? 's' : ''}');
+    }
+    if (activity.videosRemoved > 0) {
+      parts.add(
+          '${activity.videosRemoved} vidéo${activity.videosRemoved > 1 ? 's' : ''}');
+    }
+    return parts.join(' et ');
+  }
+
   String get _title =>
       activity.memoryTitle.isNotEmpty ? activity.memoryTitle : 'un souvenir';
 
-  String get _verb => activity.isCreated ? 'a créé un souvenir avec' : 'a ajouté';
+  /// Verbe + médias + préposition avant le titre — varie selon que
+  /// l'activité est un ajout, une suppression, ou (rare, mais possible en
+  /// éditant) les deux à la fois dans la même sauvegarde.
+  String get _actionText {
+    final added = _addedLabel;
+    final removed = _removedLabel;
+    if (activity.isCreated) return 'a créé un souvenir avec $added à';
+    if (added.isNotEmpty && removed.isNotEmpty) {
+      return 'a ajouté $added et supprimé $removed sur';
+    }
+    if (removed.isNotEmpty) return 'a supprimé $removed de';
+    return 'a ajouté $added à';
+  }
 
   String get _relativeTime {
     final diff = DateTime.now().difference(activity.createdAt);
@@ -1520,7 +1564,7 @@ class _ActivityCard extends StatelessWidget {
                             text: activity.actorLabel,
                             style:
                                 const TextStyle(fontWeight: FontWeight.w700)),
-                        TextSpan(text: ' $_verb $_mediaLabel à « '),
+                        TextSpan(text: ' $_actionText « '),
                         TextSpan(
                             text: _title,
                             style:
@@ -1555,73 +1599,61 @@ class _ActivityCard extends StatelessWidget {
 
 // ── Bannière commandes en cours ──────────────────────────────────────────────
 
-class _ActiveOrdersBanner extends StatelessWidget {
-  final String uid;
-  const _ActiveOrdersBanner({required this.uid});
+// 'archived' = le client a confirmé avoir reçu son colis (voir
+// order_tracking_screen.dart, bouton "J'ai bien reçu ma commande") — sans ça,
+// une commande 'shipped' restait "en cours" indéfiniment, même reçue.
+const _activeOrderDoneStatuses = {'paid', 'archived'};
 
-  // 'archived' = le client a confirmé avoir reçu son colis (voir
-  // order_tracking_screen.dart, bouton "J'ai bien reçu ma commande") — sans
-  // ça, une commande 'shipped' restait "en cours" indéfiniment, même reçue.
-  static const _doneStatuses = {'paid', 'archived'};
+/// Carte « N commande(s) en cours », affichée sous le titre « Mes livres »
+/// (voir `_booksSection`) — regroupée là plutôt qu'en bandeau flottant tout
+/// en haut du dashboard, pour rester au même endroit que ce qu'elle concerne.
+class _ActiveOrdersCard extends StatelessWidget {
+  final List<OrderModel> orders;
+  const _ActiveOrdersCard({required this.orders});
 
   @override
   Widget build(BuildContext context) {
-    if (uid.isEmpty) return const SliverToBoxAdapter(child: SizedBox.shrink());
-    return SliverToBoxAdapter(
-      child: StreamBuilder<List<OrderModel>>(
-        stream: OrderService.userOrdersStream(uid),
-        builder: (context, snap) {
-          if (!snap.hasData) return const SizedBox.shrink();
-          final active = snap.data!
-              .where((o) => !_doneStatuses.contains(o.status))
-              .toList();
-          if (active.isEmpty) return const SizedBox.shrink();
-
-          return GestureDetector(
-            onTap: () => context.push('/orders'),
-            child: Container(
-              margin: const EdgeInsets.fromLTRB(20, 12, 20, 4),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: AppColors.amber.withOpacity(0.08),
-                borderRadius: BorderRadius.circular(14),
-                border:
-                    Border.all(color: AppColors.amber.withOpacity(0.35), width: 1),
-              ),
-              child: Row(
+    return GestureDetector(
+      onTap: () => context.push('/orders'),
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.amber.withOpacity(0.08),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: AppColors.amber.withOpacity(0.35), width: 1),
+        ),
+        child: Row(
+          children: [
+            const Text('📦', style: TextStyle(fontSize: 22)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('📦', style: TextStyle(fontSize: 22)),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${active.length} commande${active.length > 1 ? 's' : ''} en cours',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 14,
-                            color: AppColors.textDark,
-                          ),
-                        ),
-                        Text(
-                          active.first.statusLabel,
-                          style: const TextStyle(
-                              fontSize: 12, color: AppColors.textMedium),
-                        ),
-                      ],
+                  Text(
+                    '${orders.length} commande${orders.length > 1 ? 's' : ''} en cours',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 14,
+                      color: AppColors.textDark,
                     ),
                   ),
-                  const Text('Voir →',
-                      style: TextStyle(
-                          color: AppColors.amber,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13)),
+                  Text(
+                    orders.first.statusLabel,
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMedium),
+                  ),
                 ],
               ),
             ),
-          );
-        },
+            const Text('Voir →',
+                style: TextStyle(
+                    color: AppColors.amber,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13)),
+          ],
+        ),
       ),
     );
   }
