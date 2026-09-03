@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
@@ -8,8 +9,11 @@ import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../core/config/app_config.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/models/generated_book_model.dart';
 import '../../core/models/order_model.dart';
+import '../../core/services/book_history_service.dart';
 import '../../core/services/order_service.dart';
+import '../../core/services/photo_service.dart';
 
 class OrdersListScreen extends StatelessWidget {
   const OrdersListScreen({super.key});
@@ -56,10 +60,28 @@ class OrdersListScreen extends StatelessWidget {
               ),
             );
           }
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: orders.length,
-            itemBuilder: (_, i) => _OrderCard(order: orders[i]),
+          // Photo de couverture d'une commande LIVRE : pas stockée sur la
+          // commande elle-même (contrairement au tirage, voir
+          // OrderModel.posterPhotoKey) mais sur l'entrée `generatedBooks`
+          // correspondante (`GeneratedBookModel.orderId`) — un 2ᵉ flux, jointe
+          // côté client par id de commande.
+          return StreamBuilder<List<GeneratedBookModel>>(
+            stream: BookHistoryService.streamForUser(),
+            builder: (context, bookSnap) {
+              final coverByOrderId = <String, GeneratedBookModel>{
+                for (final b in bookSnap.data ?? const <GeneratedBookModel>[])
+                  if (b.orderId != null && b.orderId!.isNotEmpty)
+                    b.orderId!: b,
+              };
+              return ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: orders.length,
+                itemBuilder: (_, i) => _OrderCard(
+                  order: orders[i],
+                  coverBook: coverByOrderId[orders[i].id],
+                ),
+              );
+            },
           );
         },
       ),
@@ -155,7 +177,11 @@ class OrderDetailScreen extends StatelessWidget {
 
 class _OrderCard extends StatelessWidget {
   final OrderModel order;
-  const _OrderCard({required this.order});
+  /// Entrée `generatedBooks` correspondante (livre uniquement) — pour la
+  /// vignette photo, voir `_OrderThumb`. Null pour un tirage (qui porte sa
+  /// propre photo directement sur la commande) ou si rien n'a été retrouvé.
+  final GeneratedBookModel? coverBook;
+  const _OrderCard({required this.order, this.coverBook});
 
   @override
   Widget build(BuildContext context) {
@@ -171,7 +197,7 @@ class _OrderCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Text(order.statusEmoji, style: const TextStyle(fontSize: 28)),
+            _OrderThumb(order: order, coverBook: coverBook),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -225,6 +251,70 @@ class _OrderCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Vignette d'une commande : la photo de couverture (livre) ou "en vedette"
+/// (tirage) en plein cadre, comme sur les étagères "Mes livres"/"Mes
+/// tirages" du dashboard (même principe que `_CoverThumb`/`_PosterThumb`
+/// dans home_screen.dart) — pour reconnaître une commande au premier coup
+/// d'œil plutôt qu'au titre/à la date seuls. Repli sur l'emoji de statut
+/// (dégradé de la couleur du produit) quand aucune photo n'est disponible :
+/// commande sans couverture choisie, ou (livre) aucune entrée
+/// `generatedBooks` retrouvée pour les commandes les plus anciennes.
+class _OrderThumb extends StatelessWidget {
+  final OrderModel order;
+  final GeneratedBookModel? coverBook;
+  const _OrderThumb({required this.order, this.coverBook});
+
+  @override
+  Widget build(BuildContext context) {
+    final photoKey =
+        order.isPoster ? order.posterPhotoKey : coverBook?.coverPhotoKey;
+    final photoUrl =
+        order.isPoster ? order.posterPhotoUrl : coverBook?.coverPhotoUrl;
+
+    return Container(
+      width: 52,
+      height: 52,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(borderRadius: BorderRadius.circular(12)),
+      child: _resolve(photoKey, photoUrl),
+    );
+  }
+
+  Widget _resolve(String? photoKey, String? photoUrl) {
+    if (photoKey != null && photoKey.isNotEmpty) {
+      return FutureBuilder<Map<String, String>>(
+        future: PhotoService.signOwnPhotoKeys([photoKey]),
+        builder: (context, snap) {
+          final url = snap.data?[photoKey];
+          return url != null ? _photo(url) : _fallback();
+        },
+      );
+    }
+    if (photoUrl != null && photoUrl.isNotEmpty) return _photo(photoUrl);
+    return _fallback();
+  }
+
+  Widget _photo(String url) => CachedNetworkImage(
+        imageUrl: url,
+        fit: BoxFit.cover,
+        placeholder: (_, __) => const ColoredBox(color: Color(0xFF6B4A32)),
+        errorWidget: (_, __, ___) => _fallback(),
+      );
+
+  Widget _fallback() => Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+        ),
+        child: Center(
+          child: Text(order.statusEmoji, style: const TextStyle(fontSize: 22)),
+        ),
+      );
 }
 
 class _OrderTimeline extends StatelessWidget {
