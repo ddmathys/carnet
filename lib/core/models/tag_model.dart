@@ -11,6 +11,9 @@ import 'notebook_model.dart';
 /// `kind` :
 ///  - `libre`  : tag ordinaire (par défaut) ;
 ///  - `annee`  / `lieu` : tags posés automatiquement à la création d'un souvenir ;
+///  - `personne` : tag qui désigne une personne (posé via le menu « c'est une
+///    personne » du sélecteur) → catégorie « Personne » du filtre, et sujet des
+///    rétrospectives ;
 ///  - `enfant` : tag spécial qui porte une date de naissance → débloque la
 ///    courbe de croissance (héritage des carnets enfant).
 class TagModel {

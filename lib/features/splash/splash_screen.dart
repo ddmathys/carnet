@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/media_migration_service.dart';
 import '../../core/services/migration_service.dart';
 import '../../core/services/notification_service.dart';
@@ -49,6 +50,16 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       try { await TagMigrationService.runIfNeeded(); } catch (_) {}
       // Tags en double fusionnés + nature (année / lieu) rétablie.
       try { await TagService.repairTags(); } catch (_) {}
+      // Personnes connues classées « personne » — une seule fois, pour ne pas
+      // re-forcer un nom que l'utilisateur reclasserait ensuite à la main.
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        if (prefs.getBool('people_classified_v1') != true) {
+          await TagService.classifyPeople(
+              const ['Nathan', 'Léa', 'Lea', 'Karin', 'David', 'Sandra']);
+          await prefs.setBool('people_classified_v1', true);
+        }
+      } catch (_) {}
       try { await UserService.onLogin(); } catch (_) {}
       // Médias restés sur Firebase Storage → R2, en tâche de fond (sans bloquer
       // le démarrage : la migration reprend là où elle s'est arrêtée).

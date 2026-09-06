@@ -74,6 +74,12 @@ class MediaUploadQueue extends ChangeNotifier {
   int _videoTotal = 0;
   int _lastNotifiedPct = -1;
 
+  // Progression des photos du lot en cours : nombre envoyé / total. Le PUT R2
+  // ne fournit pas la progression octet-par-octet (contrairement à la vidéo),
+  // on suit donc l'avancement au nombre de photos terminées.
+  int _photoDone = 0;
+  int _photoTotal = 0;
+
   /// Nombre d'uploads encore en cours.
   int get pending => _pending;
 
@@ -83,6 +89,14 @@ class MediaUploadQueue extends ChangeNotifier {
   /// Clip vidéo en cours (1-based) et nombre total à envoyer dans le lot.
   int get videoIndex => _videoIndex;
   int get videoTotal => _videoTotal;
+
+  /// Fraction des photos envoyées (0..1), ou null si aucune photo dans le lot.
+  double? get photoProgress =>
+      _photoTotal > 0 ? _photoDone / _photoTotal : null;
+
+  /// Photos envoyées et nombre total à envoyer dans le lot.
+  int get photoDone => _photoDone;
+  int get photoTotal => _photoTotal;
 
   /// Travaux qui ont échoué (réseau coupé, etc.) et qu'on peut relancer.
   List<MediaUploadJob> get failed => List.unmodifiable(_failed);
@@ -126,11 +140,24 @@ class MediaUploadQueue extends ChangeNotifier {
       // PRÉCISÉMENT quel fichier a échoué (index aligné sur job.localPhotos)
       // pour pouvoir le remettre en file — un échec silencieux ici est
       // exactement le bug qui faisait disparaître des photos sans prévenir.
+      // On suit au passage le nombre de photos terminées pour la barre de
+      // progression (le PUT R2 ne donne pas l'octet-par-octet). Future.wait
+      // préserve l'ordre des résultats, l'alignement sur l'index reste bon.
+      if (job.localPhotos.isNotEmpty) {
+        _photoTotal = job.localPhotos.length;
+        _photoDone = 0;
+        notifyListeners();
+      }
       final photoFuture = Future.wait(job.localPhotos.map(
-        (f) => PhotoService.uploadMemoryPhotoToR2(
-          photo: f,
-          notebookId: job.notebookId,
-        ),
+        (f) async {
+          final key = await PhotoService.uploadMemoryPhotoToR2(
+            photo: f,
+            notebookId: job.notebookId,
+          );
+          _photoDone++;
+          notifyListeners();
+          return key;
+        },
       ));
       // Audio → R2 (clé). Nouveau mémo → upload ; sinon rien à uploader.
       final Future<String?> audioFuture = job.localAudioPath != null
@@ -221,6 +248,12 @@ class MediaUploadQueue extends ChangeNotifier {
       if (failedPhotos.isNotEmpty) {
         _lastError = 'Échec de l\'envoi de ${failedPhotos.length} photo(s)';
       }
+      // Photos du lot terminées → on efface la progression (la bannière repasse
+      // en indéterminé le temps de finir mémo/écriture Firestore).
+      _photoTotal = 0;
+      _photoDone = 0;
+      notifyListeners();
+
 
       final uploadedAudioKey = await audioFuture;
       // Le nouveau mémo a échoué → on garde l'ancien tel quel (ne PAS l'effacer
@@ -300,6 +333,12 @@ class MediaUploadQueue extends ChangeNotifier {
       _failed.add(job);
       return false;
     } finally {
+      // Envoi terminé (ou échoué) → on efface toute progression résiduelle.
+      _videoTotal = 0;
+      _videoIndex = 0;
+      _videoProgress = 0;
+      _photoTotal = 0;
+      _photoDone = 0;
       _pending--;
       notifyListeners();
     }

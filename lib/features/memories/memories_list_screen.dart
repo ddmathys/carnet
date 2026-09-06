@@ -379,14 +379,24 @@ class _UploadStatusBanner extends StatelessWidget {
         if (q.pending > 0) {
           final n = q.pending;
           final vp = q.videoProgress; // null si aucune vidéo en cours
-          final pct = vp != null ? (vp * 100).round() : null;
-          final title = q.videoTotal > 1
-              ? 'Envoi de la vidéo ${q.videoIndex}/${q.videoTotal}…'
-              : (vp != null
-                  ? 'Envoi de la vidéo…'
-                  : (n == 1
-                      ? 'Envoi du souvenir en cours…'
-                      : 'Envoi de $n souvenirs en cours…'));
+          final pp = q.photoProgress; // null si aucune photo en cours
+          // La vidéo (plus lourde) est prioritaire ; sinon on suit les photos.
+          final frac = vp ?? pp;
+          final pct = frac != null ? (frac * 100).round() : null;
+          final String title;
+          if (q.videoTotal > 1) {
+            title = 'Envoi de la vidéo ${q.videoIndex}/${q.videoTotal}…';
+          } else if (vp != null) {
+            title = 'Envoi de la vidéo…';
+          } else if (pp != null) {
+            title = q.photoTotal > 1
+                ? 'Envoi des photos ${q.photoDone}/${q.photoTotal}…'
+                : 'Envoi de la photo…';
+          } else {
+            title = n == 1
+                ? 'Envoi du souvenir en cours…'
+                : 'Envoi de $n souvenirs en cours…';
+          }
           return _strip(
             color: AppColors.sage.withOpacity(0.12),
             child: Column(
@@ -409,9 +419,9 @@ class _UploadStatusBanner extends StatelessWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(99),
                   child: LinearProgressIndicator(
-                    // Déterminée pendant l'envoi d'une vidéo, indéterminée sinon
-                    // (photos/mémo, dont on ne suit pas le détail).
-                    value: vp,
+                    // Déterminée pendant l'envoi d'une vidéo ou des photos,
+                    // indéterminée sinon (mémo/écriture, non suivis en détail).
+                    value: frac,
                     minHeight: 6,
                     backgroundColor: AppColors.sage.withOpacity(0.18),
                     valueColor:

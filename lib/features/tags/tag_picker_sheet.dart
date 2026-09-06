@@ -1,32 +1,47 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
+import '../../core/services/tag_service.dart';
 
-/// Les trois familles de tags présentées à l'utilisateur.
-/// Elles se déduisent du `kind` du tag : une année → Date, un lieu → Lieu, le
-/// reste (tags libres, tag enfant) → Événement.
-enum TagCategory { date, lieu, evenement }
+/// Les familles de tags présentées à l'utilisateur.
+/// Elles se déduisent du `kind` du tag : une année → Date, un lieu → Lieu, une
+/// personne → Personne, le reste (tags libres) → Événement.
+enum TagCategory { date, personne, lieu, evenement }
 
 extension TagCategoryX on TagCategory {
   String get label => switch (this) {
         TagCategory.date => 'Date',
+        TagCategory.personne => 'Personne',
         TagCategory.lieu => 'Lieu',
         TagCategory.evenement => 'Événement',
       };
 
   IconData get icon => switch (this) {
         TagCategory.date => Icons.event_outlined,
+        TagCategory.personne => Icons.person_outline,
         TagCategory.lieu => Icons.place_outlined,
         TagCategory.evenement => Icons.local_offer_outlined,
       };
+
+  /// Le `kind` Firestore correspondant (l'inverse de [categoryOfKind]).
+  String get kind => switch (this) {
+        TagCategory.date => 'annee',
+        TagCategory.personne => 'personne',
+        TagCategory.lieu => 'lieu',
+        TagCategory.evenement => 'libre',
+      };
 }
 
-TagCategory categoryOf(TagModel tag) => switch (tag.kind) {
+TagCategory categoryOfKind(String kind) => switch (kind) {
       'annee' => TagCategory.date,
+      'personne' => TagCategory.personne,
       'lieu' => TagCategory.lieu,
       _ => TagCategory.evenement,
     };
+
+TagCategory categoryOf(TagModel tag) => categoryOfKind(tag.kind);
 
 /// Un souvenir correspond-il à la sélection de tags ?
 ///
@@ -93,6 +108,11 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
   // apparaître (et rester cochés) dans la feuille.
   final List<String> _created = [];
   final _newTagCtrl = TextEditingController();
+  // Reclassements faits à l'instant (libellé minuscule → nouveau `kind`) : la
+  // feuille reçoit une liste de tags figée, on garde donc les changements en
+  // local pour que la puce change de section tout de suite. La base, elle, est
+  // déjà mise à jour par TagService.setKindByLabel.
+  final Map<String, String> _kindOverride = {};
 
   @override
   void dispose() {
@@ -112,7 +132,10 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     for (final t in widget.tags) {
       final label = t.label.trim();
       if (label.isEmpty || !seen.add(label.toLowerCase())) continue;
-      map[categoryOf(t)]!.add(label);
+      final override = _kindOverride[label.toLowerCase()];
+      final category =
+          override != null ? categoryOfKind(override) : categoryOf(t);
+      map[category]!.add(label);
     }
     // Les tags créés à l'instant sont des événements tant qu'ils n'ont pas de
     // kind — c'est le cas courant (« Vacances », « Amis »).
@@ -140,6 +163,61 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
       _selected.add(label);
       _newTagCtrl.clear();
     });
+  }
+
+  /// Appui long sur une puce → petit menu pour changer sa nature (Personne,
+  /// Lieu, Événement…). C'est ce qui permet de distinguer une personne comme on
+  /// distingue déjà une date ou un lieu. Ne concerne que les tags que je possède
+  /// (les règles Firestore interdisent de modifier un tag partagé par autrui).
+  Future<void> _reclassify(String label) async {
+    final owned = widget.tags.any((t) =>
+        t.userId == TagService.currentUid &&
+        t.label.trim().toLowerCase() == label.toLowerCase());
+    if (!owned) return;
+    HapticFeedback.selectionClick();
+    final choice = await showModalBottomSheet<TagCategory>(
+      context: context,
+      backgroundColor: AppColors.background,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 8),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 8, 20, 4),
+              child: Text(
+                '« $label » — c\'est…',
+                style: const TextStyle(
+                  fontFamily: 'Fraunces',
+                  fontSize: 17,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDark,
+                ),
+              ),
+            ),
+            for (final c in const [
+              TagCategory.personne,
+              TagCategory.lieu,
+              TagCategory.evenement,
+              TagCategory.date,
+            ])
+              ListTile(
+                leading: Icon(c.icon, color: AppColors.sageDark),
+                title: Text(c.label),
+                onTap: () => Navigator.pop(context, c),
+              ),
+            const SizedBox(height: 6),
+          ],
+        ),
+      ),
+    );
+    if (choice == null) return;
+    await TagService.setKindByLabel(label, choice.kind);
+    if (!mounted) return;
+    setState(() => _kindOverride[label.toLowerCase()] = choice.kind);
   }
 
   @override
@@ -226,6 +304,7 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
                                   _selected.add(label);
                                 }
                               }),
+                              onLongPress: () => _reclassify(label),
                               child: _Chip(
                                 label: label,
                                 selected: _selected.contains(label),

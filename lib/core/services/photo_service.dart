@@ -73,12 +73,24 @@ class PhotoService {
   }
 
   /// Upload plusieurs photos vers R2 (parallèle). Retourne les clés réussies.
+  ///
+  /// [onProgress] est rappelé (done, total) à chaque photo terminée pour
+  /// alimenter la barre de progression : le PUT R2 ne donne pas la progression
+  /// octet-par-octet, on suit donc l'avancement au nombre de photos envoyées.
   static Future<List<String>> uploadMultiplePhotosToR2({
     required List<File> photos,
     required String notebookId,
+    void Function(int done, int total)? onProgress,
   }) async {
-    final results = await Future.wait(photos
-        .map((f) => uploadMemoryPhotoToR2(photo: f, notebookId: notebookId)));
+    final total = photos.length;
+    var done = 0;
+    onProgress?.call(0, total);
+    final results = await Future.wait(photos.map((f) async {
+      final key = await uploadMemoryPhotoToR2(photo: f, notebookId: notebookId);
+      done++;
+      onProgress?.call(done, total);
+      return key;
+    }));
     return results.whereType<String>().toList();
   }
 

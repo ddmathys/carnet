@@ -28,6 +28,9 @@ import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
 import 'features/posters/poster_select_screen.dart';
 import 'features/posters/poster_generate_screen.dart';
+import 'features/retro/retro_subjects_screen.dart';
+import 'features/retro/retro_view_screen.dart';
+import 'features/retro/retro_data.dart';
 import 'features/orders/order_tracking_screen.dart';
 import 'features/orders/order_confirmation_screen.dart';
 import 'features/admin/admin_orders_screen.dart';
@@ -149,6 +152,18 @@ final _router = GoRouter(
           photoRefs: refs,
           editOrderId: state.uri.queryParameters['editOrder'],
         );
+      },
+    ),
+
+    // ── Rétrospective ──
+    GoRoute(path: '/retro', builder: (_, __) => const RetroSubjectsScreen()),
+    GoRoute(
+      path: '/retro/view',
+      builder: (_, state) {
+        final subject = state.extra;
+        return subject is RetroSubject
+            ? RetroViewScreen(subject: subject)
+            : const RetroSubjectsScreen();
       },
     ),
 

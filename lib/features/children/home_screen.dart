@@ -224,6 +224,11 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           SliverToBoxAdapter(child: _filterBar(context)),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
+
+          // 3) Redécouvrir : une rétrospective d'une personne, d'un lieu…
+          SliverToBoxAdapter(
+            child: _RetroCta(onTap: () => context.push('/retro')),
+          ),
         ],
 
         // 3b) Courbe de croissance — un raccourci direct par tag enfant.
@@ -1249,6 +1254,65 @@ class _CreatePosterCta extends StatelessWidget {
                 ),
               ),
               const Icon(Icons.chevron_right, color: Colors.white70),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Entrée vers la rétrospective : redécouvrir tout ce qu'on a gardé sur une
+/// personne, un lieu ou une année, raconté dans l'ordre.
+class _RetroCta extends StatelessWidget {
+  final VoidCallback onTap;
+  const _RetroCta({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 8, 22, 0),
+      child: GestureDetector(
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.sageTint,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppColors.sageLight),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: AppColors.sageDark.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(Icons.auto_stories_outlined,
+                    color: AppColors.sageDark, size: 24),
+              ),
+              const SizedBox(width: 14),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Rétrospective',
+                        style: TextStyle(
+                          fontFamily: 'Fraunces',
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textDark,
+                        )),
+                    SizedBox(height: 2),
+                    Text('Une personne, un lieu, une année — raconté.',
+                        style: TextStyle(
+                            fontSize: 12.5, color: AppColors.textMedium)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right, color: AppColors.softGray),
             ],
           ),
         ),

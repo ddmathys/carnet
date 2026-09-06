@@ -16,6 +16,10 @@ class TagService {
 
   static String? get _uid => FirebaseAuth.instance.currentUser?.uid;
 
+  /// UID de l'utilisateur courant (utile aux écrans pour savoir quels tags ils
+  /// possèdent, donc peuvent reclasser/éditer).
+  static String? get currentUid => _uid;
+
   // ── Lecture ────────────────────────────────────────────────────────────────
 
   /// Tags dont l'utilisateur est propriétaire.
@@ -163,6 +167,52 @@ class TagService {
     final ref = await _col.add(tag.toFirestore());
     final doc = await ref.get();
     return TagModel.fromFirestore(doc);
+  }
+
+  /// Reclasse tous les tags que je possède portant ce libellé dans une nouvelle
+  /// nature (`personne`, `lieu`, `annee`, `libre`). Sert au menu « c'est une
+  /// personne / un lieu / … » : c'est ainsi qu'on distingue une personne comme
+  /// on distingue déjà une date ou un lieu. Ne touche pas aux tags partagés par
+  /// d'autres (les règles Firestore l'interdisent de toute façon).
+  static Future<void> setKindByLabel(String label, String kind) async {
+    final uid = _uid;
+    final clean = label.trim();
+    if (uid == null || clean.isEmpty) return;
+    final mine = await myTags();
+    final batch = _db.batch();
+    var writes = 0;
+    for (final t in mine) {
+      if (t.label.trim().toLowerCase() == clean.toLowerCase() &&
+          t.kind != kind) {
+        batch.update(_col.doc(t.id), {'kind': kind});
+        writes++;
+      }
+    }
+    if (writes > 0) await batch.commit();
+  }
+
+  /// Classe une liste de libellés comme `personne` (batch, une seule écriture).
+  /// Sert la migration one-shot des personnes connues au démarrage. Ne touche
+  /// qu'aux tags que je possède et qui ne sont pas déjà `personne`. Retourne le
+  /// nombre de tags effectivement reclassés.
+  static Future<int> classifyPeople(Iterable<String> labels) async {
+    final uid = _uid;
+    if (uid == null) return 0;
+    final wanted = {for (final l in labels) l.trim().toLowerCase()}
+      ..remove('');
+    if (wanted.isEmpty) return 0;
+    final mine = await myTags();
+    final batch = _db.batch();
+    var writes = 0;
+    for (final t in mine) {
+      if (t.kind != 'personne' &&
+          wanted.contains(t.label.trim().toLowerCase())) {
+        batch.update(_col.doc(t.id), {'kind': 'personne'});
+        writes++;
+      }
+    }
+    if (writes > 0) await batch.commit();
+    return writes;
   }
 
   /// Tags posés d'office sur un nouveau souvenir : l'année et le lieu.
