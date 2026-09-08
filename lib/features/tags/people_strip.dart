@@ -106,6 +106,12 @@ class _PeopleStripState extends State<PeopleStrip> {
               onTap: () => Navigator.pop(ctx, 'retro'),
             ),
             ListTile(
+              leading: const Icon(Icons.photo_library_outlined,
+                  color: AppColors.sageDark),
+              title: const Text('Voir les souvenirs'),
+              onTap: () => Navigator.pop(ctx, 'memories'),
+            ),
+            ListTile(
               leading: const Icon(Icons.photo_camera_outlined,
                   color: AppColors.sageDark),
               title: Text(
@@ -122,6 +128,8 @@ class _PeopleStripState extends State<PeopleStrip> {
       await editPersonPhoto(context, tag);
     } else if (choice == 'retro') {
       _openRetro(tag);
+    } else if (choice == 'memories') {
+      context.push('/memories?tag=${tag.id}');
     }
   }
 
