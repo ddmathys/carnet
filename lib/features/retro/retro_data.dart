@@ -142,21 +142,6 @@ class RetroData {
     required this.placeCount,
   });
 
-  /// Toutes les années de la plage, y compris celles sans souvenir (barre à
-  /// zéro) — pour ne pas fausser la perception de la durée dans la ligne de
-  /// temps.
-  List<int> get years => [
-        for (var y = subject.firstYear; y <= subject.lastYear; y++) y,
-      ];
-
-  int get maxYearCount =>
-      yearHistogram.values.fold(0, (a, b) => a > b ? a : b);
-
-  /// Index de la première section d'une année donnée (pour la navigation depuis
-  /// la ligne de temps), ou -1 si l'année n'a aucun souvenir.
-  int firstSectionIndexOfYear(int year) =>
-      sections.indexWhere((s) => s.year == year);
-
   static final _monthFmt = DateFormat('MMMM yyyy', 'fr');
 
   /// Construit la rétrospective d'un [subject] à partir des souvenirs visibles.

@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:go_router/go_router.dart';
 import 'package:scrollable_positioned_list/scrollable_positioned_list.dart';
@@ -15,9 +14,11 @@ import 'retro_data.dart';
 
 /// Écran C — Lecture de la rétrospective.
 ///
-/// En-tête, cartes de stats, ligne de temps par année (sticky), timeline
-/// verticale de sections mensuelles. Le texte de chaque mois est la matière
-/// réelle des souvenirs (pas d'IA à ce stade).
+/// En-tête, cartes de stats, puis une timeline verticale (ligne + pastille
+/// par mois) : chaque repère porte sa date, et un bandeau discret en haut de
+/// la liste affiche la date du mois qu'on est en train de lire, mise à jour
+/// pendant le scroll. Le texte de chaque mois est la matière réelle des
+/// souvenirs (pas d'IA à ce stade).
 class RetroViewScreen extends StatefulWidget {
   final RetroSubject subject;
   // Souvenirs/tags déjà chargés par l'écran de choix du sujet (qui les tient
@@ -46,13 +47,10 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
   RetroData? _data;
   bool _loading = true;
 
-  // Timeline : liste dont on connaît l'index visible + scroll vers un index.
-  final _scrollController = ItemScrollController();
+  // Suit quel mois est visible en haut de la liste, pour le bandeau de date
+  // sticky (voir _onScroll).
   final _positions = ItemPositionsListener.create();
-  final ValueNotifier<int?> _activeYear = ValueNotifier<int?>(null);
-  // Vrai pendant un scroll déclenché par la ligne de temps : on ignore alors la
-  // mise à jour de l'année active (sinon le tap et le scroll se battent).
-  bool _programmaticScroll = false;
+  final ValueNotifier<String?> _activeLabel = ValueNotifier<String?>(null);
 
   @override
   void initState() {
@@ -67,6 +65,7 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
       _memories = memories;
       _data = RetroData.build(widget.subject, memories, tags);
       _loading = false;
+      _primeActiveLabel();
       _listenLive();
     } else {
       // Repli (deep link direct, sans données déjà en cache) : tags suivis en
@@ -93,10 +92,18 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
   void _rebuild() {
     if (!mounted) return;
     setState(() => _data = RetroData.build(widget.subject, _memories, _tags));
+    _primeActiveLabel();
+  }
+
+  /// Le bandeau sticky doit afficher une date dès le premier rendu, pas
+  /// attendre le premier scroll pour sortir de son état vide.
+  void _primeActiveLabel() {
+    if (_activeLabel.value != null) return;
+    final sections = _data?.sections ?? const [];
+    if (sections.isNotEmpty) _activeLabel.value = sections.first.label;
   }
 
   void _onScroll() {
-    if (_programmaticScroll) return;
     final data = _data;
     if (data == null) return;
     final positions = _positions.itemPositions.value;
@@ -112,34 +119,17 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
     // Index 0 = en-tête ; les sections commencent à 1.
     final sectionIndex = top.index - 1;
     if (sectionIndex < 0 || sectionIndex >= data.sections.length) {
-      _activeYear.value = data.sections.isNotEmpty
-          ? data.sections.first.year
-          : null;
+      _activeLabel.value =
+          data.sections.isNotEmpty ? data.sections.first.label : null;
       return;
     }
-    _activeYear.value = data.sections[sectionIndex].year;
-  }
-
-  Future<void> _jumpToYear(int year) async {
-    final data = _data;
-    if (data == null) return;
-    final idx = data.firstSectionIndexOfYear(year);
-    if (idx < 0) return;
-    HapticFeedback.selectionClick();
-    _activeYear.value = year;
-    _programmaticScroll = true;
-    await _scrollController.scrollTo(
-      index: idx + 1, // +1 : l'en-tête occupe l'index 0
-      duration: const Duration(milliseconds: 420),
-      curve: Curves.easeInOutCubic,
-    );
-    _programmaticScroll = false;
+    _activeLabel.value = data.sections[sectionIndex].label;
   }
 
   @override
   void dispose() {
     _positions.itemPositions.removeListener(_onScroll);
-    _activeYear.dispose();
+    _activeLabel.dispose();
     _memSub?.cancel();
     _tagSub?.cancel();
     super.dispose();
@@ -172,23 +162,22 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
                 )
               : Column(
                   children: [
-                    // Ligne de temps sticky : reste visible pendant la lecture.
-                    if (data.years.length > 1)
-                      _YearTimeline(
-                        data: data,
-                        activeYear: _activeYear,
-                        onTapYear: _jumpToYear,
-                      ),
+                    // Bandeau sticky : la date du mois qu'on est en train de
+                    // lire, mise à jour pendant le scroll (voir _onScroll).
+                    if (data.sections.length > 1)
+                      _ActiveDateBanner(activeLabel: _activeLabel),
                     Expanded(
                       child: ScrollablePositionedList.builder(
-                        itemScrollController: _scrollController,
                         itemPositionsListener: _positions,
                         padding: const EdgeInsets.only(bottom: 28),
                         itemCount: data.sections.length + 1,
                         itemBuilder: (context, index) {
                           if (index == 0) return _IntroHeader(data: data);
+                          final i = index - 1;
                           return _SectionCard(
-                              section: data.sections[index - 1]);
+                            section: data.sections[i],
+                            isLast: i == data.sections.length - 1,
+                          );
                         },
                       ),
                     ),
@@ -319,158 +308,130 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-/// Barres par année, hauteur ∝ nombre de souvenirs. L'année active est en
-/// accent. Tap sur une barre → saut à la première section de l'année.
-class _YearTimeline extends StatelessWidget {
-  final RetroData data;
-  final ValueNotifier<int?> activeYear;
-  final void Function(int year) onTapYear;
-  const _YearTimeline({
-    required this.data,
-    required this.activeYear,
-    required this.onTapYear,
-  });
+/// Bandeau sticky au-dessus de la liste : la date du mois qu'on est en train
+/// de lire (voir _onScroll), pour toujours savoir où on en est sans avoir à
+/// remonter.
+class _ActiveDateBanner extends StatelessWidget {
+  final ValueNotifier<String?> activeLabel;
+  const _ActiveDateBanner({required this.activeLabel});
 
   @override
   Widget build(BuildContext context) {
-    final years = data.years;
-    final max = data.maxYearCount == 0 ? 1 : data.maxYearCount;
     return Container(
+      width: double.infinity,
       decoration: const BoxDecoration(
         color: AppColors.background,
         border: Border(bottom: BorderSide(color: AppColors.border)),
       ),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-      child: ValueListenableBuilder<int?>(
-        valueListenable: activeYear,
-        builder: (context, active, _) {
-          return SizedBox(
-            height: 54,
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                for (final y in years)
-                  Expanded(
-                    child: _YearBar(
-                      year: y,
-                      count: data.yearHistogram[y] ?? 0,
-                      maxCount: max,
-                      active: y == active,
-                      onTap: (data.yearHistogram[y] ?? 0) > 0
-                          ? () => onTapYear(y)
-                          : null,
-                    ),
-                  ),
-              ],
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+      child: ValueListenableBuilder<String?>(
+        valueListenable: activeLabel,
+        builder: (context, label, _) => Row(
+          children: [
+            Container(
+              width: 8,
+              height: 8,
+              decoration: const BoxDecoration(
+                color: AppColors.sage,
+                shape: BoxShape.circle,
+              ),
             ),
-          );
-        },
+            const SizedBox(width: 10),
+            Text(
+              label ?? '',
+              style: const TextStyle(
+                fontFamily: 'Fraunces',
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textDark,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _YearBar extends StatelessWidget {
-  final int year;
-  final int count;
-  final int maxCount;
-  final bool active;
-  final VoidCallback? onTap;
-  const _YearBar({
-    required this.year,
-    required this.count,
-    required this.maxCount,
-    required this.active,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    // Hauteur de barre : 3 px (vide) → 34 px (année la plus dense).
-    final h = count == 0 ? 3.0 : 3.0 + 31.0 * (count / maxCount);
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          Container(
-            height: h,
-            margin: const EdgeInsets.symmetric(horizontal: 2),
-            decoration: BoxDecoration(
-              color: active
-                  ? AppColors.sage
-                  : (count == 0
-                      ? AppColors.border
-                      : AppColors.sageLight),
-              borderRadius: BorderRadius.circular(3),
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            '\'${year % 100}',
-            style: TextStyle(
-              fontSize: 9.5,
-              fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-              color: active ? AppColors.sage : AppColors.textMedium,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-/// Une section mensuelle : label du mois, texte (descriptions réelles), photos.
+/// Une section mensuelle, sur la ligne verticale de la timeline : sa pastille
+/// et le segment de ligne qui la relie à la section suivante, sa date, un
+/// texte condensé (matière réelle des souvenirs), ses photos.
 class _SectionCard extends StatelessWidget {
   final RetroSection section;
-  const _SectionCard({required this.section});
+  final bool isLast;
+  const _SectionCard({required this.section, this.isLast = false});
 
   @override
   Widget build(BuildContext context) {
     final narrative = section.narrative;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 8,
-                height: 8,
-                decoration: const BoxDecoration(
-                  color: AppColors.sage,
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                section.label,
-                style: const TextStyle(
-                  fontFamily: 'Fraunces',
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textDark,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          if (narrative.isNotEmpty)
-            Text(
-              narrative,
-              style: const TextStyle(
-                fontSize: 14.5,
-                height: 1.5,
-                color: AppColors.textDark,
+    return IntrinsicHeight(
+      child: Padding(
+        padding: const EdgeInsets.only(left: 20, right: 20, bottom: 4),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // La ligne verticale + la pastille de ce mois.
+            SizedBox(
+              width: 18,
+              child: Column(
+                children: [
+                  Container(
+                    margin: const EdgeInsets.only(top: 5),
+                    width: 9,
+                    height: 9,
+                    decoration: const BoxDecoration(
+                      color: AppColors.sage,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  if (!isLast)
+                    Expanded(
+                      child: Container(
+                        width: 1.4,
+                        margin: const EdgeInsets.only(top: 5),
+                        color: AppColors.border,
+                      ),
+                    ),
+                ],
               ),
             ),
-          if (section.heroes.isNotEmpty) ...[
-            const SizedBox(height: 12),
-            _PhotoGrid(memories: section.heroes),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      section.label.toUpperCase(),
+                      style: const TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.7,
+                        color: AppColors.sage,
+                      ),
+                    ),
+                    if (narrative.isNotEmpty) ...[
+                      const SizedBox(height: 5),
+                      Text(
+                        narrative,
+                        style: const TextStyle(
+                          fontSize: 13.5,
+                          height: 1.4,
+                          color: AppColors.textDark,
+                        ),
+                      ),
+                    ],
+                    if (section.heroes.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      _PhotoGrid(memories: section.heroes),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ],
-        ],
+        ),
       ),
     );
   }
