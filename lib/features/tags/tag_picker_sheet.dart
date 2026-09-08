@@ -36,7 +36,12 @@ extension TagCategoryX on TagCategory {
 
 TagCategory categoryOfKind(String kind) => switch (kind) {
       'annee' => TagCategory.date,
-      'personne' => TagCategory.personne,
+      // Un tag « enfant » (porte une date de naissance, débloque la courbe de
+      // croissance) EST une personne — sans ça il retombait sous « Événement »
+      // et n'apparaissait ni dans le filtre Personne, ni comme sujet de
+      // rétrospective. Son `kind` reste 'enfant' (jamais réécrit ici) : c'est
+      // uniquement le rangement visuel qui change.
+      'personne' || 'enfant' => TagCategory.personne,
       'lieu' => TagCategory.lieu,
       _ => TagCategory.evenement,
     };
@@ -170,10 +175,18 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
   /// distingue déjà une date ou un lieu. Ne concerne que les tags que je possède
   /// (les règles Firestore interdisent de modifier un tag partagé par autrui).
   Future<void> _reclassify(String label) async {
-    final owned = widget.tags.any((t) =>
-        t.userId == TagService.currentUid &&
-        t.label.trim().toLowerCase() == label.toLowerCase());
-    if (!owned) return;
+    TagModel? tag;
+    for (final t in widget.tags) {
+      if (t.userId == TagService.currentUid &&
+          t.label.trim().toLowerCase() == label.toLowerCase()) {
+        tag = t;
+        break;
+      }
+    }
+    if (tag == null) return;
+    // Un tag enfant est déjà une « Personne » (voir categoryOfKind) et porte
+    // une date de naissance — le reclasser perdrait la courbe de croissance.
+    if (tag.isChild) return;
     HapticFeedback.selectionClick();
     final choice = await showModalBottomSheet<TagCategory>(
       context: context,

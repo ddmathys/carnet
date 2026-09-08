@@ -3,6 +3,11 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/tag_service.dart';
 import 'person_avatar.dart';
+import 'tag_picker_sheet.dart' show categoryOfKind, TagCategory;
+
+/// Un tag `personne` OU `enfant` (un enfant EST une personne, voir
+/// [categoryOfKind]) désigne une personne.
+bool _isPersonKind(String kind) => categoryOfKind(kind) == TagCategory.personne;
 
 /// Sélecteur de personnes — la version « juste les personnes » du sélecteur
 /// de tags : une liste des personnes déjà connues (tags `kind == 'personne'`),
@@ -60,7 +65,7 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
     final override = _tagOverrides[key];
     if (override != null) return override;
     for (final t in widget.tags) {
-      if (t.kind == 'personne' && t.label.trim().toLowerCase() == key) {
+      if (_isPersonKind(t.kind) && t.label.trim().toLowerCase() == key) {
         return t;
       }
     }
@@ -82,7 +87,7 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
     final seen = <String>{};
     final out = <String>[];
     for (final t in widget.tags) {
-      if (t.kind != 'personne') continue;
+      if (!_isPersonKind(t.kind)) continue;
       final label = t.label.trim();
       if (label.isEmpty || !seen.add(label.toLowerCase())) continue;
       out.add(label);
@@ -99,8 +104,7 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
     if (label.isEmpty) return;
     setState(() {
       if (!_created.contains(label) &&
-          !widget.tags.any(
-              (t) => t.kind == 'personne' && t.label == label)) {
+          !widget.tags.any((t) => _isPersonKind(t.kind) && t.label == label)) {
         _created.add(label);
       }
       _selected.add(label);

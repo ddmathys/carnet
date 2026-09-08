@@ -66,6 +66,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // spinner plein écran ci-dessous tourner à l'infini, sans message.
   String? _loadError;
 
+  // ── Sections repliables (Quand/Où, Personnes, Tags) ──────────────────────
+  // En édition, un souvenir a déjà tout ça de rempli — les montrer dépliées
+  // d'office allonge l'écran pour rien et repousse photos/vidéo plus bas.
+  // Repliées par défaut à l'édition (résumé d'une ligne, dépliables au tap),
+  // dépliées à la création (pour voir tout de suite les champs à remplir).
+  late bool _dateSectionExpanded = !_isEditing;
+  late bool _personSectionExpanded = !_isEditing;
+  late bool _tagSectionExpanded = !_isEditing;
+
   // ── Tags ───────────────────────────────────────────────────────────────────
   // On travaille en LIBELLÉS, pas en ids : rien n'est créé en base tant que le
   // souvenir n'est pas enregistré (TagService.ensureTag résout label → tag).
@@ -88,10 +97,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return {
       for (final l in _tagLabels)
         if (_newPersonLabels.contains(l) ||
-            kindByLabel[l.trim().toLowerCase()] == 'personne')
+            _isPersonKind(kindByLabel[l.trim().toLowerCase()]))
           l,
     };
   }
+
+  /// Un tag `personne` OU `enfant` (un enfant EST une personne, voir
+  /// [categoryOfKind]) désigne une personne.
+  bool _isPersonKind(String? kind) =>
+      kind != null && categoryOfKind(kind) == TagCategory.personne;
   // Tags posés d'office (année, lieu) : on garde de quoi les remplacer quand la
   // date ou le lieu change, et de quoi ne pas les remettre si l'utilisateur les
   // a retirés.
@@ -2131,11 +2145,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildVideoSection(),
           ]),
           const SizedBox(height: 14),
-          _FormCard(children: [
-            _buildDateSection(),
-            const SizedBox(height: 18),
-            _buildLocationField(),
-          ]),
+          _FormCard(children: [_buildDateLocationSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildPersonSection()]),
           const SizedBox(height: 14),
@@ -2200,11 +2210,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildVideoSection(),
           ]),
           const SizedBox(height: 14),
-          _FormCard(children: [
-            _buildDateSection(),
-            const SizedBox(height: 18),
-            _buildLocationField(),
-          ]),
+          _FormCard(children: [_buildDateLocationSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildPersonSection()]),
           const SizedBox(height: 14),
@@ -2458,11 +2464,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           // vers ce mode) — la vidéo reste possible.
           _FormCard(children: [_buildVideoSection()]),
           const SizedBox(height: 14),
-          _FormCard(children: [
-            _buildDateSection(),
-            const SizedBox(height: 18),
-            _buildLocationField(),
-          ]),
+          _FormCard(children: [_buildDateLocationSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildPersonSection()]),
           const SizedBox(height: 14),
@@ -2518,11 +2520,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           // ne pas l'exclure du rendu photo normal du livre.
           _growthToggleRow(on: false),
           const SizedBox(height: 4),
-          _FormCard(children: [
-            _buildDateSection(),
-            const SizedBox(height: 18),
-            _buildLocationField(),
-          ]),
+          _FormCard(children: [_buildDateLocationSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildPersonSection()]),
           const SizedBox(height: 14),
@@ -2542,6 +2540,81 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
+  // ── Sections repliables (Quand/Où, Personnes, Tags) ─────────────────────────
+
+  /// En-tête d'une section repliable : titre, résumé d'une ligne quand elle
+  /// est repliée, chevron. Tap n'importe où sur la ligne pour déplier/replier
+  /// — pensé pour garder l'écran court (photos/vidéo plus vite atteintes) une
+  /// fois ces champs déjà remplis, notamment à l'édition.
+  Widget _collapsibleHeader({
+    required String title,
+    required String summary,
+    required bool expanded,
+    required VoidCallback onToggle,
+    bool error = false,
+  }) {
+    return GestureDetector(
+      onTap: onToggle,
+      behavior: HitTestBehavior.opaque,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionTitle(title, error: error),
+                if (!expanded) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    summary,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 13.5,
+                      color: AppColors.textDark,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          Icon(expanded ? Icons.expand_less : Icons.expand_more,
+              color: AppColors.textMedium),
+        ],
+      ),
+    );
+  }
+
+  /// Date + lieu du souvenir, dans une seule section repliable — résumé
+  /// « 15 mars 2025 · Genève » une fois repliée.
+  Widget _buildDateLocationSection() {
+    final loc = _locationController.text.trim();
+    final summary = _dateNeedsConfirmation
+        ? 'Date à confirmer${loc.isNotEmpty ? ' · $loc' : ''}'
+        : '$_dateLabel${loc.isNotEmpty ? ' · $loc' : ' · lieu manquant'}';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _collapsibleHeader(
+          title: '📅 QUAND & OÙ',
+          summary: summary,
+          expanded: _dateSectionExpanded,
+          error: _dateNeedsConfirmation || _locationRequiredEmpty,
+          onToggle: () =>
+              setState(() => _dateSectionExpanded = !_dateSectionExpanded),
+        ),
+        if (_dateSectionExpanded) ...[
+          const SizedBox(height: 12),
+          _buildDateSection(),
+          const SizedBox(height: 18),
+          _buildLocationField(),
+        ],
+      ],
+    );
+  }
+
   // ── Tags ───────────────────────────────────────────────────────────────────
 
   /// Tags du souvenir : l'année et le lieu sont posés d'office, le reste se
@@ -2556,30 +2629,39 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('🏷️ TAGS'),
-        const SizedBox(height: 4),
-        const Text(
-          'L\'année et le lieu sont ajoutés automatiquement. Les tags servent à '
-          'retrouver tes souvenirs, à composer un livre et à partager.',
-          style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+        _collapsibleHeader(
+          title: '🏷️ TAGS',
+          summary: selected.isEmpty ? 'Aucun tag' : selected.join(', '),
+          expanded: _tagSectionExpanded,
+          onToggle: () =>
+              setState(() => _tagSectionExpanded = !_tagSectionExpanded),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final label in selected)
+        if (_tagSectionExpanded) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'L\'année et le lieu sont ajoutés automatiquement. Les tags '
+            'servent à retrouver tes souvenirs, à composer un livre et à '
+            'partager.',
+            style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final label in selected)
+                GestureDetector(
+                  onTap: () => _toggleTag(label),
+                  child: _TagChip(label: label, selected: true),
+                ),
               GestureDetector(
-                onTap: () => _toggleTag(label),
-                child: _TagChip(label: label, selected: true),
+                onTap: _openTagPicker,
+                child: const _TagChip(
+                    label: '＋ Choisir des tags', selected: false),
               ),
-            GestureDetector(
-              onTap: _openTagPicker,
-              child: const _TagChip(
-                  label: '＋ Choisir des tags', selected: false),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -2594,41 +2676,49 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle('🧑 PERSONNES'),
-        const SizedBox(height: 4),
-        const Text(
-          'Qui est dans ce souvenir ? Sert à retrouver ses souvenirs avec '
-          'quelqu\'un et à lui composer une rétrospective. Appui long sur une '
-          'personne pour lui donner une photo.',
-          style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+        _collapsibleHeader(
+          title: '🧑 PERSONNES',
+          summary: selected.isEmpty ? 'Aucune personne' : selected.join(', '),
+          expanded: _personSectionExpanded,
+          onToggle: () => setState(
+              () => _personSectionExpanded = !_personSectionExpanded),
         ),
-        const SizedBox(height: 10),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            for (final label in selected)
-              GestureDetector(
-                onTap: () => _removePerson(label),
-                onLongPress: () => _editPersonPhoto(label),
-                child: _TagChip(
-                  label: label,
-                  selected: true,
-                  leading: PersonAvatar(
+        if (_personSectionExpanded) ...[
+          const SizedBox(height: 4),
+          const Text(
+            'Qui est dans ce souvenir ? Sert à retrouver ses souvenirs avec '
+            'quelqu\'un et à lui composer une rétrospective. Appui long sur '
+            'une personne pour lui donner une photo.',
+            style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final label in selected)
+                GestureDetector(
+                  onTap: () => _removePerson(label),
+                  onLongPress: () => _editPersonPhoto(label),
+                  child: _TagChip(
                     label: label,
-                    photoKey: _personTagFor(label)?.photoKey,
-                    colorHex: _personTagFor(label)?.color ?? '#C4714B',
-                    size: 20,
+                    selected: true,
+                    leading: PersonAvatar(
+                      label: label,
+                      photoKey: _personTagFor(label)?.photoKey,
+                      colorHex: _personTagFor(label)?.color ?? '#C4714B',
+                      size: 20,
+                    ),
                   ),
                 ),
+              GestureDetector(
+                onTap: _openPersonPicker,
+                child: const _TagChip(
+                    label: '＋ Ajouter une personne', selected: false),
               ),
-            GestureDetector(
-              onTap: _openPersonPicker,
-              child: const _TagChip(
-                  label: '＋ Ajouter une personne', selected: false),
-            ),
-          ],
-        ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -2638,7 +2728,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   TagModel? _personTagFor(String label) {
     final key = label.trim().toLowerCase();
     for (final t in _allTags) {
-      if (t.kind == 'personne' && t.label.trim().toLowerCase() == key) {
+      if (_isPersonKind(t.kind) && t.label.trim().toLowerCase() == key) {
         return t;
       }
     }
@@ -2687,8 +2777,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       }
       for (final label in result) {
         _tagLabels.add(label);
-        final known = _allTags.any(
-            (t) => t.kind == 'personne' && t.label.toLowerCase() == label.toLowerCase());
+        final known = _allTags.any((t) =>
+            _isPersonKind(t.kind) && t.label.toLowerCase() == label.toLowerCase());
         if (!known) _newPersonLabels.add(label);
       }
     });
