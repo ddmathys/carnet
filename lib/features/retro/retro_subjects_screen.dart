@@ -171,15 +171,12 @@ class _PersonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: AppColors.white,
+        // `white` est réservé au texte/icônes sur fond coloré (voir
+        // AppColors) — une carte doit prendre `surface`, sinon le texte clair
+        // (pensé pour un fond sombre) devient illisible dessus.
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.textDark.withOpacity(0.05),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
+        border: Border.all(color: AppColors.border, width: 0.6),
       ),
       child: Material(
         color: Colors.transparent,

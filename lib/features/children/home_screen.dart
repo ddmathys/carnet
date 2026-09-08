@@ -22,6 +22,7 @@ import '../memories/widgets/memory_polaroid.dart';
 import '../memories/widgets/import_media_cta.dart';
 import '../memories/widgets/delete_memory.dart';
 import '../shared/upload_status_banner.dart';
+import '../tags/people_strip.dart';
 import '../tags/tag_picker_sheet.dart';
 import '../tags/share_tag_sheet.dart';
 import '../tags/shared_tags_sheet.dart';
@@ -196,6 +197,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onShared: () => _showSharedTagsSheet(context),
           ),
         ),
+        const SliverToBoxAdapter(child: PeopleStrip()),
         const SliverToBoxAdapter(child: UploadStatusBanner()),
         const SliverToBoxAdapter(child: _ActivityBanner()),
 
