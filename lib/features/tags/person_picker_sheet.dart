@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/tag_model.dart';
+import '../../core/services/tag_service.dart';
+import 'person_avatar.dart';
 
 /// Sélecteur de personnes — la version « juste les personnes » du sélecteur
 /// de tags : une liste des personnes déjà connues (tags `kind == 'personne'`),
@@ -42,11 +44,38 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
   // apparaître (et rester cochées) dans la feuille.
   final List<String> _created = [];
   final _newCtrl = TextEditingController();
+  // Tags résolus/créés pendant cette session (photo ajoutée, ou nouvelle
+  // personne créée en base pour pouvoir lui poser une photo tout de suite) :
+  // `widget.tags` est figé, on garde ici ce qui change en local.
+  final Map<String, TagModel> _tagOverrides = {};
 
   @override
   void dispose() {
     _newCtrl.dispose();
     super.dispose();
+  }
+
+  TagModel? _tagFor(String label) {
+    final key = label.trim().toLowerCase();
+    final override = _tagOverrides[key];
+    if (override != null) return override;
+    for (final t in widget.tags) {
+      if (t.kind == 'personne' && t.label.trim().toLowerCase() == key) {
+        return t;
+      }
+    }
+    return null;
+  }
+
+  /// Appui long sur une personne → lui donner/changer sa photo de tête. Une
+  /// personne pas encore enregistrée (tapée à l'instant) est créée en base au
+  /// passage — sans ça, impossible de lui attacher une photo.
+  Future<void> _editPhoto(String label) async {
+    final tag = _tagFor(label) ?? await TagService.ensureTag(label, kind: 'personne');
+    if (tag == null || !mounted) return;
+    final updated = await editPersonPhoto(context, tag);
+    if (updated == null || !mounted) return;
+    setState(() => _tagOverrides[label.trim().toLowerCase()] = updated);
   }
 
   List<String> get _people {
@@ -144,7 +173,15 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
                             fontSize: 13, color: AppColors.textMedium),
                       ),
                     )
-                  else
+                  else ...[
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 8),
+                      child: Text(
+                        'Appui long sur une personne pour lui donner une photo.',
+                        style: TextStyle(
+                            fontSize: 12, color: AppColors.textMedium),
+                      ),
+                    ),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
@@ -156,13 +193,17 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
                                 _selected.add(label);
                               }
                             }),
+                            onLongPress: () => _editPhoto(label),
                             child: _PersonChip(
                               label: label,
                               selected: _selected.contains(label),
+                              photoKey: _tagFor(label)?.photoKey,
+                              colorHex: _tagFor(label)?.color ?? '#C4714B',
                             ),
                           ),
                       ],
                     ),
+                  ],
                   const SizedBox(height: 14),
                   Row(
                     children: [
@@ -214,13 +255,20 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
 class _PersonChip extends StatelessWidget {
   final String label;
   final bool selected;
-  const _PersonChip({required this.label, required this.selected});
+  final String? photoKey;
+  final String colorHex;
+  const _PersonChip({
+    required this.label,
+    required this.selected,
+    this.photoKey,
+    this.colorHex = '#C4714B',
+  });
 
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 140),
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
         color: selected ? AppColors.sageDark : AppColors.surface,
         borderRadius: BorderRadius.circular(50),
@@ -232,9 +280,9 @@ class _PersonChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.person,
-              size: 14, color: selected ? Colors.white : AppColors.textMedium),
-          const SizedBox(width: 5),
+          PersonAvatar(
+              label: label, photoKey: photoKey, colorHex: colorHex, size: 20),
+          const SizedBox(width: 6),
           Text(
             label,
             style: TextStyle(

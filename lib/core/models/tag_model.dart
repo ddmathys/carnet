@@ -23,6 +23,10 @@ class TagModel {
   final String kind;
   final String color; // hex, ex. '#C4714B'
 
+  // kind == 'personne' : photo de tête (clé R2 `photos/{uid}/...`), pour
+  // afficher une pastille reconnaissable dans le sélecteur et la rétrospective.
+  final String? photoKey;
+
   // kind == 'enfant'
   final DateTime? birthdate;
   final String? gender; // 'boy' | 'girl'
@@ -39,6 +43,7 @@ class TagModel {
     required this.label,
     this.kind = 'libre',
     this.color = '#C4714B',
+    this.photoKey,
     this.birthdate,
     this.gender,
     this.companion,
@@ -60,6 +65,7 @@ class TagModel {
       label: d['label'] ?? '',
       kind: d['kind'] ?? 'libre',
       color: d['color'] ?? '#C4714B',
+      photoKey: d['photoKey'] as String?,
       birthdate: d['birthdate'] != null
           ? (d['birthdate'] as Timestamp).toDate()
           : null,
@@ -79,6 +85,7 @@ class TagModel {
         'label': label,
         'kind': kind,
         'color': color,
+        if (photoKey != null) 'photoKey': photoKey,
         if (birthdate != null) 'birthdate': Timestamp.fromDate(birthdate!),
         if (gender != null) 'gender': gender,
         if (companion != null) 'companion': companion,

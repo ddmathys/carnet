@@ -191,6 +191,14 @@ class TagService {
     if (writes > 0) await batch.commit();
   }
 
+  /// Photo de tête d'une personne (clé R2 `photos/{uid}/...`, ou null pour la
+  /// retirer). Ne touche qu'aux tags que je possède.
+  static Future<void> setPersonPhoto(TagModel tag, String? photoKey) async {
+    final uid = _uid;
+    if (uid == null || tag.userId != uid) return;
+    await _col.doc(tag.id).update({'photoKey': photoKey});
+  }
+
   /// Classe une liste de libellés comme `personne` (batch, une seule écriture).
   /// Sert la migration one-shot des personnes connues au démarrage. Ne touche
   /// qu'aux tags que je possède et qui ne sont pas déjà `personne`. Retourne le

@@ -18,6 +18,10 @@ class RetroSubject {
   final int count;
   final int firstYear;
   final int lastYear;
+  // Photo de tête (clé R2) et couleur du tag — pour la pastille de l'écran de
+  // choix du sujet. `color` a toujours une valeur (palette du tag).
+  final String? photoKey;
+  final String color;
 
   const RetroSubject({
     required this.tagId,
@@ -26,6 +30,8 @@ class RetroSubject {
     required this.count,
     required this.firstYear,
     required this.lastYear,
+    this.photoKey,
+    this.color = '#C4714B',
   });
 
   /// « 2015–2026 », ou « 2019 » si tout tient sur une année.
@@ -63,6 +69,8 @@ class RetroSubject {
         count: mems.length,
         firstYear: years.first,
         lastYear: years.last,
+        photoKey: tag.photoKey,
+        color: tag.color,
       ));
     });
     out.sort((a, b) => b.count.compareTo(a.count));

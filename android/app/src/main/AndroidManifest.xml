@@ -71,6 +71,12 @@
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+        <!-- image_cropper (recadrage circulaire des photos de personne) : sans
+             cette déclaration, l'écran de recadrage ne s'ouvre pas. -->
+        <activity
+            android:name="com.yalantis.ucrop.UCropActivity"
+            android:screenOrientation="portrait"
+            android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
         <!-- Canal par défaut des push reçus quand l'appli est fermée. Il doit
              porter le même id que le canal créé dans MainActivity, sinon
              Android range les notifications dans un canal « Divers » sans nom. -->

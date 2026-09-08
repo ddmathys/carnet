@@ -85,6 +85,7 @@ dependencies:
 
   # Numéro de version affiché dans l'app (écran de connexion)
   package_info_plus: ^8.1.2
+  image_cropper: ^12.2.1
 
 dev_dependencies:
   flutter_test:

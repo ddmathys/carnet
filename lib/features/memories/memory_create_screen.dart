@@ -29,6 +29,7 @@ import '../../core/widgets/date_mask_field.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../milestones/widgets/growth_curve_chart.dart';
 import '../milestones/widgets/flexible_date_sheet.dart';
+import '../tags/person_avatar.dart';
 import '../tags/person_picker_sheet.dart';
 import '../tags/tag_picker_sheet.dart';
 
@@ -2597,7 +2598,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         const SizedBox(height: 4),
         const Text(
           'Qui est dans ce souvenir ? Sert à retrouver ses souvenirs avec '
-          'quelqu\'un et à lui composer une rétrospective.',
+          'quelqu\'un et à lui composer une rétrospective. Appui long sur une '
+          'personne pour lui donner une photo.',
           style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
         ),
         const SizedBox(height: 10),
@@ -2608,7 +2610,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             for (final label in selected)
               GestureDetector(
                 onTap: () => _removePerson(label),
-                child: _TagChip(label: label, selected: true),
+                onLongPress: () => _editPersonPhoto(label),
+                child: _TagChip(
+                  label: label,
+                  selected: true,
+                  leading: PersonAvatar(
+                    label: label,
+                    photoKey: _personTagFor(label)?.photoKey,
+                    colorHex: _personTagFor(label)?.color ?? '#C4714B',
+                    size: 20,
+                  ),
+                ),
               ),
             GestureDetector(
               onTap: _openPersonPicker,
@@ -2621,11 +2633,40 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
+  /// Le tag correspondant à une personne déjà sélectionnée (pour sa photo et
+  /// sa couleur), s'il est déjà connu en base.
+  TagModel? _personTagFor(String label) {
+    final key = label.trim().toLowerCase();
+    for (final t in _allTags) {
+      if (t.kind == 'personne' && t.label.trim().toLowerCase() == key) {
+        return t;
+      }
+    }
+    return null;
+  }
+
   void _removePerson(String label) {
     setState(() {
       _tagLabels.remove(label);
       _newPersonLabels.remove(label);
       if (_autoAdded.contains(label)) _dismissedAuto.add(label);
+    });
+  }
+
+  /// Appui long sur une personne du souvenir → lui donner/changer sa photo de
+  /// tête. Une personne pas encore enregistrée (tapée à l'instant) est créée
+  /// en base au passage — sans ça, impossible de lui attacher une photo.
+  Future<void> _editPersonPhoto(String label) async {
+    final tag =
+        _personTagFor(label) ?? await TagService.ensureTag(label, kind: 'personne');
+    if (tag == null || !mounted) return;
+    final updated = await editPersonPhoto(context, tag);
+    if (updated == null || !mounted) return;
+    setState(() {
+      _allTags = [
+        for (final t in _allTags) if (t.id != updated.id) t,
+        updated,
+      ];
     });
   }
 
@@ -3180,13 +3221,16 @@ class _VideoThumb extends StatelessWidget {
 class _TagChip extends StatelessWidget {
   final String label;
   final bool selected;
-  const _TagChip({required this.label, required this.selected});
+  // Avatar de personne, affiché avant le libellé — null pour un tag ordinaire.
+  final Widget? leading;
+  const _TagChip({required this.label, required this.selected, this.leading});
 
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
-      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
+      padding: EdgeInsets.symmetric(
+          horizontal: leading != null ? 10 : 13, vertical: leading != null ? 6 : 8),
       decoration: BoxDecoration(
         color: selected ? AppColors.sageDark : AppColors.surface,
         borderRadius: BorderRadius.circular(50),
@@ -3198,6 +3242,7 @@ class _TagChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (leading != null) ...[leading!, const SizedBox(width: 6)],
           Text(
             label,
             style: TextStyle(

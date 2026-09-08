@@ -6,6 +6,7 @@ import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
+import '../tags/person_avatar.dart';
 import '../tags/tag_picker_sheet.dart' show TagCategory;
 import 'retro_data.dart';
 
@@ -152,6 +153,13 @@ class _SubjectTile extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             child: Row(
               children: [
+                PersonAvatar(
+                  label: subject.label,
+                  photoKey: subject.photoKey,
+                  colorHex: subject.color,
+                  size: 44,
+                ),
+                const SizedBox(width: 14),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
