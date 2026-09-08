@@ -111,17 +111,6 @@ class MediaUploadQueue extends ChangeNotifier {
     _run(job);
   }
 
-  /// Comme [enqueue], mais attend la fin de l'envoi et dit si tout est
-  /// parti (`true`) ou si au moins un média a échoué (`false`) — utilisé par
-  /// l'écran de création pour garder le bouton "Enregistrer" indisponible
-  /// tant que les photos/vidéos ne sont pas réellement envoyées, plutôt que
-  /// de naviguer en supposant que ça a marché.
-  Future<bool> runAndWait(MediaUploadJob job) {
-    _pending++;
-    notifyListeners();
-    return _run(job);
-  }
-
   /// Relance tous les travaux échoués.
   void retryFailed() {
     final jobs = List<MediaUploadJob>.of(_failed);

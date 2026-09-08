@@ -1207,16 +1207,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           ? double.tryParse(_heightController.text.replaceAll(',', '.'))
           : null;
 
-      // ── Écriture texte puis attente des médias ────────────────────────────
+      // ── Sauvegarde optimiste (façon WhatsApp) ─────────────────────────────
       // On écrit d'abord le souvenir en base AVEC les médias déjà connus
       // (photos existantes en édition, audio existant conservé). Les NOUVEAUX
       // médias (photos locales, mémo vocal fraîchement enregistré, vidéos)
-      // sont ensuite envoyés via MediaUploadQueue.runAndWait, ATTENDU avant
-      // de quitter l'écran (le bouton Enregistrer reste indisponible pendant
-      // ce temps) : un média qui échoue doit le dire tout de suite, pas
-      // disparaître silencieusement une fois qu'on a déjà changé d'écran.
-      // Si tout part bien, le document Firestore est complété par la queue
-      // et la liste (écoute temps réel) affiche le souvenir avec ses médias.
+      // sont laissés de côté : ils partent en arrière-plan via
+      // MediaUploadQueue.enqueue (non bloquant), qui complétera le document
+      // une fois l'upload terminé. La liste (écoute temps réel) affiche le
+      // souvenir tout de suite et ses médias arrivent tout seuls ensuite ; un
+      // échec reste visible via la bannière d'envoi (dashboard + liste), avec
+      // "Réessayer" — jamais silencieux.
       // `_existingPhotoUrls` mélange d'anciennes URLs Firebase et des URLs R2
       // signées (temporaires) → on sépare : les URLs signées ne doivent jamais
       // être écrites en base, seule leur CLÉ R2 (via `_existingKeyByUrl`) l'est.
@@ -1352,12 +1352,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _removedVideoKeys.isNotEmpty ||
           (_audioRemoved && _existingAudioUrl != null);
       if (hasMediaWork) {
-        // On ATTEND la fin de l'envoi avant de quitter l'écran : le bouton
-        // Enregistrer reste indisponible (_loading déjà true) tant que les
-        // photos/vidéos ne sont pas réellement parties, pour ne jamais
-        // donner l'impression que c'est enregistré alors qu'un média a
-        // échoué en silence.
-        final ok = await MediaUploadQueue.instance.runAndWait(MediaUploadJob(
+        // On NE bloque PAS l'écran sur l'envoi des médias (façon WhatsApp) :
+        // le souvenir texte est déjà écrit, l'écran se ferme tout de suite et
+        // photos/vidéos partent en arrière-plan via la file. La bannière
+        // d'envoi (dashboard + liste des souvenirs, voir UploadStatusBanner)
+        // affiche la progression pour savoir quand on peut quitter
+        // l'application, et un échec reste visible avec "Réessayer" — plus
+        // question qu'un média disparaisse en silence.
+        MediaUploadQueue.instance.enqueue(MediaUploadJob(
           memoryId: memoryId,
           notebookId: spaceId,
           localPhotos: List<File>.of(_localPhotos),
@@ -1376,15 +1378,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           existingVideoDurations: knownVideoDurations,
           removedVideoKeys: List<String>.of(_removedVideoKeys),
         ));
-        if (!ok) {
-          if (!mounted) return;
-          setState(() => _loading = false);
-          _showSnack(
-            '${MediaUploadQueue.instance.lastError ?? "Échec de l'envoi"} — '
-            'le texte est enregistré, réessaie pour les photos/vidéos.',
-          );
-          return;
-        }
       }
 
       if (mounted) context.go('/memories');
