@@ -28,7 +28,6 @@ import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
 import 'features/posters/poster_select_screen.dart';
 import 'features/posters/poster_generate_screen.dart';
-import 'features/retro/retro_subjects_screen.dart';
 import 'features/retro/retro_view_screen.dart';
 import 'features/retro/retro_data.dart';
 import 'features/orders/order_tracking_screen.dart';
@@ -155,8 +154,8 @@ final _router = GoRouter(
       },
     ),
 
-    // ── Rétrospective ──
-    GoRoute(path: '/retro', builder: (_, __) => const RetroSubjectsScreen()),
+    // ── Rétrospective ── L'entrée se fait depuis une personne (pastille du
+    // dashboard, PeopleStrip) : pas d'écran intermédiaire « choisis un sujet ».
     GoRoute(
       path: '/retro/view',
       builder: (_, state) {
@@ -168,10 +167,10 @@ final _router = GoRouter(
             initialTags: extra.tags,
           );
         }
-        // Repli (deep link direct, sans être passé par l'écran de choix) :
+        // Repli (deep link direct, sans données déjà en cache) :
         return extra is RetroSubject
             ? RetroViewScreen(subject: extra)
-            : const RetroSubjectsScreen();
+            : const HomeScreen();
       },
     ),
 
