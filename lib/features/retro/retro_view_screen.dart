@@ -10,6 +10,7 @@ import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/tag_service.dart';
+import '../tags/person_avatar.dart';
 import 'retro_data.dart';
 
 /// Écran C — Lecture de la rétrospective.
@@ -219,17 +220,30 @@ class _IntroHeader extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            s.label,
-            style: const TextStyle(
-              fontFamily: 'Fraunces',
-              fontSize: 30,
-              fontWeight: FontWeight.w600,
-              color: AppColors.textDark,
-              height: 1.1,
-            ),
+          Row(
+            children: [
+              PersonAvatar(
+                label: s.label,
+                photoKey: s.photoKey,
+                colorHex: s.color,
+                size: 52,
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Text(
+                  s.label,
+                  style: const TextStyle(
+                    fontFamily: 'Fraunces',
+                    fontSize: 30,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark,
+                    height: 1.1,
+                  ),
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 10),
           Text(
             subtitleParts.join(' · '),
             style: const TextStyle(fontSize: 13.5, color: AppColors.textMedium),

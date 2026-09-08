@@ -82,30 +82,48 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
           ? const Center(child: CircularProgressIndicator())
           : subjects.isEmpty
               ? _empty()
-              : ListView(
-                  padding: const EdgeInsets.fromLTRB(18, 6, 18, 28),
-                  children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(4, 4, 4, 16),
-                      child: Text(
-                        'Revisite tout ce que tu as gardé sur chacune des '
-                        'personnes de tes souvenirs, raconté dans l\'ordre.',
-                        style: TextStyle(
-                            fontSize: 14, color: AppColors.textMedium),
-                      ),
-                    ),
-                    for (final s in subjects)
-                      _SubjectTile(
-                        subject: s,
-                        onTap: () => context.push(
-                          '/retro/view',
-                          extra: RetroViewArgs(
-                            subject: s,
-                            memories: _memories,
-                            tags: _tags,
-                          ),
+              : CustomScrollView(
+                  slivers: [
+                    const SliverPadding(
+                      padding: EdgeInsets.fromLTRB(20, 10, 20, 6),
+                      sliver: SliverToBoxAdapter(
+                        child: Text(
+                          'Revisite tout ce que tu as gardé sur chacune des '
+                          'personnes de tes souvenirs, raconté dans l\'ordre.',
+                          style: TextStyle(
+                              fontSize: 14, color: AppColors.textMedium),
                         ),
                       ),
+                    ),
+                    SliverPadding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 28),
+                      sliver: SliverGrid(
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 3,
+                          mainAxisSpacing: 14,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 0.8,
+                        ),
+                        delegate: SliverChildBuilderDelegate(
+                          (context, i) {
+                            final s = subjects[i];
+                            return _PersonCard(
+                              subject: s,
+                              onTap: () => context.push(
+                                '/retro/view',
+                                extra: RetroViewArgs(
+                                  subject: s,
+                                  memories: _memories,
+                                  tags: _tags,
+                                ),
+                              ),
+                            );
+                          },
+                          childCount: subjects.length,
+                        ),
+                      ),
+                    ),
                   ],
                 ),
     );
@@ -142,55 +160,63 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
       );
 }
 
-class _SubjectTile extends StatelessWidget {
+/// Une personne, en pastille : sa photo (ou ses initiales), son prénom, le
+/// nombre de souvenirs qui lui sont dédiés.
+class _PersonCard extends StatelessWidget {
   final RetroSubject subject;
   final VoidCallback onTap;
-  const _SubjectTile({required this.subject, required this.onTap});
+  const _PersonCard({required this.subject, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Material(
+    return Container(
+      decoration: BoxDecoration(
         color: AppColors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: AppColors.textDark.withOpacity(0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(20),
         child: InkWell(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(20),
           onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            child: Row(
+            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 6),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 PersonAvatar(
                   label: subject.label,
                   photoKey: subject.photoKey,
                   colorHex: subject.color,
-                  size: 44,
+                  size: 64,
                 ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        subject.label,
-                        style: const TextStyle(
-                          fontFamily: 'Fraunces',
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: AppColors.textDark,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        '${subject.count} souvenirs · ${subject.rangeLabel}',
-                        style: const TextStyle(
-                            fontSize: 13, color: AppColors.textMedium),
-                      ),
-                    ],
+                const SizedBox(height: 10),
+                Text(
+                  subject.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontFamily: 'Fraunces',
+                    fontSize: 14.5,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark,
                   ),
                 ),
-                const Icon(Icons.chevron_right, color: AppColors.softGray),
+                const SizedBox(height: 2),
+                Text(
+                  '${subject.count} souvenirs',
+                  style: const TextStyle(
+                      fontSize: 11, color: AppColors.textMedium),
+                ),
               ],
             ),
           ),

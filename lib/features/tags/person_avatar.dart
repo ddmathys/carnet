@@ -73,15 +73,24 @@ class PersonAvatar extends StatelessWidget {
     );
   }
 
+  /// Sans photo : les deux premières lettres du prénom, en majuscules
+  /// (« Nathan » → NA) — plus reconnaissable qu'une seule initiale.
+  String get _initials {
+    final clean = label.trim();
+    if (clean.isEmpty) return '?';
+    return clean.substring(0, clean.length < 2 ? 1 : 2).toUpperCase();
+  }
+
   Widget _fallback() => CircleAvatar(
         radius: size / 2,
         backgroundColor: _color,
         child: Text(
-          label.trim().isNotEmpty ? label.trim()[0].toUpperCase() : '?',
+          _initials,
           style: TextStyle(
             color: Colors.white,
-            fontSize: size * 0.45,
+            fontSize: size * 0.36,
             fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
           ),
         ),
       );
