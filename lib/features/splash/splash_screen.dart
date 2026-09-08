@@ -55,8 +55,15 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       try {
         final prefs = await SharedPreferences.getInstance();
         if (prefs.getBool('people_classified_v1') != true) {
-          await TagService.classifyPeople(
-              const ['Nathan', 'Léa', 'Lea', 'Karin', 'David', 'Sandra']);
+          await TagService.classifyPeople(const [
+            'Nathan',
+            'Léa',
+            'Lea',
+            'Karin',
+            'David',
+            'Sandra',
+            'Olivier',
+          ]);
           await prefs.setBool('people_classified_v1', true);
         }
       } catch (_) {}

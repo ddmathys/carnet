@@ -242,8 +242,11 @@ class TagService {
 
   /// Classe une liste de libellés comme `personne` (batch, une seule écriture).
   /// Sert la migration one-shot des personnes connues au démarrage. Ne touche
-  /// qu'aux tags que je possède et qui ne sont pas déjà `personne`. Retourne le
-  /// nombre de tags effectivement reclassés.
+  /// qu'aux tags que je possède et qui ne sont pas déjà des personnes — un tag
+  /// `enfant` (porte la date de naissance, courbe de croissance) EN EST déjà
+  /// une (voir `categoryOfKind`) et ne doit surtout pas être réécrit, sous
+  /// peine de perdre sa date de naissance. Retourne le nombre de tags
+  /// effectivement reclassés.
   static Future<int> classifyPeople(Iterable<String> labels) async {
     final uid = _uid;
     if (uid == null) return 0;
@@ -255,6 +258,7 @@ class TagService {
     var writes = 0;
     for (final t in mine) {
       if (t.kind != 'personne' &&
+          !t.isChild &&
           wanted.contains(t.label.trim().toLowerCase())) {
         batch.update(_col.doc(t.id), {'kind': 'personne'});
         writes++;
