@@ -6,14 +6,16 @@ import '../../core/models/memory_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
-import '../tags/tag_picker_sheet.dart' show TagCategory, TagCategoryX;
+import '../tags/tag_picker_sheet.dart' show TagCategory;
 import 'retro_data.dart';
 
 /// Écran A — Choix du sujet.
 ///
-/// Liste les tags qui ont assez de matière pour une rétrospective (≥ 8
-/// souvenirs), groupés par type, avec nombre de souvenirs et plage d'années.
-/// Tout est calculé côté client à partir des souvenirs déjà en cache.
+/// Liste les PERSONNES qui ont assez de matière pour une rétrospective (≥ 8
+/// souvenirs), avec nombre de souvenirs et plage d'années. Volontairement
+/// limité aux personnes (lieux/années/événements ont moins de sens à
+/// « raconter » comme un sujet). Tout est calculé côté client à partir des
+/// souvenirs déjà en cache.
 class RetroSubjectsScreen extends StatefulWidget {
   const RetroSubjectsScreen({super.key});
 
@@ -52,18 +54,11 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final subjects = RetroSubject.eligible(_memories, _tags);
-    // Groupés par catégorie, dans l'ordre Personne → Lieu → Date → Événement.
-    final byCategory = <TagCategory, List<RetroSubject>>{};
-    for (final s in subjects) {
-      byCategory.putIfAbsent(s.category, () => []).add(s);
-    }
-    const order = [
-      TagCategory.personne,
-      TagCategory.lieu,
-      TagCategory.date,
-      TagCategory.evenement,
-    ];
+    // Uniquement les personnes : un lieu ou une année n'ont pas la même
+    // valeur de récit, et mélanger les types rendait l'écran illisible.
+    final subjects = RetroSubject.eligible(_memories, _tags)
+        .where((s) => s.category == TagCategory.personne)
+        .toList();
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -90,23 +85,17 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
                     const Padding(
                       padding: EdgeInsets.fromLTRB(4, 4, 4, 16),
                       child: Text(
-                        'Revisite tout ce que tu as gardé sur une personne, '
-                        'un lieu ou une année, raconté dans l\'ordre.',
+                        'Revisite tout ce que tu as gardé sur chacune des '
+                        'personnes de tes souvenirs, raconté dans l\'ordre.',
                         style: TextStyle(
                             fontSize: 14, color: AppColors.textMedium),
                       ),
                     ),
-                    for (final c in order)
-                      if ((byCategory[c] ?? const []).isNotEmpty) ...[
-                        _CategoryHeader(category: c),
-                        for (final s in byCategory[c]!)
-                          _SubjectTile(
-                            subject: s,
-                            onTap: () =>
-                                context.push('/retro/view', extra: s),
-                          ),
-                        const SizedBox(height: 20),
-                      ],
+                    for (final s in subjects)
+                      _SubjectTile(
+                        subject: s,
+                        onTap: () => context.push('/retro/view', extra: s),
+                      ),
                   ],
                 ),
     );
@@ -132,9 +121,8 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
               ),
               const SizedBox(height: 8),
               Text(
-                'Il faut au moins ${RetroSubject.minMemories} souvenirs sur '
-                'une même personne, un même lieu ou une même année pour '
-                'composer un récit.',
+                'Il faut au moins ${RetroSubject.minMemories} souvenirs avec '
+                'une même personne taguée pour composer un récit.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                     fontSize: 13.5, color: AppColors.textMedium),
@@ -143,33 +131,6 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
           ),
         ),
       );
-}
-
-class _CategoryHeader extends StatelessWidget {
-  final TagCategory category;
-  const _CategoryHeader({required this.category});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 4, 4, 10),
-      child: Row(
-        children: [
-          Icon(category.icon, size: 15, color: AppColors.textMedium),
-          const SizedBox(width: 6),
-          Text(
-            category.label.toUpperCase(),
-            style: const TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 1.1,
-              color: AppColors.textMedium,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _SubjectTile extends StatelessWidget {

@@ -29,6 +29,7 @@ import '../../core/widgets/date_mask_field.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../milestones/widgets/growth_curve_chart.dart';
 import '../milestones/widgets/flexible_date_sheet.dart';
+import '../tags/person_picker_sheet.dart';
 import '../tags/tag_picker_sheet.dart';
 
 class MemoryCreateScreen extends StatefulWidget {
@@ -69,6 +70,27 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // souvenir n'est pas enregistré (TagService.ensureTag résout label → tag).
   final Set<String> _tagLabels = {};
   List<TagModel> _allTags = [];
+  // Personnes tapées à la volée dans le sélecteur dédié, pas encore en base
+  // (donc absentes de `_allTags`) : à créer en kind `personne` à la
+  // sauvegarde, sans passer par la déduction habituelle (TagService.inferKind
+  // ne sait pas reconnaître un nom de personne).
+  final Set<String> _newPersonLabels = {};
+
+  /// Sous-ensemble de `_tagLabels` qui désigne des personnes — déduit des tags
+  /// déjà classés `personne` en base, complété par celles ajoutées cette
+  /// session via le sélecteur dédié. Permet à la section "Personnes" de
+  /// n'afficher que ça, séparément des autres tags.
+  Set<String> get _personLabels {
+    final kindByLabel = <String, String>{
+      for (final t in _allTags) t.label.trim().toLowerCase(): t.kind,
+    };
+    return {
+      for (final l in _tagLabels)
+        if (_newPersonLabels.contains(l) ||
+            kindByLabel[l.trim().toLowerCase()] == 'personne')
+          l,
+    };
+  }
   // Tags posés d'office (année, lieu) : on garde de quoi les remplacer quand la
   // date ou le lieu change, et de quoi ne pas les remettre si l'utilisateur les
   // a retirés.
@@ -1250,15 +1272,18 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // les règles Firestore pour autoriser un collaborateur à voir le souvenir.
       final tagIds = <String>[];
       final tagLabels = <String>[];
+      final personLabels = _personLabels;
       for (final label in _tagLabels) {
         // Un tag qui reprend le lieu du souvenir EST un tag de lieu : c'est sa
-        // nature (`kind`) qui le rangera sous « Lieu » dans le filtre.
+        // nature (`kind`) qui le rangera sous « Lieu » dans le filtre. Une
+        // personne ajoutée via la section dédiée EST un tag de personne, peu
+        // importe ce que la déduction automatique (année/lieu) en aurait fait.
         final isLocation = locationValue.isNotEmpty &&
             label.trim().toLowerCase() == locationValue.toLowerCase();
-        final tag = await TagService.ensureTag(
-          label,
-          kind: TagService.inferKind(label, isLocation: isLocation),
-        );
+        final kind = personLabels.contains(label)
+            ? 'personne'
+            : TagService.inferKind(label, isLocation: isLocation);
+        final tag = await TagService.ensureTag(label, kind: kind);
         if (tag == null) continue;
         tagIds.add(tag.id);
         tagLabels.add(tag.label);
@@ -2111,6 +2136,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildLocationField(),
           ]),
           const SizedBox(height: 14),
+          _FormCard(children: [_buildPersonSection()]),
+          const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildVoiceMemoSection()]),
@@ -2177,6 +2204,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             const SizedBox(height: 18),
             _buildLocationField(),
           ]),
+          const SizedBox(height: 14),
+          _FormCard(children: [_buildPersonSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
@@ -2434,6 +2463,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildLocationField(),
           ]),
           const SizedBox(height: 14),
+          _FormCard(children: [_buildPersonSection()]),
+          const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildVoiceMemoSection()]),
@@ -2492,6 +2523,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildLocationField(),
           ]),
           const SizedBox(height: 14),
+          _FormCard(children: [_buildPersonSection()]),
+          const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildVoiceMemoSection()]),
@@ -2512,9 +2545,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   /// Tags du souvenir : l'année et le lieu sont posés d'office, le reste se
   /// choisit dans le même sélecteur que le filtre du dashboard (Date / Lieu /
-  /// Événement, multi-sélection, et création d'un tag à la volée).
+  /// Événement, multi-sélection, et création d'un tag à la volée). Les
+  /// personnes ont leur propre section ([_buildPersonSection]) : on les
+  /// exclut d'ici pour ne pas les afficher deux fois.
   Widget _buildTagSection() {
-    final selected = _tagLabels.toList()..sort();
+    final persons = _personLabels;
+    final selected = _tagLabels.where((l) => !persons.contains(l)).toList()
+      ..sort();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -2544,6 +2581,76 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         ),
       ],
     );
+  }
+
+  // ── Personnes ────────────────────────────────────────────────────────────
+
+  /// Qui est dans ce souvenir : une catégorie de tag à part, distincte des
+  /// dates/lieux/événements, pour pouvoir proposer uniquement les personnes
+  /// dans le sélecteur de rétrospective.
+  Widget _buildPersonSection() {
+    final selected = _personLabels.toList()..sort();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle('🧑 PERSONNES'),
+        const SizedBox(height: 4),
+        const Text(
+          'Qui est dans ce souvenir ? Sert à retrouver ses souvenirs avec '
+          'quelqu\'un et à lui composer une rétrospective.',
+          style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            for (final label in selected)
+              GestureDetector(
+                onTap: () => _removePerson(label),
+                child: _TagChip(label: label, selected: true),
+              ),
+            GestureDetector(
+              onTap: _openPersonPicker,
+              child: const _TagChip(
+                  label: '＋ Ajouter une personne', selected: false),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  void _removePerson(String label) {
+    setState(() {
+      _tagLabels.remove(label);
+      _newPersonLabels.remove(label);
+      if (_autoAdded.contains(label)) _dismissedAuto.add(label);
+    });
+  }
+
+  Future<void> _openPersonPicker() async {
+    final before = _personLabels;
+    final result = await showPersonPickerSheet(
+      context,
+      tags: _allTags,
+      initialLabels: before,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      for (final label in before) {
+        if (!result.contains(label)) {
+          _tagLabels.remove(label);
+          _newPersonLabels.remove(label);
+        }
+      }
+      for (final label in result) {
+        _tagLabels.add(label);
+        final known = _allTags.any(
+            (t) => t.kind == 'personne' && t.label.toLowerCase() == label.toLowerCase());
+        if (!known) _newPersonLabels.add(label);
+      }
+    });
   }
 
   Future<void> _openTagPicker() async {
