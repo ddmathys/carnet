@@ -38,9 +38,10 @@ class RetroSubject {
   String get rangeLabel =>
       firstYear == lastYear ? '$firstYear' : '$firstYear–$lastYear';
 
-  /// Seuls les sujets qui ont assez de matière sont proposés : sous ce seuil,
-  /// un récit n'a pas de forme.
-  static const int minMemories = 8;
+  /// Une personne taguée sur au moins un souvenir est proposée comme sujet —
+  /// pas de seuil minimum (David préfère voir apparaître une personne tout de
+  /// suite, quitte à ce que son récit soit encore court).
+  static const int minMemories = 1;
 
   /// Sujets éligibles (≥ [minMemories] souvenirs), tous types confondus, triés
   /// par richesse décroissante. Calculé depuis les souvenirs visibles.

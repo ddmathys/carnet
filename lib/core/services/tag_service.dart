@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/tag_model.dart';
@@ -70,6 +71,46 @@ class TagService {
     final tags = byId.values.toList()
       ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
     return tags;
+  }
+
+  /// Version « live » de [visibleTags] : recombine les miens et ceux qu'on
+  /// m'a partagés à chaque mise à jour de l'un des deux flux — un tag tout
+  /// juste créé (ex. une personne, à l'instant où on lui ajoute un souvenir)
+  /// apparaît sans avoir à rouvrir l'écran qui l'affiche.
+  static Stream<List<TagModel>> streamVisible() {
+    final uid = _uid;
+    if (uid == null) return Stream.value(const []);
+    final controller = StreamController<List<TagModel>>.broadcast();
+    var mine = <TagModel>[];
+    var shared = <TagModel>[];
+    var gotMine = false;
+    var gotShared = false;
+    void emit() {
+      if (!gotMine || !gotShared || controller.isClosed) return;
+      final byId = <String, TagModel>{};
+      for (final t in mine) byId[t.id] = t;
+      for (final t in shared) byId[t.id] = t;
+      final tags = byId.values.toList()
+        ..sort(
+            (a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+      controller.add(tags);
+    }
+
+    final subMine = streamMine().listen((v) {
+      mine = v;
+      gotMine = true;
+      emit();
+    });
+    final subShared = streamSharedWithMe().listen((v) {
+      shared = v;
+      gotShared = true;
+      emit();
+    });
+    controller.onCancel = () {
+      subMine.cancel();
+      subShared.cancel();
+    };
+    return controller.stream;
   }
 
   static Future<TagModel?> byId(String tagId) async {

@@ -12,11 +12,12 @@ import 'retro_data.dart';
 
 /// Écran A — Choix du sujet.
 ///
-/// Liste les PERSONNES qui ont assez de matière pour une rétrospective (≥ 8
-/// souvenirs), avec nombre de souvenirs et plage d'années. Volontairement
-/// limité aux personnes (lieux/années/événements ont moins de sens à
-/// « raconter » comme un sujet). Tout est calculé côté client à partir des
-/// souvenirs déjà en cache.
+/// Liste les PERSONNES qui ont au moins un souvenir taggé, avec nombre de
+/// souvenirs et plage d'années. Volontairement limité aux personnes
+/// (lieux/années/événements ont moins de sens à « raconter » comme un sujet).
+/// Tags et souvenirs sont suivis en direct (Firestore) : une personne tout
+/// juste créée, ou son premier souvenir tagué, apparaît sans quitter/rouvrir
+/// cet écran.
 class RetroSubjectsScreen extends StatefulWidget {
   const RetroSubjectsScreen({super.key});
 
@@ -26,6 +27,7 @@ class RetroSubjectsScreen extends StatefulWidget {
 
 class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
   StreamSubscription? _memSub;
+  StreamSubscription? _tagSub;
   List<MemoryModel> _memories = [];
   List<TagModel> _tags = [];
   bool _loading = true;
@@ -33,7 +35,11 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
   @override
   void initState() {
     super.initState();
-    _loadTags();
+    // Flux live sur les deux : une personne tout juste créée (ou son premier
+    // souvenir taggé) doit apparaître sans quitter/rouvrir cet écran.
+    _tagSub = TagService.streamVisible().listen((tags) {
+      if (mounted) setState(() => _tags = tags);
+    });
     _memSub = MemoryQueryService.visible().listen((mems) {
       if (mounted) setState(() {
         _memories = mems;
@@ -42,14 +48,10 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
     });
   }
 
-  Future<void> _loadTags() async {
-    final tags = await TagService.visibleTags();
-    if (mounted) setState(() => _tags = tags);
-  }
-
   @override
   void dispose() {
     _memSub?.cancel();
+    _tagSub?.cancel();
     super.dispose();
   }
 
@@ -128,12 +130,11 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                'Il faut au moins ${RetroSubject.minMemories} souvenirs avec '
-                'une même personne taguée pour composer un récit.',
+              const Text(
+                'Tague une personne sur un souvenir pour lui composer un '
+                'récit.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(
-                    fontSize: 13.5, color: AppColors.textMedium),
+                style: TextStyle(fontSize: 13.5, color: AppColors.textMedium),
               ),
             ],
           ),

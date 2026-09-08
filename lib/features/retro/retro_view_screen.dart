@@ -39,7 +39,9 @@ class RetroViewScreen extends StatefulWidget {
 
 class _RetroViewScreenState extends State<RetroViewScreen> {
   StreamSubscription? _memSub;
+  StreamSubscription? _tagSub;
   List<TagModel> _tags = [];
+  List<MemoryModel> _memories = const [];
   RetroData? _data;
   bool _loading = true;
 
@@ -61,17 +63,19 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
       // Déjà en cache (écran de choix du sujet) : affichage immédiat, pas de
       // rechargement réseau ni de spinner à chaque sujet ouvert.
       _tags = tags;
+      _memories = memories;
       _data = RetroData.build(widget.subject, memories, tags);
       _loading = false;
       _listenLive();
     } else {
-      _load();
+      // Repli (deep link direct, sans données déjà en cache) : tags suivis en
+      // direct comme sur l'écran de choix du sujet.
+      _tagSub = TagService.streamVisible().listen((tags) {
+        _tags = tags;
+        _rebuild();
+      });
+      _listenLive();
     }
-  }
-
-  Future<void> _load() async {
-    _tags = await TagService.visibleTags();
-    _listenLive();
   }
 
   /// Écoute les souvenirs en temps réel : la rétrospective reste à jour
@@ -79,12 +83,15 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
   /// arrière et rouvrir le sujet.
   void _listenLive() {
     _memSub = MemoryQueryService.visible().listen((mems) {
-      if (!mounted) return;
-      setState(() {
-        _data = RetroData.build(widget.subject, mems, _tags);
-        _loading = false;
-      });
+      _memories = mems;
+      _loading = false;
+      _rebuild();
     });
+  }
+
+  void _rebuild() {
+    if (!mounted) return;
+    setState(() => _data = RetroData.build(widget.subject, _memories, _tags));
   }
 
   void _onScroll() {
@@ -133,6 +140,7 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
     _positions.itemPositions.removeListener(_onScroll);
     _activeYear.dispose();
     _memSub?.cancel();
+    _tagSub?.cancel();
     super.dispose();
   }
 
