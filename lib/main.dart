@@ -160,9 +160,17 @@ final _router = GoRouter(
     GoRoute(
       path: '/retro/view',
       builder: (_, state) {
-        final subject = state.extra;
-        return subject is RetroSubject
-            ? RetroViewScreen(subject: subject)
+        final extra = state.extra;
+        if (extra is RetroViewArgs) {
+          return RetroViewScreen(
+            subject: extra.subject,
+            initialMemories: extra.memories,
+            initialTags: extra.tags,
+          );
+        }
+        // Repli (deep link direct, sans être passé par l'écran de choix) :
+        return extra is RetroSubject
+            ? RetroViewScreen(subject: extra)
             : const RetroSubjectsScreen();
       },
     ),

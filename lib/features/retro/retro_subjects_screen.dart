@@ -95,7 +95,14 @@ class _RetroSubjectsScreenState extends State<RetroSubjectsScreen> {
                     for (final s in subjects)
                       _SubjectTile(
                         subject: s,
-                        onTap: () => context.push('/retro/view', extra: s),
+                        onTap: () => context.push(
+                          '/retro/view',
+                          extra: RetroViewArgs(
+                            subject: s,
+                            memories: _memories,
+                            tags: _tags,
+                          ),
+                        ),
                       ),
                   ],
                 ),

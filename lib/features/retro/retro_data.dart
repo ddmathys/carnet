@@ -78,6 +78,22 @@ class RetroSubject {
   }
 }
 
+/// Données déjà en cache transmises à l'écran de lecture (souvenirs + tags) —
+/// l'écran de choix du sujet les a déjà chargées (et les tient à jour en
+/// temps réel) ; les redemander en ouvrant un sujet ferait clignoter un
+/// écran de chargement à chaque sélection pour rien.
+class RetroViewArgs {
+  final RetroSubject subject;
+  final List<MemoryModel> memories;
+  final List<TagModel> tags;
+
+  const RetroViewArgs({
+    required this.subject,
+    required this.memories,
+    required this.tags,
+  });
+}
+
 /// Une section mensuelle de la timeline : un mois, ses souvenirs, et jusqu'à 3
 /// souvenirs « héros » (les mieux notés qui portent une photo).
 class RetroSection {

@@ -19,7 +19,19 @@ import 'retro_data.dart';
 /// réelle des souvenirs (pas d'IA à ce stade).
 class RetroViewScreen extends StatefulWidget {
   final RetroSubject subject;
-  const RetroViewScreen({super.key, required this.subject});
+  // Souvenirs/tags déjà chargés par l'écran de choix du sujet (qui les tient
+  // à jour en temps réel) : évite un rechargement (spinner) à chaque sujet
+  // ouvert. Absents seulement si l'écran est atteint autrement qu'en passant
+  // par ce choix (repli sur un chargement classique).
+  final List<MemoryModel>? initialMemories;
+  final List<TagModel>? initialTags;
+
+  const RetroViewScreen({
+    super.key,
+    required this.subject,
+    this.initialMemories,
+    this.initialTags,
+  });
 
   @override
   State<RetroViewScreen> createState() => _RetroViewScreenState();
@@ -43,11 +55,29 @@ class _RetroViewScreenState extends State<RetroViewScreen> {
   void initState() {
     super.initState();
     _positions.itemPositions.addListener(_onScroll);
-    _load();
+    final memories = widget.initialMemories;
+    final tags = widget.initialTags;
+    if (memories != null && tags != null) {
+      // Déjà en cache (écran de choix du sujet) : affichage immédiat, pas de
+      // rechargement réseau ni de spinner à chaque sujet ouvert.
+      _tags = tags;
+      _data = RetroData.build(widget.subject, memories, tags);
+      _loading = false;
+      _listenLive();
+    } else {
+      _load();
+    }
   }
 
   Future<void> _load() async {
     _tags = await TagService.visibleTags();
+    _listenLive();
+  }
+
+  /// Écoute les souvenirs en temps réel : la rétrospective reste à jour
+  /// (nouveau souvenir tagué, média ajouté…) sans jamais avoir à revenir en
+  /// arrière et rouvrir le sujet.
+  void _listenLive() {
     _memSub = MemoryQueryService.visible().listen((mems) {
       if (!mounted) return;
       setState(() {
