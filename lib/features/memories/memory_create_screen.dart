@@ -66,13 +66,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // spinner plein écran ci-dessous tourner à l'infini, sans message.
   String? _loadError;
 
-  // ── Sections repliables (Quand/Où, Personnes, Tags) ──────────────────────
+  // ── Sections repliables (Date, Lieu, Tags) ────────────────────────────────
   // En édition, un souvenir a déjà tout ça de rempli — les montrer dépliées
   // d'office allonge l'écran pour rien et repousse photos/vidéo plus bas.
   // Repliées par défaut à l'édition (résumé d'une ligne, dépliables au tap),
   // dépliées à la création (pour voir tout de suite les champs à remplir).
+  // Les personnes n'en font plus partie : elles sont en pastilles fixes tout
+  // en haut de l'écran (voir _buildPersonPastilleRow), pas dans une section
+  // à déplier.
   late bool _dateSectionExpanded = !_isEditing;
-  late bool _personSectionExpanded = !_isEditing;
+  late bool _locationSectionExpanded = !_isEditing;
   late bool _tagSectionExpanded = !_isEditing;
 
   // ── Tags ───────────────────────────────────────────────────────────────────
@@ -2109,6 +2112,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildPersonPastilleRow(),
+          const SizedBox(height: 16),
           _FormCard(children: [
             _SectionTitle('💬 TYPE DE PAROLE', error: _selectedSubType == null),
             const SizedBox(height: 12),
@@ -2145,9 +2150,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildVideoSection(),
           ]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildDateLocationSection()]),
+          _FormCard(children: [_buildDateCollapsible()]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildPersonSection()]),
+          _FormCard(children: [_buildLocationCollapsible()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
@@ -2172,6 +2177,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildPersonPastilleRow(),
+          const SizedBox(height: 16),
           _FormCard(children: [
             _SectionTitle('🏃 TYPE DE MOUVEMENT',
                 error: _selectedSubType == null),
@@ -2210,9 +2217,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             _buildVideoSection(),
           ]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildDateLocationSection()]),
+          _FormCard(children: [_buildDateCollapsible()]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildPersonSection()]),
+          _FormCard(children: [_buildLocationCollapsible()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
@@ -2376,6 +2383,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildPersonPastilleRow(),
+          const SizedBox(height: 16),
           _growthToggleRow(on: true),
           const SizedBox(height: 10),
           _FormCard(children: [
@@ -2464,9 +2473,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           // vers ce mode) — la vidéo reste possible.
           _FormCard(children: [_buildVideoSection()]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildDateLocationSection()]),
+          _FormCard(children: [_buildDateCollapsible()]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildPersonSection()]),
+          _FormCard(children: [_buildLocationCollapsible()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
@@ -2493,6 +2502,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          _buildPersonPastilleRow(),
+          const SizedBox(height: 16),
           _FormCard(children: [
             _buildPhotoSection(),
             const SizedBox(height: 16),
@@ -2520,9 +2531,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           // ne pas l'exclure du rendu photo normal du livre.
           _growthToggleRow(on: false),
           const SizedBox(height: 4),
-          _FormCard(children: [_buildDateLocationSection()]),
+          _FormCard(children: [_buildDateCollapsible()]),
           const SizedBox(height: 14),
-          _FormCard(children: [_buildPersonSection()]),
+          _FormCard(children: [_buildLocationCollapsible()]),
           const SizedBox(height: 14),
           _FormCard(children: [_buildTagSection()]),
           const SizedBox(height: 14),
@@ -2587,29 +2598,47 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  /// Date + lieu du souvenir, dans une seule section repliable — résumé
-  /// « 15 mars 2025 · Genève » une fois repliée.
-  Widget _buildDateLocationSection() {
-    final loc = _locationController.text.trim();
-    final summary = _dateNeedsConfirmation
-        ? 'Date à confirmer${loc.isNotEmpty ? ' · $loc' : ''}'
-        : '$_dateLabel${loc.isNotEmpty ? ' · $loc' : ' · lieu manquant'}';
+  /// Date du souvenir — sa propre section repliable, résumé « 15 mars 2025 »
+  /// une fois repliée.
+  Widget _buildDateCollapsible() {
+    final summary = _dateNeedsConfirmation ? 'Date à confirmer' : _dateLabel;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         _collapsibleHeader(
-          title: '📅 QUAND & OÙ',
+          title: '📅 DATE',
           summary: summary,
           expanded: _dateSectionExpanded,
-          error: _dateNeedsConfirmation || _locationRequiredEmpty,
+          error: _dateNeedsConfirmation,
           onToggle: () =>
               setState(() => _dateSectionExpanded = !_dateSectionExpanded),
         ),
         if (_dateSectionExpanded) ...[
           const SizedBox(height: 12),
-          _buildDateSection(),
-          const SizedBox(height: 18),
-          _buildLocationField(),
+          _buildDateSection(showTitle: false),
+        ],
+      ],
+    );
+  }
+
+  /// Lieu du souvenir — sa propre section repliable, résumé « Genève » une
+  /// fois repliée.
+  Widget _buildLocationCollapsible() {
+    final loc = _locationController.text.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _collapsibleHeader(
+          title: '📍 LIEU',
+          summary: loc.isEmpty ? 'Lieu manquant' : loc,
+          expanded: _locationSectionExpanded,
+          error: _locationRequiredEmpty,
+          onToggle: () => setState(
+              () => _locationSectionExpanded = !_locationSectionExpanded),
+        ),
+        if (_locationSectionExpanded) ...[
+          const SizedBox(height: 12),
+          _buildLocationField(showTitle: false),
         ],
       ],
     );
@@ -2620,8 +2649,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// Tags du souvenir : l'année et le lieu sont posés d'office, le reste se
   /// choisit dans le même sélecteur que le filtre du dashboard (Date / Lieu /
   /// Événement, multi-sélection, et création d'un tag à la volée). Les
-  /// personnes ont leur propre section ([_buildPersonSection]) : on les
-  /// exclut d'ici pour ne pas les afficher deux fois.
+  /// personnes ont leur propre rangée de pastilles ([_buildPersonPastilleRow],
+  /// tout en haut de l'écran) : on les exclut d'ici pour ne pas les afficher
+  /// deux fois.
   Widget _buildTagSection() {
     final persons = _personLabels;
     final selected = _tagLabels.where((l) => !persons.contains(l)).toList()
@@ -2668,57 +2698,37 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   // ── Personnes ────────────────────────────────────────────────────────────
 
-  /// Qui est dans ce souvenir : une catégorie de tag à part, distincte des
-  /// dates/lieux/événements, pour pouvoir proposer uniquement les personnes
-  /// dans le sélecteur de rétrospective.
-  Widget _buildPersonSection() {
+  /// Qui est dans ce souvenir, tout en haut de l'écran, en pastilles (photo
+  /// ou initiales) — la première chose qu'on ajuste en éditant. Tap sur une
+  /// pastille pour lui donner/changer sa photo, sur sa croix pour la retirer,
+  /// sur « + » pour en ajouter une.
+  Widget _buildPersonPastilleRow() {
     final selected = _personLabels.toList()..sort();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _collapsibleHeader(
-          title: '🧑 PERSONNES',
-          summary: selected.isEmpty ? 'Aucune personne' : selected.join(', '),
-          expanded: _personSectionExpanded,
-          onToggle: () => setState(
-              () => _personSectionExpanded = !_personSectionExpanded),
-        ),
-        if (_personSectionExpanded) ...[
-          const SizedBox(height: 4),
-          const Text(
-            'Qui est dans ce souvenir ? Sert à retrouver ses souvenirs avec '
-            'quelqu\'un et à lui composer une rétrospective. Appui long sur '
-            'une personne pour lui donner une photo.',
-            style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+        const _SectionTitle('🧑 PERSONNES'),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 92,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
             children: [
               for (final label in selected)
-                GestureDetector(
-                  onTap: () => _removePerson(label),
-                  onLongPress: () => _editPersonPhoto(label),
-                  child: _TagChip(
+                Padding(
+                  padding: const EdgeInsets.only(right: 14),
+                  child: _EditablePersonPastille(
                     label: label,
-                    selected: true,
-                    leading: PersonAvatar(
-                      label: label,
-                      photoKey: _personTagFor(label)?.photoKey,
-                      colorHex: _personTagFor(label)?.color ?? '#C4714B',
-                      size: 20,
-                    ),
+                    photoKey: _personTagFor(label)?.photoKey,
+                    colorHex: _personTagFor(label)?.color ?? '#C4714B',
+                    onTap: () => _editPersonPhoto(label),
+                    onRemove: () => _removePerson(label),
                   ),
                 ),
-              GestureDetector(
-                onTap: _openPersonPicker,
-                child: const _TagChip(
-                    label: '＋ Ajouter une personne', selected: false),
-              ),
+              _AddPersonPastille(onTap: _openPersonPicker),
             ],
           ),
-        ],
+        ),
       ],
     );
   }
@@ -3056,12 +3066,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  Widget _buildLocationField() {
+  Widget _buildLocationField({bool showTitle = true}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle('📍 LIEU', error: _locationRequiredEmpty),
-        const SizedBox(height: 8),
+        if (showTitle) ...[
+          _SectionTitle('📍 LIEU', error: _locationRequiredEmpty),
+          const SizedBox(height: 8),
+        ],
         _locationAutocompleteField(
           decoration: InputDecoration(
             hintText: 'Ex : Zoo de Genève, Paris, Maison…',
@@ -3110,13 +3122,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  Widget _buildDateSection() {
+  Widget _buildDateSection({bool showTitle = true}) {
     final minDate = _childTag?.birthdate ?? DateTime(2000);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle('📅 DATE', error: _dateNeedsConfirmation),
-        const SizedBox(height: 8),
+        if (showTitle) ...[
+          _SectionTitle('📅 DATE', error: _dateNeedsConfirmation),
+          const SizedBox(height: 8),
+        ],
         if (_datePrecision == DatePrecision.exact)
           DateMaskField(
             label: 'Date',
@@ -3307,20 +3321,126 @@ class _VideoThumb extends StatelessWidget {
   }
 }
 
+/// Une personne du souvenir, pastille + croix pour la retirer. Tap sur la
+/// pastille = lui donner/changer sa photo ; tap sur la croix = la retirer du
+/// souvenir (ne supprime pas la personne elle-même, juste ce tag-ci).
+class _EditablePersonPastille extends StatelessWidget {
+  final String label;
+  final String? photoKey;
+  final String colorHex;
+  final VoidCallback onTap;
+  final VoidCallback onRemove;
+  const _EditablePersonPastille({
+    required this.label,
+    required this.photoKey,
+    required this.colorHex,
+    required this.onTap,
+    required this.onRemove,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      width: 64,
+      child: Column(
+        children: [
+          GestureDetector(
+            onTap: onTap,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                PersonAvatar(
+                    label: label, photoKey: photoKey, colorHex: colorHex, size: 60),
+                Positioned(
+                  top: -4,
+                  right: -4,
+                  child: GestureDetector(
+                    onTap: onRemove,
+                    child: Container(
+                      width: 22,
+                      height: 22,
+                      decoration: const BoxDecoration(
+                        color: AppColors.error,
+                        shape: BoxShape.circle,
+                        border: Border.fromBorderSide(
+                            BorderSide(color: AppColors.background, width: 2)),
+                      ),
+                      child: const Icon(Icons.close, size: 13, color: Colors.white),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.textMedium,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pastille « + » pour ajouter une personne au souvenir.
+class _AddPersonPastille extends StatelessWidget {
+  final VoidCallback onTap;
+  const _AddPersonPastille({required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: SizedBox(
+        width: 64,
+        child: Column(
+          children: [
+            Container(
+              width: 60,
+              height: 60,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: AppColors.surface,
+                border: Border.all(color: AppColors.border, width: 1.2),
+              ),
+              child: const Icon(Icons.add, color: AppColors.sageDark, size: 26),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Ajouter',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: AppColors.textMedium,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Puce de tag : cochée = le souvenir porte ce tag.
 class _TagChip extends StatelessWidget {
   final String label;
   final bool selected;
-  // Avatar de personne, affiché avant le libellé — null pour un tag ordinaire.
-  final Widget? leading;
-  const _TagChip({required this.label, required this.selected, this.leading});
+  const _TagChip({required this.label, required this.selected});
 
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 150),
-      padding: EdgeInsets.symmetric(
-          horizontal: leading != null ? 10 : 13, vertical: leading != null ? 6 : 8),
+      padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 8),
       decoration: BoxDecoration(
         color: selected ? AppColors.sageDark : AppColors.surface,
         borderRadius: BorderRadius.circular(50),
@@ -3332,7 +3452,6 @@ class _TagChip extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (leading != null) ...[leading!, const SizedBox(width: 6)],
           Text(
             label,
             style: TextStyle(

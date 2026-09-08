@@ -7,11 +7,15 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/models/memory_model.dart';
+import '../../core/models/tag_model.dart';
 import '../../core/services/audio_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/tag_service.dart';
 import '../../core/services/video_service.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
+import '../tags/person_avatar.dart';
+import '../tags/tag_picker_sheet.dart' show categoryOfKind, TagCategory;
 import 'widgets/delete_memory.dart';
 
 /// Vue LECTURE d'un souvenir : ce qu'on voit en tapant sur un polaroïd. La
@@ -50,11 +54,19 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
   bool _audioPlaying = false;
   StreamSubscription? _audioStateSub;
 
+  // Tags visibles, pour résoudre les pastilles des personnes taguées (photo,
+  // couleur) — le souvenir ne porte que des ids/libellés, pas ces détails.
+  List<TagModel> _tags = [];
+  StreamSubscription? _tagSub;
+
   @override
   void initState() {
     super.initState();
     _audioStateSub = _audio.onPlayerStateChanged.listen((s) {
       if (mounted) setState(() => _audioPlaying = s == PlayerState.playing);
+    });
+    _tagSub = TagService.streamVisible().listen((tags) {
+      if (mounted) setState(() => _tags = tags);
     });
   }
 
@@ -62,7 +74,22 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
   void dispose() {
     _audioStateSub?.cancel();
     _audio.dispose();
+    _tagSub?.cancel();
     super.dispose();
+  }
+
+  /// Les tags de personnes portés par ce souvenir, résolus depuis leurs ids
+  /// (un enfant EST une personne, voir categoryOfKind).
+  List<TagModel> _personTags(MemoryModel m) {
+    final byId = {for (final t in _tags) t.id: t};
+    final out = <TagModel>[];
+    for (final id in m.tagIds) {
+      final t = byId[id];
+      if (t != null && categoryOfKind(t.kind) == TagCategory.personne) {
+        out.add(t);
+      }
+    }
+    return out;
   }
 
   Future<void> _resolveMedia(MemoryModel m) async {
@@ -169,6 +196,7 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
+                        _peopleRow(m),
                         _meta(m),
                         const Divider(
                             height: 1, thickness: 1, color: AppColors.border,
@@ -249,6 +277,62 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
   }
 
   // ── Méta ─────────────────────────────────────────────────────────────────
+
+  // ── Personnes ────────────────────────────────────────────────────────────
+
+  /// Les personnes taguées, en pastilles tout en haut — la première chose
+  /// qu'on voit en ouvrant un souvenir. Rien à afficher si aucune n'est taguée.
+  Widget _peopleRow(MemoryModel m) {
+    final people = _personTags(m);
+    if (people.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(0, 14, 0, 4),
+      child: SizedBox(
+        height: 86,
+        child: ListView(
+          scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.symmetric(horizontal: 22),
+          children: [
+            for (final t in people)
+              Padding(
+                padding: const EdgeInsets.only(right: 14),
+                child: SizedBox(
+                  width: 58,
+                  child: Column(
+                    children: [
+                      PersonAvatar(
+                        label: t.label,
+                        photoKey: t.photoKey,
+                        colorHex: t.color,
+                        size: 54,
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        t.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 11.5,
+                          color: AppColors.textMedium,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Libellés de tags à afficher en puces génériques : tous sauf les
+  /// personnes (déjà montrées en pastilles tout en haut, voir _peopleRow).
+  List<String> _nonPersonTagLabels(MemoryModel m) {
+    final personLabels = {for (final t in _personTags(m)) t.label};
+    return [for (final l in m.tagLabels) if (!personLabels.contains(l)) l];
+  }
 
   Widget _meta(MemoryModel m) {
     final cat = _safeCat(m.type);
@@ -336,13 +420,13 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
                 ),
               ),
           ],
-          if (m.tagLabels.isNotEmpty) ...[
+          if (_nonPersonTagLabels(m).isNotEmpty) ...[
             const SizedBox(height: 16),
             Wrap(
               spacing: 8,
               runSpacing: 8,
               children: [
-                for (final t in m.tagLabels)
+                for (final t in _nonPersonTagLabels(m))
                   Container(
                     padding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
