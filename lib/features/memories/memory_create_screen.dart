@@ -1367,25 +1367,31 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // Photos/vidéos envoyées vers R2 dès leur sélection (voir
       // DraftMediaUploader), pendant qu'on remplissait le reste du
       // formulaire : leur clé va direct dans le souvenir, pas besoin de
-      // repasser par la file d'arrière-plan. Ce qui n'a pas fini à temps (ou
-      // a échoué) y repart comme avant — on annule d'abord tout ticket
-      // encore actif pour ces fichiers-là, pour ne pas envoyer deux fois le
-      // même clip.
+      // repasser par la file d'arrière-plan. Ce qui n'a PAS fini à temps
+      // repart aussi vers cette file — mais SANS annuler le ticket en cours :
+      // pour un gros lot (ex. 19 vidéos) qui n'a pas eu le temps de finir
+      // pendant le remplissage du formulaire, annuler jetterait toute la
+      // compression/l'envoi déjà en cours pour la relancer de zéro (c'est ce
+      // qui faisait « Envoi de la vidéo 0/19 » sans aucun rapport avec le
+      // travail déjà fait). La file d'arrière-plan ATTEND ce même ticket
+      // (voir MediaUploadQueue) au lieu d'en démarrer un second en double.
       final preUploadedPhotoKeys = <String>[];
       final stillPendingPhotos = <File>[];
+      final stillPendingPhotoTickets = <DraftUploadTicket?>[];
       for (var i = 0; i < _localPhotos.length; i++) {
         final ticket = i < _photoTickets.length ? _photoTickets[i] : null;
         if (ticket != null && ticket.isDone && ticket.key != null) {
           preUploadedPhotoKeys.add(ticket.key!);
         } else {
-          if (ticket != null) DraftMediaUploader.instance.cancel(ticket);
           stillPendingPhotos.add(_localPhotos[i]);
+          stillPendingPhotoTickets.add(ticket);
         }
       }
       final preUploadedVideoKeys = <String>[];
       final preUploadedVideoDurations = <int>[];
       final stillPendingVideoPaths = <String>[];
       final stillPendingVideoDurations = <int?>[];
+      final stillPendingVideoTickets = <DraftUploadTicket?>[];
       for (var i = 0; i < _localVideoPaths.length; i++) {
         final ticket = i < _videoTickets.length ? _videoTickets[i] : null;
         if (ticket != null && ticket.isDone && ticket.key != null) {
@@ -1395,14 +1401,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           final dur = ticket.durationMs ?? localDur;
           if (dur != null) preUploadedVideoDurations.add(dur);
         } else {
-          if (ticket != null) DraftMediaUploader.instance.cancel(ticket);
           stillPendingVideoPaths.add(_localVideoPaths[i]);
           stillPendingVideoDurations.add(
               i < _localVideoDurations.length ? _localVideoDurations[i] : null);
+          stillPendingVideoTickets.add(ticket);
         }
       }
-      // Les tickets sont repris ci-dessus (clé gardée ou fichier remis en
-      // file) — `dispose()` ne doit plus y toucher.
+      // Les tickets sont repris ci-dessus (clé gardée, ou ticket transmis à
+      // la file d'arrière-plan qui l'attendra) — `dispose()` ne doit plus y
+      // toucher.
       _mediaFinalized = true;
       final allNewPhotoKeys = [...keptPhotoKeys, ...preUploadedPhotoKeys];
       final allVideoKeys = [...knownVideoKeys, ...preUploadedVideoKeys];
@@ -1542,6 +1549,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           memoryId: memoryId,
           notebookId: spaceId,
           localPhotos: stillPendingPhotos,
+          photoTickets: stillPendingPhotoTickets,
           existingPhotoUrls: keptLegacyUrls,
           existingPhotoKeys: allNewPhotoKeys,
           removedPhotoUrls: List<String>.of(_removedPhotoUrls),
@@ -1553,6 +1561,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           audioDurationMs: _audioDurationMs,
           localVideoPaths: stillPendingVideoPaths,
           localVideoDurations: stillPendingVideoDurations,
+          videoTickets: stillPendingVideoTickets,
           existingVideoKeys: allVideoKeys,
           existingVideoDurations: allVideoDurations,
           removedVideoKeys: List<String>.of(_removedVideoKeys),

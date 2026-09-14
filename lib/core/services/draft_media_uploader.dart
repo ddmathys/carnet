@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'photo_service.dart';
@@ -12,7 +13,12 @@ enum DraftUploadStatus { uploading, done, failed, cancelled }
 /// aussi à l'envoi : la file qui restait à traiter APRÈS la sauvegarde
 /// (bannière « Envoi de la vidéo x/y », voir `UploadStatusBanner`) est donc
 /// souvent bien plus courte, parfois vide, une fois qu'on appuie sur
-/// « Enregistrer ».
+/// « Enregistrer ». Pour un gros lot (ex. 19 vidéos) qui n'a pas eu le temps
+/// de finir avant l'enregistrement, `_save()` (memory_create_screen.dart) ne
+/// doit JAMAIS annuler un ticket encore actif pour le relancer de zéro — ça
+/// gâcherait la compression/l'envoi déjà en cours pour rien. Il passe plutôt
+/// le ticket à `MediaUploadQueue`, qui ATTEND ce même envoi (voir [settled])
+/// au lieu d'en démarrer un second en double.
 class DraftUploadTicket extends ChangeNotifier {
   DraftUploadTicket({required this.isVideo});
 
@@ -20,10 +26,25 @@ class DraftUploadTicket extends ChangeNotifier {
   DraftUploadStatus status = DraftUploadStatus.uploading;
   String? key;
   int? durationMs;
+  // Progression 0..1 de l'envoi réseau en cours (vidéo seulement — relayée
+  // par `MediaUploadQueue` sur la bannière si le ticket n'a pas fini à temps,
+  // pour que la barre reflète le vrai avancement au lieu de repartir à 0%).
+  double progress = 0;
   bool _cancelRequested = false;
+  final Completer<void> _settledCompleter = Completer<void>();
 
   bool get isCancelled => _cancelRequested;
   bool get isDone => status == DraftUploadStatus.done;
+
+  /// Se termine une fois l'envoi arrivé dans un état FINAL (réussi, échoué ou
+  /// annulé) — jamais avant. `MediaUploadQueue` l'attend pour un ticket
+  /// encore actif au moment de `_save()`, plutôt que de relancer un envoi en
+  /// double sur le même fichier.
+  Future<void> get settled => _settledCompleter.future;
+
+  void _settle() {
+    if (!_settledCompleter.isCompleted) _settledCompleter.complete();
+  }
 
   void _markDone(String uploadedKey, int? uploadedDurationMs) {
     key = uploadedKey;
@@ -32,6 +53,7 @@ class DraftUploadTicket extends ChangeNotifier {
     status =
         cancelledMeanwhile ? DraftUploadStatus.cancelled : DraftUploadStatus.done;
     notifyListeners();
+    _settle();
     if (cancelledMeanwhile) {
       // Désélectionné pendant que l'envoi se terminait : la clé est déjà sur
       // R2, on la nettoie plutôt que de laisser un objet orphelin.
@@ -50,10 +72,17 @@ class DraftUploadTicket extends ChangeNotifier {
       status = DraftUploadStatus.failed;
     }
     notifyListeners();
+    _settle();
   }
 
   void _markCancelled() {
     status = DraftUploadStatus.cancelled;
+    notifyListeners();
+    _settle();
+  }
+
+  void _updateProgress(double p) {
+    progress = p;
     notifyListeners();
   }
 }
@@ -113,6 +142,10 @@ class DraftMediaUploader {
           video: file,
           notebookId: nbId,
           isCancelled: () => ticket.isCancelled,
+          onProgress: (sent, total) {
+            if (total <= 0) return;
+            ticket._updateProgress(sent / total);
+          },
         );
         if (r == null) {
           if (VideoService.lastUploadWasCancelled) {

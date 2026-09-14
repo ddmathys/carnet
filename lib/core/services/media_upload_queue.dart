@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'draft_media_uploader.dart';
 import 'photo_service.dart';
 import 'audio_service.dart';
 import 'video_service.dart';
@@ -29,6 +30,15 @@ class MediaUploadJob {
   final List<String> existingVideoKeys;
   final List<int> existingVideoDurations;
   final List<String> removedVideoKeys;
+  // Envoi déjà démarré à la SÉLECTION (voir DraftMediaUploader), pas encore
+  // fini au moment de `_save()` — parallèle à `localPhotos`/`localVideoPaths`
+  // (même index, `null` = pas de ticket, upload frais comme avant). On
+  // ATTEND ce même envoi plutôt que d'en lancer un second sur le même
+  // fichier : sinon, un gros lot (ex. 19 vidéos) qui n'a pas fini pendant le
+  // remplissage du formulaire verrait tout son travail jeté et relancé de
+  // zéro dès qu'on appuie sur « Enregistrer ».
+  final List<DraftUploadTicket?> photoTickets;
+  final List<DraftUploadTicket?> videoTickets;
 
   const MediaUploadJob({
     required this.memoryId,
@@ -48,6 +58,8 @@ class MediaUploadJob {
     this.existingVideoKeys = const [],
     this.existingVideoDurations = const [],
     this.removedVideoKeys = const [],
+    this.photoTickets = const [],
+    this.videoTickets = const [],
   });
 }
 
@@ -138,17 +150,30 @@ class MediaUploadQueue extends ChangeNotifier {
         _photoDone = 0;
         notifyListeners();
       }
-      final photoFuture = Future.wait(job.localPhotos.map(
-        (f) async {
-          final key = await PhotoService.uploadMemoryPhotoToR2(
-            photo: f,
-            notebookId: job.notebookId,
-          );
-          _photoDone++;
-          notifyListeners();
-          return key;
-        },
-      ));
+      final photoFuture = Future.wait(List.generate(job.localPhotos.length,
+          (i) async {
+        // Envoi déjà démarré à la sélection, pas encore fini : on ATTEND ce
+        // même envoi au lieu d'en lancer un second sur le même fichier.
+        final ticket =
+            i < job.photoTickets.length ? job.photoTickets[i] : null;
+        if (ticket != null) {
+          await ticket.settled;
+          if (ticket.key != null) {
+            _photoDone++;
+            notifyListeners();
+            return ticket.key;
+          }
+          // Ticket en échec (ou annulé sans clé) → repli sur un envoi frais,
+          // comme si aucun pré-envoi n'avait été tenté.
+        }
+        final key = await PhotoService.uploadMemoryPhotoToR2(
+          photo: job.localPhotos[i],
+          notebookId: job.notebookId,
+        );
+        _photoDone++;
+        notifyListeners();
+        return key;
+      }));
       // Audio → R2 (clé). Nouveau mémo → upload ; sinon rien à uploader.
       final Future<String?> audioFuture = job.localAudioPath != null
           ? AudioService.uploadMemoryAudioToR2(
@@ -192,36 +217,79 @@ class MediaUploadQueue extends ChangeNotifier {
         _videoProgress = 0;
         _lastNotifiedPct = -1;
         notifyListeners();
-        // Rail partagé avec `DraftMediaUploader` (upload dès la sélection,
-        // avant même la sauvegarde) : garantit qu'un seul clip compresse à la
-        // fois app-wide, pas seulement au sein de CETTE file.
-        final r = await VideoUploadLane.instance.run(() =>
-            VideoService.uploadMemoryVideo(
-              video: File(job.localVideoPaths[i]),
-              notebookId: job.notebookId,
-              onProgress: (sent, total) {
-                if (total <= 0) return;
-                _videoProgress = sent / total;
-                // On ne rafraîchit qu'au changement de pourcent entier : sinon
-                // des milliers de notifications pour un gros fichier.
-                final pct = (_videoProgress * 100).floor();
-                if (pct != _lastNotifiedPct) {
-                  _lastNotifiedPct = pct;
-                  notifyListeners();
-                }
-              },
-            ));
+
+        String? key;
+        int? durationMs;
+        final ticket =
+            i < job.videoTickets.length ? job.videoTickets[i] : null;
+        if (ticket != null) {
+          // Envoi déjà démarré à la sélection (voir DraftMediaUploader), pas
+          // encore fini : on ATTEND ce même envoi — sur le rail partagé
+          // VideoUploadLane, il est peut-être même déjà en train de tourner
+          // — au lieu d'en lancer un second en double sur le même fichier
+          // (double compression/upload gâchés pour rien). On relaie sa
+          // progression déjà en cours sur la bannière, pour ne pas la montrer
+          // bloquée à 0 % pendant qu'on attend.
+          void relay() {
+            _videoProgress = ticket.progress;
+            final pct = (_videoProgress * 100).floor();
+            if (pct != _lastNotifiedPct) {
+              _lastNotifiedPct = pct;
+              notifyListeners();
+            }
+          }
+
+          ticket.addListener(relay);
+          relay();
+          await ticket.settled;
+          ticket.removeListener(relay);
+          if (ticket.key != null) {
+            key = ticket.key;
+            durationMs = ticket.durationMs;
+          }
+          // Ticket en échec (ou annulé sans clé) → repli sur un envoi frais
+          // ci-dessous, comme si aucun pré-envoi n'avait été tenté.
+        }
+
+        if (key == null) {
+          _videoProgress = 0;
+          notifyListeners();
+          // Rail partagé avec `DraftMediaUploader` (upload dès la sélection,
+          // avant même la sauvegarde) : garantit qu'un seul clip compresse à
+          // la fois app-wide, pas seulement au sein de CETTE file.
+          final r = await VideoUploadLane.instance.run(() =>
+              VideoService.uploadMemoryVideo(
+                video: File(job.localVideoPaths[i]),
+                notebookId: job.notebookId,
+                onProgress: (sent, total) {
+                  if (total <= 0) return;
+                  _videoProgress = sent / total;
+                  // On ne rafraîchit qu'au changement de pourcent entier :
+                  // sinon des milliers de notifications pour un gros fichier.
+                  final pct = (_videoProgress * 100).floor();
+                  if (pct != _lastNotifiedPct) {
+                    _lastNotifiedPct = pct;
+                    notifyListeners();
+                  }
+                },
+              ));
+          if (r != null) {
+            key = r.key;
+            durationMs = r.durationMs;
+          }
+        }
+
         final localDur =
             i < job.localVideoDurations.length ? job.localVideoDurations[i] : null;
-        if (r == null) {
+        if (key == null) {
           // Upload échoué → on garde le chemin pour un réessai (sans doublon).
           failedVideoPaths.add(job.localVideoPaths[i]);
           failedVideoDurations.add(localDur);
           _lastError = VideoService.lastFailureReason ?? 'Échec de l\'envoi';
           continue;
         }
-        videoKeys.add(r.key);
-        final dur = r.durationMs ?? localDur;
+        videoKeys.add(key);
+        final dur = durationMs ?? localDur;
         if (dur != null) videoDurationsMs.add(dur);
       }
       // Fin des vidéos de ce lot → on efface la progression (la bannière repasse
