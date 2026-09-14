@@ -233,13 +233,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'photo-sign') {
-    // Signature par lot de clés APPARTENANT à l'appelant (photos/{uid}/…).
-    // Sert la génération de livre et les couvertures.
+    // Signature par lot de clés — deux cas légitimes :
+    // (1) clés APPARTENANT à l'appelant (photos/{uid}/…) : génération de
+    //     livre, couvertures ;
+    // (2) clé qui est la photo d'un tag PERSONNE auquel l'appelant a accès
+    //     (propriétaire OU collaborateur partagé) : l'avatar d'une personne
+    //     (ex. « Nathan ») doit s'afficher aussi chez un collaborateur qui a
+    //     rejoint le tag partagé, pas seulement chez le propriétaire — sinon
+    //     la pastille retombe silencieusement sur les initiales pour lui.
     const raw = Array.isArray(body.keys) ? (body.keys as unknown[]) : []
-    const keys = raw.filter(
-      (k): k is string =>
-        typeof k === 'string' && k.startsWith(`photos/${user.uid}/`)
-    )
+    const allKeys = raw.filter((k): k is string => typeof k === 'string')
+
+    const ownKeys = allKeys.filter((k) => k.startsWith(`photos/${user.uid}/`))
+    const otherKeys = allKeys.filter((k) => !k.startsWith(`photos/${user.uid}/`))
+
+    const sharedPersonKeys: string[] = []
+    if (otherKeys.length > 0) {
+      // Limite `in` Firestore : 30 valeurs par requête. Un lot dépasse
+      // rarement 1 clé en pratique (un avatar à la fois), mais on découpe
+      // par sécurité si jamais plus sont demandées d'un coup.
+      for (let i = 0; i < otherKeys.length; i += 30) {
+        const batch = otherKeys.slice(i, i + 30)
+        const snap = await db.collection('tags').where('photoKey', 'in', batch).get()
+        for (const doc of snap.docs) {
+          const t = doc.data() as Record<string, any>
+          const sharedWith: string[] = Array.isArray(t.sharedWith) ? t.sharedWith : []
+          if (
+            typeof t.photoKey === 'string' &&
+            (t.userId === user.uid || sharedWith.includes(user.uid))
+          ) {
+            sharedPersonKeys.push(t.photoKey)
+          }
+        }
+      }
+    }
+
+    const keys = [...ownKeys, ...sharedPersonKeys]
     const urls = await Promise.all(keys.map((k) => presignGet(k, 3600)))
     return res.status(200).json({ keys, urls })
   }
