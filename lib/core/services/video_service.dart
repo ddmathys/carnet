@@ -7,6 +7,13 @@ import 'package:http/http.dart' as http;
 import 'package:video_compress/video_compress.dart';
 import '../config/app_config.dart';
 
+/// Marqueur interne : le PUT a été interrompu volontairement (`isCancelled`
+/// de [VideoService.uploadMemoryVideo] passé à vrai), pas par une vraie
+/// coupure réseau — distingue les deux dans la boucle de tentatives.
+class _UploadCancelledException implements Exception {
+  const _UploadCancelledException();
+}
+
 /// Résultat d'un upload vidéo : la clé d'objet R2 (stockée dans Firestore) et
 /// la durée détectée.
 class VideoUploadResult {
@@ -117,12 +124,20 @@ class VideoService {
   /// Sans elle, un clip qui ne part pas disparaît sans un mot.
   static String? lastFailureReason;
 
+  /// Le dernier appel à [uploadMemoryVideo] s'est-il arrêté parce
+  /// qu'[isCancelled] est devenu vrai (l'utilisateur a désélectionné le clip
+  /// pendant l'envoi) ? Distinct d'un vrai échec : pas d'erreur à afficher,
+  /// pas de réessai. Un seul clip à la fois transite (voir `VideoUploadLane`),
+  /// ce drapeau statique n'est donc jamais ambigu.
+  static bool lastUploadWasCancelled = false;
+
   /// PUT en FLUX vers R2 : le fichier est lu par morceaux depuis le disque. Une
   /// vidéo de plusieurs centaines de Mo chargée d'un bloc en mémoire faisait
   /// tomber l'app sur les téléphones modestes — et le clip était perdu sans
   /// message.
   static Future<int> _putFile(Uri url, File file, String contentType,
       {void Function(int sent, int total)? onProgress,
+      bool Function()? isCancelled,
       Duration idleTimeout = const Duration(seconds: 90)}) async {
     final client = http.Client();
     Timer? watchdog;
@@ -139,6 +154,9 @@ class VideoService {
       // réel de l'envoi.
       var sent = 0;
       final body = file.openRead().map((chunk) {
+        if (isCancelled != null && isCancelled()) {
+          throw const _UploadCancelledException();
+        }
         sent += chunk.length;
         lastActivity = DateTime.now();
         onProgress?.call(sent, length);
@@ -183,7 +201,19 @@ class VideoService {
     required File video,
     required String notebookId,
     void Function(int sent, int total)? onProgress,
+    // Vérifié à chaque point de contrôle (avant compression, après
+    // compression, à chaque octet du PUT) : envoi immédiat dès la sélection
+    // dans l'écran de création (voir `DraftMediaUploader`), pour arrêter
+    // proprement — et supprimer si une clé a déjà été produite — si
+    // l'utilisateur désélectionne le clip en cours de route. `null` (cas de
+    // la file d'arrière-plan `MediaUploadQueue`) = jamais annulé.
+    bool Function()? isCancelled,
   }) async {
+    lastUploadWasCancelled = false;
+    if (isCancelled?.call() ?? false) {
+      lastUploadWasCancelled = true;
+      return null;
+    }
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (token == null) {
       lastFailureReason = 'Session expirée';
@@ -204,12 +234,23 @@ class VideoService {
     } catch (_) {}
     if (sizeBytes > 0 && sizeBytes <= skipCompressionAbove) {
       try {
+        // Chien de garde : sur certains clips (codec/format inhabituel), le
+        // plugin natif ne renvoie jamais ni résultat ni erreur — sans timeout,
+        // ça bloquait indéfiniment (barre à 0 %) TOUTE la file, la compression
+        // étant strictement séquentielle (une seule session globale, voir plus
+        // haut). Si ça patine, on annule côté natif (sinon la session globale
+        // reste occupée et bloque aussi les clips suivants) et on envoie
+        // l'original tel quel, comme pour le cas "vidéo trop lourde" ci-dessous.
         final info = await VideoCompress.compressVideo(
           video.path,
           quality: VideoQuality.Res1280x720Quality,
           deleteOrigin: false,
           includeAudio: true,
-        );
+        ).timeout(const Duration(seconds: 90), onTimeout: () {
+          debugPrint('VideoService: compression au point mort (>90s) — envoi original');
+          VideoCompress.cancelCompression();
+          return null;
+        });
         if (info != null && info.path != null) {
           toUpload = File(info.path!);
           durationMs = info.duration?.round();
@@ -220,6 +261,11 @@ class VideoService {
     } else {
       debugPrint(
           'VideoService: vidéo volumineuse (${(sizeBytes / (1024 * 1024)).round()} Mo) → envoi sans compression');
+    }
+
+    if (isCancelled?.call() ?? false) {
+      lastUploadWasCancelled = true;
+      return null;
     }
 
     // 2 + 3. On (re)signe une URL puis on PUT vers R2, avec REPRISE auto. Un
@@ -265,7 +311,7 @@ class VideoService {
         // 3. PUT direct vers R2. Le Content-Type doit correspondre à la signature.
         final status = await _putFile(
             Uri.parse(uploadUrl), toUpload, contentType,
-            onProgress: onProgress);
+            onProgress: onProgress, isCancelled: isCancelled);
         if (status == 200 || status == 201) {
           lastFailureReason = null;
           return VideoUploadResult(key: key, durationMs: durationMs);
@@ -286,6 +332,10 @@ class VideoService {
           await Future<void>.delayed(Duration(seconds: 2 * attempt));
           continue;
         }
+        return null;
+      } on _UploadCancelledException {
+        // Désélectionné pendant l'envoi : pas une erreur, pas de réessai.
+        lastUploadWasCancelled = true;
         return null;
       } catch (e) {
         debugPrint('VideoService: upload error (essai $attempt) — $e');

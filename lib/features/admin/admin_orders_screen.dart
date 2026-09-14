@@ -8,6 +8,7 @@ import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/models/order_model.dart';
+import '../../core/services/backend_client.dart';
 import '../../core/services/order_service.dart';
 
 class AdminOrdersScreen extends StatefulWidget {
@@ -42,6 +43,18 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => context.go('/home'),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.ios_share, color: Colors.white),
+            tooltip: 'Partager l\'app',
+            onPressed: () => showModalBottomSheet<void>(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const _ShareApkSheet(),
+            ),
+          ),
+        ],
       ),
       body: Column(
         children: [
@@ -796,6 +809,149 @@ class _PdfStatusWidget extends StatelessWidget {
           ]),
         );
       },
+    );
+  }
+}
+
+/// Feuille "Partager l'app" : l'admin envoie le lien d'installation Android
+/// (dmathys.dev/download/carnet.apk) par email à un ou plusieurs proches —
+/// jusqu'ici seul un envoi manuel du lien (copier-coller) était possible.
+class _ShareApkSheet extends StatefulWidget {
+  const _ShareApkSheet();
+
+  @override
+  State<_ShareApkSheet> createState() => _ShareApkSheetState();
+}
+
+class _ShareApkSheetState extends State<_ShareApkSheet> {
+  final _emailsController = TextEditingController();
+  final _messageController = TextEditingController();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _emailsController.dispose();
+    _messageController.dispose();
+    super.dispose();
+  }
+
+  // Virgule, point-virgule OU retour à la ligne — souple sur la façon dont on
+  // colle une liste d'adresses depuis un carnet de contacts ou un mail.
+  List<String> get _parsedEmails => _emailsController.text
+      .split(RegExp(r'[,;\n]'))
+      .map((e) => e.trim())
+      .where((e) => e.contains('@'))
+      .toSet()
+      .toList();
+
+  Future<void> _send() async {
+    final emails = _parsedEmails;
+    if (emails.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Ajoute au moins un email valide')),
+      );
+      return;
+    }
+    setState(() => _sending = true);
+    final result = await BackendClient.postJson('/api/notify/share-apk', {
+      'emails': emails,
+      'message': _messageController.text.trim(),
+    });
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (result == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Échec de l\'envoi — réessaie.')),
+      );
+      return;
+    }
+    final sentCount = (result['sent'] as List?)?.length ?? 0;
+    final failed = ((result['failed'] as List?) ?? const [])
+        .map((e) => e.toString())
+        .toList();
+    Navigator.pop(context);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(failed.isEmpty
+          ? 'Envoyé à $sentCount destinataire${sentCount > 1 ? 's' : ''} 📖'
+          : 'Envoyé à $sentCount — échec pour ${failed.join(', ')}'),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: EdgeInsets.only(
+        bottom: MediaQuery.of(context).viewInsets.bottom,
+      ),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.background,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 28),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Partager l\'app',
+                style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 6),
+            const Text(
+              'Envoie le lien d\'installation Android par email — un ou '
+              'plusieurs destinataires (séparés par une virgule ou un '
+              'retour à la ligne).',
+              style: TextStyle(fontSize: 12.5, color: AppColors.textMedium),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _emailsController,
+              maxLines: 3,
+              minLines: 1,
+              keyboardType: TextInputType.emailAddress,
+              decoration: const InputDecoration(
+                labelText: 'Email(s)',
+                hintText: 'ami@example.com, collegue@example.com',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _messageController,
+              maxLines: 2,
+              minLines: 1,
+              decoration: const InputDecoration(
+                labelText: 'Message personnel (optionnel)',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton(
+                onPressed: _sending ? null : _send,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.sageDark,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: _sending
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text('Envoyer',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600)),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

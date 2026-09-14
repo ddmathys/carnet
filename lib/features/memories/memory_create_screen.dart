@@ -13,6 +13,7 @@ import 'package:path_provider/path_provider.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/app_messenger.dart';
 import '../../core/services/audio_service.dart';
+import '../../core/services/draft_media_uploader.dart';
 import '../../core/services/media_upload_queue.dart';
 import '../../core/services/memory_activity_service.dart';
 import '../../core/services/memory_query_service.dart';
@@ -147,6 +148,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // Vidéos souvenir (jusqu'à maxVideosPerMemory clips, stockées sur R2).
   final List<String> _localVideoPaths = []; // nouvelles vidéos non uploadées
   final List<int?> _localVideoDurations = []; // parallèle à _localVideoPaths
+  // Envoi vers R2 démarré dès la sélection (voir DraftMediaUploader) — pas
+  // seulement à l'enregistrement. Parallèle à `_localVideoPaths` (même index).
+  final List<DraftUploadTicket> _videoTickets = [];
   final List<String> _existingVideoKeys = []; // clés R2 conservées (édition)
   final List<int> _existingVideoDurations = []; // parallèle à _existingVideoKeys
   final List<String> _removedVideoKeys = []; // clés existantes supprimées
@@ -180,6 +184,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   // Photos (multi)
   final List<File> _localPhotos = [];
+  // Envoi vers R2 démarré dès la sélection (voir DraftMediaUploader) — pas
+  // seulement à l'enregistrement. Parallèle à `_localPhotos` (même index).
+  final List<DraftUploadTicket> _photoTickets = [];
+  // Devient vrai une fois `_save()` a repris les tickets en cours (dans le
+  // payload ou dans la file d'arrière-plan) : `dispose()` ne doit alors plus
+  // les annuler (le média est déjà sauvegardé / pris en charge ailleurs).
+  bool _mediaFinalized = false;
   final List<String> _existingPhotoUrls = [];
   final List<String> _removedPhotoUrls = [];
   // Photos R2 existantes : URL signée (affichée) → clé R2 (conservée en base).
@@ -236,6 +247,20 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   @override
   void dispose() {
+    // Écran quitté sans sauvegarder (ou sauvegarde qui n'a jamais abouti) :
+    // les envois démarrés dès la sélection (DraftMediaUploader) n'ont pas été
+    // repris ailleurs, on les annule pour ne pas laisser d'objets orphelins
+    // sur R2. Si `_save()` a fini (`_mediaFinalized`), tout est déjà pris en
+    // charge (clé dans le souvenir ou fichier remis dans la file
+    // d'arrière-plan) — ne plus y toucher.
+    if (!_mediaFinalized) {
+      for (final t in _photoTickets) {
+        DraftMediaUploader.instance.cancel(t);
+      }
+      for (final t in _videoTickets) {
+        DraftMediaUploader.instance.cancel(t);
+      }
+    }
     _titleController.dispose();
     _locationController.dispose();
     _locationFocusNode.dispose();
@@ -561,6 +586,38 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     } catch (_) {}
   }
 
+  /// Carnet porteur à passer à l'upload immédiat (voir DraftMediaUploader).
+  /// Même résolution qu'à la sauvegarde (`_save`) : espace unique de
+  /// l'utilisateur, ou carnet du souvenir édité. `SpaceService.ensureSpaceId`
+  /// met déjà en cache par utilisateur — pas besoin de le faire ici aussi.
+  Future<String?> _notebookIdForUpload() async {
+    if (_isEditing) return _editNotebookId ?? await SpaceService.ensureSpaceId();
+    return SpaceService.ensureSpaceId();
+  }
+
+  /// Démarre l'envoi R2 de [files] dès leur sélection (pas seulement à
+  /// l'enregistrement) : un ticket de suivi par fichier, dans le même ordre —
+  /// appelant responsable d'ajouter les fichiers ET les tickets à
+  /// `_localPhotos`/`_photoTickets` dans le même `setState`.
+  List<DraftUploadTicket> _startPhotoUploads(List<File> files) {
+    final notebookIdFuture = _notebookIdForUpload();
+    return [
+      for (final f in files)
+        DraftMediaUploader.instance
+            .startPhoto(file: f, notebookId: notebookIdFuture),
+    ];
+  }
+
+  /// Équivalent vidéo de [_startPhotoUploads].
+  List<DraftUploadTicket> _startVideoUploads(List<String> paths) {
+    final notebookIdFuture = _notebookIdForUpload();
+    return [
+      for (final p in paths)
+        DraftMediaUploader.instance
+            .startVideo(file: File(p), notebookId: notebookIdFuture),
+    ];
+  }
+
   Future<void> _pickPhotos(ImageSource source) async {
     // Quota photos : on bloque à la limite réelle (compte les photos déjà en
     // cours d'ajout).
@@ -579,7 +636,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             imageQuality: 80, maxWidth: 1920);
         if (picked.isNotEmpty && mounted) {
           final files = picked.map((x) => File(x.path)).toList();
-          setState(() => _localPhotos.addAll(files));
+          final tickets = _startPhotoUploads(files);
+          setState(() {
+            _localPhotos.addAll(files);
+            _photoTickets.addAll(tickets);
+          });
           // Read EXIF (date + GPS location) from the first photo only
           await _applyExifFromPhoto(files.first);
         }
@@ -588,7 +649,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             source: source, imageQuality: 80, maxWidth: 1920);
         if (picked != null && mounted) {
           final file = File(picked.path);
-          setState(() => _localPhotos.add(file));
+          final ticket = _startPhotoUploads([file]).single;
+          setState(() {
+            _localPhotos.add(file);
+            _photoTickets.add(ticket);
+          });
           await _applyExifFromPhoto(file);
         }
       }
@@ -610,7 +675,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   void _removeLocalPhoto(int index) {
-    setState(() => _localPhotos.removeAt(index));
+    setState(() {
+      _localPhotos.removeAt(index);
+      if (index < _photoTickets.length) {
+        DraftMediaUploader.instance.cancel(_photoTickets.removeAt(index));
+      }
+    });
   }
 
   void _showQuotaDialog() {
@@ -793,9 +863,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       }
 
       if (mounted) {
+        final ticket = _startVideoUploads([picked.path]).single;
         setState(() {
           _localVideoPaths.add(picked.path);
           _localVideoDurations.add(durMs);
+          _videoTickets.add(ticket);
           _preparingVideo = false;
         });
       }
@@ -877,9 +949,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     }
 
     if (!mounted) return;
+    final tickets = _startVideoUploads(accepted);
     setState(() {
       _localVideoPaths.addAll(accepted);
       _localVideoDurations.addAll(acceptedDurations);
+      _videoTickets.addAll(tickets);
     });
 
     if (quotaHit) {
@@ -946,7 +1020,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         photoOk = q.allowed;
       }
       if (photoOk) {
-        if (mounted) setState(() => _localPhotos.addAll(photoFiles));
+        if (mounted) {
+          final tickets = _startPhotoUploads(photoFiles);
+          setState(() {
+            _localPhotos.addAll(photoFiles);
+            _photoTickets.addAll(tickets);
+          });
+        }
         await _applyExifFromPhoto(photoFiles.first);
       } else if (mounted) {
         _showQuotaDialog();
@@ -989,6 +1069,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     setState(() {
       _localVideoPaths.removeAt(index);
       _localVideoDurations.removeAt(index);
+      if (index < _videoTickets.length) {
+        DraftMediaUploader.instance.cancel(_videoTickets.removeAt(index));
+      }
     });
   }
 
@@ -1281,6 +1364,53 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       final knownVideoKeys = List<String>.of(_existingVideoKeys);
       final knownVideoDurations = List<int>.of(_existingVideoDurations);
 
+      // Photos/vidéos envoyées vers R2 dès leur sélection (voir
+      // DraftMediaUploader), pendant qu'on remplissait le reste du
+      // formulaire : leur clé va direct dans le souvenir, pas besoin de
+      // repasser par la file d'arrière-plan. Ce qui n'a pas fini à temps (ou
+      // a échoué) y repart comme avant — on annule d'abord tout ticket
+      // encore actif pour ces fichiers-là, pour ne pas envoyer deux fois le
+      // même clip.
+      final preUploadedPhotoKeys = <String>[];
+      final stillPendingPhotos = <File>[];
+      for (var i = 0; i < _localPhotos.length; i++) {
+        final ticket = i < _photoTickets.length ? _photoTickets[i] : null;
+        if (ticket != null && ticket.isDone && ticket.key != null) {
+          preUploadedPhotoKeys.add(ticket.key!);
+        } else {
+          if (ticket != null) DraftMediaUploader.instance.cancel(ticket);
+          stillPendingPhotos.add(_localPhotos[i]);
+        }
+      }
+      final preUploadedVideoKeys = <String>[];
+      final preUploadedVideoDurations = <int>[];
+      final stillPendingVideoPaths = <String>[];
+      final stillPendingVideoDurations = <int?>[];
+      for (var i = 0; i < _localVideoPaths.length; i++) {
+        final ticket = i < _videoTickets.length ? _videoTickets[i] : null;
+        if (ticket != null && ticket.isDone && ticket.key != null) {
+          preUploadedVideoKeys.add(ticket.key!);
+          final localDur =
+              i < _localVideoDurations.length ? _localVideoDurations[i] : null;
+          final dur = ticket.durationMs ?? localDur;
+          if (dur != null) preUploadedVideoDurations.add(dur);
+        } else {
+          if (ticket != null) DraftMediaUploader.instance.cancel(ticket);
+          stillPendingVideoPaths.add(_localVideoPaths[i]);
+          stillPendingVideoDurations.add(
+              i < _localVideoDurations.length ? _localVideoDurations[i] : null);
+        }
+      }
+      // Les tickets sont repris ci-dessus (clé gardée ou fichier remis en
+      // file) — `dispose()` ne doit plus y toucher.
+      _mediaFinalized = true;
+      final allNewPhotoKeys = [...keptPhotoKeys, ...preUploadedPhotoKeys];
+      final allVideoKeys = [...knownVideoKeys, ...preUploadedVideoKeys];
+      final allVideoDurations = [
+        ...knownVideoDurations,
+        ...preUploadedVideoDurations
+      ];
+
       final titleValue = _titleController.text.trim();
       final locationValue = _locationController.text.trim();
 
@@ -1335,19 +1465,19 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'dateLabel': formatDateWithPrecision(_selectedDate, _datePrecision),
         'rawContent': rawContent,
         'mediaUrls': keptLegacyUrls,
-        'mediaKeys': keptPhotoKeys,
+        'mediaKeys': allNewPhotoKeys,
         'photoUrl': keptLegacyUrls.isNotEmpty ? keptLegacyUrls.first : null,
         'audioUrl': knownAudioUrl,
         'audioKey': knownAudioKey,
         'audioDurationMs': (knownAudioUrl != null || knownAudioKey != null)
             ? _audioDurationMs
             : null,
-        'videoKeys': knownVideoKeys,
-        'videoDurationsMs': knownVideoDurations,
+        'videoKeys': allVideoKeys,
+        'videoDurationsMs': allVideoDurations,
         // Miroir hérité (compat anciens lecteurs / page /watch d'origine).
-        'videoKey': knownVideoKeys.isNotEmpty ? knownVideoKeys.first : null,
+        'videoKey': allVideoKeys.isNotEmpty ? allVideoKeys.first : null,
         'videoDurationMs':
-            knownVideoDurations.isNotEmpty ? knownVideoDurations.first : null,
+            allVideoDurations.isNotEmpty ? allVideoDurations.first : null,
         'weightKg': weightKg,
         'heightCm': heightCm,
       };
@@ -1386,10 +1516,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         });
       } catch (_) {}
 
-      // Y a-t-il des médias à uploader/supprimer ?
-      final hasMediaWork = _localPhotos.isNotEmpty ||
+      // Y a-t-il encore des médias à uploader/supprimer ? (Ce qui était déjà
+      // envoyé à la sélection est déjà dans `payload` ci-dessus — voir
+      // `preUploadedPhotoKeys`/`preUploadedVideoKeys`.)
+      final hasMediaWork = stillPendingPhotos.isNotEmpty ||
           _localAudioPath != null ||
-          _localVideoPaths.isNotEmpty ||
+          stillPendingVideoPaths.isNotEmpty ||
           _removedPhotoUrls.isNotEmpty ||
           _removedPhotoKeys.isNotEmpty ||
           _removedVideoKeys.isNotEmpty ||
@@ -1401,13 +1533,17 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         // d'envoi (dashboard + liste des souvenirs, voir UploadStatusBanner)
         // affiche la progression pour savoir quand on peut quitter
         // l'application, et un échec reste visible avec "Réessayer" — plus
-        // question qu'un média disparaisse en silence.
+        // question qu'un média disparaisse en silence. `existingPhotoKeys`/
+        // `existingVideoKeys` incluent aussi ce qui a été envoyé DÈS LA
+        // SÉLECTION (déjà dans le `payload` ci-dessus) : si cette file doit
+        // réécrire `mediaKeys`/`videoKeys` plus tard (autre média encore en
+        // route), elle ne doit pas les faire disparaître au passage.
         MediaUploadQueue.instance.enqueue(MediaUploadJob(
           memoryId: memoryId,
           notebookId: spaceId,
-          localPhotos: List<File>.of(_localPhotos),
+          localPhotos: stillPendingPhotos,
           existingPhotoUrls: keptLegacyUrls,
-          existingPhotoKeys: keptPhotoKeys,
+          existingPhotoKeys: allNewPhotoKeys,
           removedPhotoUrls: List<String>.of(_removedPhotoUrls),
           removedPhotoKeys: List<String>.of(_removedPhotoKeys),
           localAudioPath: _localAudioPath,
@@ -1415,10 +1551,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           existingAudioKey: _existingAudioKey,
           audioRemoved: _audioRemoved,
           audioDurationMs: _audioDurationMs,
-          localVideoPaths: List<String>.of(_localVideoPaths),
-          localVideoDurations: List<int?>.of(_localVideoDurations),
-          existingVideoKeys: knownVideoKeys,
-          existingVideoDurations: knownVideoDurations,
+          localVideoPaths: stillPendingVideoPaths,
+          localVideoDurations: stillPendingVideoDurations,
+          existingVideoKeys: allVideoKeys,
+          existingVideoDurations: allVideoDurations,
           removedVideoKeys: List<String>.of(_removedVideoKeys),
         ));
       }
@@ -2350,6 +2486,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                 }
               }
               _existingPhotoUrls.clear();
+              for (final t in _photoTickets) {
+                DraftMediaUploader.instance.cancel(t);
+              }
+              _photoTickets.clear();
               _localPhotos.clear();
             }
           }),

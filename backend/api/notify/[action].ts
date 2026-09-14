@@ -44,6 +44,11 @@ import { row, wrap } from '../email/order'
 //                                    (orders : delete admin-only) — le bouton
 //                                    était cassé pour un vrai client (trouvé à
 //                                    l'audit UX du 03.09.26).
+//   POST /api/notify/share-apk     → l'ADMIN envoie le lien d'installation
+//                                    Android à un ou plusieurs emails (amis,
+//                                    famille, collègues) — console admin,
+//                                    bouton "Partager l'app". Réservé à
+//                                    ADMIN_EMAIL comme prodigi/video.
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
 // plafonne à 12 fonctions serverless.
@@ -529,6 +534,75 @@ async function handleOrderCancel(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true })
 }
 
+/** Lien d'installation public de l'APK — le même que celui utilisé pour le
+ * propre téléchargement de l'admin (voir STATUS.md / mémoire du projet),
+ * republié automatiquement à chaque build CI. Pas de secret ici : le fichier
+ * est déjà public, seul l'ENVOI par email est réservé à l'admin. */
+const APK_DOWNLOAD_URL = 'https://dmathys.dev/download/carnet.apk'
+// Borne large mais raisonnable : un envoi groupé n'a pas vocation à devenir
+// une liste de diffusion (chaque destinataire déclenche un appel Resend).
+const MAX_SHARE_RECIPIENTS = 30
+
+async function handleShareApk(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
+  const user = await requireAuth(req, res)
+  if (!user) return
+  if (user.email !== ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Accès refusé' })
+  }
+
+  const rawEmails = req.body?.emails
+  const emails = Array.from(
+    new Set(
+      (Array.isArray(rawEmails) ? rawEmails : [])
+        .map((e) => String(e).trim().toLowerCase())
+        .filter((e) => e.includes('@'))
+    )
+  )
+  if (emails.length === 0) {
+    return res.status(400).json({ error: 'Aucun email valide' })
+  }
+  if (emails.length > MAX_SHARE_RECIPIENTS) {
+    return res.status(400).json({ error: `Maximum ${MAX_SHARE_RECIPIENTS} destinataires à la fois` })
+  }
+
+  const note = typeof req.body?.message === 'string' ? req.body.message.trim() : ''
+
+  const html = wrap(`
+    <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">
+      📖 On te partage <strong>Carnet</strong>, l'app pour garder les souvenirs de famille.
+    </p>
+    ${
+      note
+        ? `<p style="margin:0 0 20px;font-size:14px;color:#555;line-height:1.6;">${note.replace(/\n/g, '<br/>')}</p>`
+        : ''
+    }
+    <p style="margin:0 0 20px;">
+      <a href="${APK_DOWNLOAD_URL}"
+         style="display:inline-block;background:#4a7c59;color:#fff;padding:12px 24px;
+                border-radius:8px;text-decoration:none;font-weight:600;">
+        Installer Carnet (Android)
+      </a>
+    </p>
+    <p style="margin:0;font-size:13px;color:#888;line-height:1.6;">
+      L'appli n'est pas encore sur le Play Store — Android peut demander
+      d'autoriser l'installation depuis cette source la première fois, c'est
+      normal.
+    </p>
+  `)
+
+  const results = await Promise.all(
+    emails.map(async (to) => ({
+      to,
+      sent: await sendEmail({ to, subject: '📖 Découvre Carnet', html }),
+    }))
+  )
+  const sent = results.filter((r) => r.sent).map((r) => r.to)
+  const failed = results.filter((r) => !r.sent).map((r) => r.to)
+
+  return res.status(200).json({ ok: failed.length === 0, sent, failed })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
@@ -539,6 +613,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'order-received') return handleOrderReceived(req, res)
   if (action === 'reset-password') return handleResetPassword(req, res)
   if (action === 'order-cancel') return handleOrderCancel(req, res)
+  if (action === 'share-apk') return handleShareApk(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

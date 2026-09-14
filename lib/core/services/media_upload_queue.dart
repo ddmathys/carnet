@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'photo_service.dart';
 import 'audio_service.dart';
 import 'video_service.dart';
+import 'video_upload_lane.dart';
 
 /// Un travail d'upload de médias pour un souvenir déjà écrit en base.
 /// Immuable : peut être re-déclenché tel quel en cas d'échec (retry).
@@ -191,21 +192,25 @@ class MediaUploadQueue extends ChangeNotifier {
         _videoProgress = 0;
         _lastNotifiedPct = -1;
         notifyListeners();
-        final r = await VideoService.uploadMemoryVideo(
-          video: File(job.localVideoPaths[i]),
-          notebookId: job.notebookId,
-          onProgress: (sent, total) {
-            if (total <= 0) return;
-            _videoProgress = sent / total;
-            // On ne rafraîchit qu'au changement de pourcent entier : sinon des
-            // milliers de notifications pour un gros fichier.
-            final pct = (_videoProgress * 100).floor();
-            if (pct != _lastNotifiedPct) {
-              _lastNotifiedPct = pct;
-              notifyListeners();
-            }
-          },
-        );
+        // Rail partagé avec `DraftMediaUploader` (upload dès la sélection,
+        // avant même la sauvegarde) : garantit qu'un seul clip compresse à la
+        // fois app-wide, pas seulement au sein de CETTE file.
+        final r = await VideoUploadLane.instance.run(() =>
+            VideoService.uploadMemoryVideo(
+              video: File(job.localVideoPaths[i]),
+              notebookId: job.notebookId,
+              onProgress: (sent, total) {
+                if (total <= 0) return;
+                _videoProgress = sent / total;
+                // On ne rafraîchit qu'au changement de pourcent entier : sinon
+                // des milliers de notifications pour un gros fichier.
+                final pct = (_videoProgress * 100).floor();
+                if (pct != _lastNotifiedPct) {
+                  _lastNotifiedPct = pct;
+                  notifyListeners();
+                }
+              },
+            ));
         final localDur =
             i < job.localVideoDurations.length ? job.localVideoDurations[i] : null;
         if (r == null) {
