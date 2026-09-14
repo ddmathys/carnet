@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
+import 'package:share_plus/share_plus.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/models/order_model.dart';
@@ -824,6 +825,10 @@ class _ShareApkSheet extends StatefulWidget {
 }
 
 class _ShareApkSheetState extends State<_ShareApkSheet> {
+  static const _apkLink = 'https://dmathys.dev/download/carnet.apk';
+  static const _defaultIntro =
+      'On te partage Carnet, l\'app pour garder les souvenirs de famille !';
+
   final _emailsController = TextEditingController();
   final _messageController = TextEditingController();
   bool _sending = false;
@@ -843,6 +848,21 @@ class _ShareApkSheetState extends State<_ShareApkSheet> {
       .where((e) => e.contains('@'))
       .toSet()
       .toList();
+
+  /// Même message pour l'email et le partage natif : la note personnelle si
+  /// elle existe, sinon une intro par défaut, suivie du lien.
+  String get _shareMessage {
+    final note = _messageController.text.trim();
+    return '${note.isNotEmpty ? note : _defaultIntro}\n\n$_apkLink';
+  }
+
+  /// Ouvre le sélecteur natif (WhatsApp, SMS, Messenger…) avec le message
+  /// pré-rempli — même mécanisme déjà utilisé pour le partage de tag
+  /// (`share_tag_sheet.dart`) : ni numéro ni contact à connaître à l'avance,
+  /// l'admin choisit l'appli et le destinataire lui-même.
+  Future<void> _shareNative() async {
+    await Share.share(_shareMessage, subject: 'Découvre Carnet 📖');
+  }
 
   Future<void> _send() async {
     final emails = _parsedEmails;
@@ -900,12 +920,46 @@ class _ShareApkSheetState extends State<_ShareApkSheet> {
                     color: AppColors.textDark)),
             const SizedBox(height: 6),
             const Text(
-              'Envoie le lien d\'installation Android par email — un ou '
-              'plusieurs destinataires (séparés par une virgule ou un '
-              'retour à la ligne).',
+              'Envoie le lien d\'installation Android par email, ou partage-le '
+              'directement via WhatsApp, SMS… avec un message.',
               style: TextStyle(fontSize: 12.5, color: AppColors.textMedium),
             ),
             const SizedBox(height: 16),
+            TextField(
+              controller: _messageController,
+              maxLines: 3,
+              minLines: 1,
+              decoration: InputDecoration(
+                labelText: 'Message (optionnel)',
+                hintText: _defaultIntro,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: _shareNative,
+                icon: const Icon(Icons.share_outlined, color: AppColors.sageDark),
+                label: const Text('Partager (WhatsApp, SMS…)',
+                    style: TextStyle(
+                        color: AppColors.sageDark,
+                        fontWeight: FontWeight.w600)),
+                style: OutlinedButton.styleFrom(
+                  side: const BorderSide(color: AppColors.sageDark),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            const Divider(height: 1),
+            const SizedBox(height: 20),
+            const Text('Ou par email',
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark)),
+            const SizedBox(height: 10),
             TextField(
               controller: _emailsController,
               maxLines: 3,
@@ -918,16 +972,6 @@ class _ShareApkSheetState extends State<_ShareApkSheet> {
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
-              controller: _messageController,
-              maxLines: 2,
-              minLines: 1,
-              decoration: const InputDecoration(
-                labelText: 'Message personnel (optionnel)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-            const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
@@ -943,7 +987,7 @@ class _ShareApkSheetState extends State<_ShareApkSheet> {
                         child: CircularProgressIndicator(
                             strokeWidth: 2, color: Colors.white),
                       )
-                    : const Text('Envoyer',
+                    : const Text('Envoyer par email',
                         style: TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.w600)),
