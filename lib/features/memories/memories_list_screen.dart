@@ -31,31 +31,23 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   final Set<String> _filterLabels = {};
   final _searchController = TextEditingController();
   String _searchQuery = '';
-  // Mes tags + ceux qu'on m'a partagés (même principe que home_screen.dart
-  // `_allTags`) — avant, cet écran ne listait que `streamMine()` : un
-  // collaborateur invité voyait bien les souvenirs partagés dans la grille,
-  // mais ne pouvait jamais filtrer dessus ni cocher `initialTagId` à
-  // l'arrivée d'un lien de partage (trouvé à l'audit UX du 03.09.26).
-  List<TagModel> _myTags = [];
-  List<TagModel> _sharedTags = [];
-  List<TagModel> get _tags => [..._myTags, ..._sharedTags];
+  // Mes tags + ceux qu'on m'a partagés + les tags « fantômes » qui n'existent
+  // que sur des souvenirs déjà visibles pour moi (voir
+  // TagService.streamFilterable) — avant, cet écran ne listait que
+  // `streamMine()` : un collaborateur invité voyait bien les souvenirs
+  // partagés dans la grille, mais ne pouvait jamais filtrer dessus ni cocher
+  // `initialTagId` à l'arrivée d'un lien de partage (trouvé à l'audit UX du
+  // 03.09.26 puis complété à l'audit partage du 15.09.26).
+  List<TagModel> _tags = [];
   StreamSubscription? _tagsSub;
-  StreamSubscription? _sharedTagsSub;
 
   @override
   void initState() {
     super.initState();
-    _tagsSub = TagService.streamMine().listen((tags) {
+    _tagsSub = TagService.streamFilterable().listen((tags) {
       if (!mounted) return;
       setState(() {
-        _myTags = tags;
-        _applyInitialTag(tags);
-      });
-    });
-    _sharedTagsSub = TagService.streamSharedWithMe().listen((tags) {
-      if (!mounted) return;
-      setState(() {
-        _sharedTags = tags;
+        _tags = tags;
         _applyInitialTag(tags);
       });
     });
@@ -77,7 +69,6 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   void dispose() {
     _searchController.dispose();
     _tagsSub?.cancel();
-    _sharedTagsSub?.cancel();
     super.dispose();
   }
 
@@ -89,6 +80,12 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
     final sel = _selectedTags;
     return sel.length == 1 ? sel.first : null;
   }
+
+  /// Tags cochés qui existent vraiment (pas de fantôme, voir
+  /// TagModel.isVirtual) : seuls ceux-là ont un id réel, utilisable pour
+  /// partager ou lancer un livre filtré.
+  List<TagModel> get _selectedRealTags =>
+      _selectedTags.where((t) => !t.isVirtual).toList();
 
   Future<void> _openFilter() async {
     final result = await showTagPickerSheet(
@@ -132,14 +129,16 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
               tooltip: 'Croissance',
               onPressed: () => context.push('/growth/${tag.id}'),
             ),
-          // Un ou plusieurs tags cochés → un seul lien les partage tous.
-          if (_selectedTags.isNotEmpty)
+          // Un ou plusieurs tags cochés → un seul lien les partage tous. Un
+          // tag « fantôme » (déduit d'un souvenir déjà partagé, voir
+          // TagModel.isVirtual) n'a pas de document réel à partager.
+          if (_selectedRealTags.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.ios_share, color: AppColors.textDark),
-              tooltip: _selectedTags.length == 1
+              tooltip: _selectedRealTags.length == 1
                   ? 'Partager ce tag'
-                  : 'Partager ces ${_selectedTags.length} tags',
-              onPressed: () => showShareTagSheet(context, _selectedTags),
+                  : 'Partager ces ${_selectedRealTags.length} tags',
+              onPressed: () => showShareTagSheet(context, _selectedRealTags),
             ),
         ],
       ),
@@ -174,7 +173,11 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
               _buildSearchBar(),
               if (_tags.isNotEmpty) _buildFilterBar(),
               if (tagFiltered.length >= 10)
-                _BookCta(count: tagFiltered.length, tagId: _soleTag?.id),
+                _BookCta(
+                    count: tagFiltered.length,
+                    tagId: _selectedRealTags.length == 1
+                        ? _selectedRealTags.first.id
+                        : null),
               Expanded(
                 child: filtered.isEmpty
                     ? _EmptyState(

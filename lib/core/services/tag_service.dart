@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../models/memory_model.dart';
 import '../models/tag_model.dart';
 import 'backend_client.dart';
+import 'memory_query_service.dart';
 
 /// Tags : l'organisation des souvenirs, et le point de pilotage du partage.
 ///
@@ -113,6 +115,81 @@ class TagService {
     return controller.stream;
   }
 
+  /// Version « filtre » de [streamVisible] : y ajoute aussi les tags qui
+  /// n'existent QUE sur des souvenirs déjà visibles pour moi, sans être eux-
+  /// mêmes partagés avec moi.
+  ///
+  /// Exemple concret : je partage le tag « Nathan » avec Karin. Elle ajoute un
+  /// souvenir avec « Nathan » + son propre tag « Piscine » (jamais partagé
+  /// individuellement). Le souvenir m'est visible (grâce à « Nathan »), mais
+  /// le document du tag « Piscine » ne l'est pas — les règles Firestore
+  /// n'autorisent sa lecture qu'à sa propriétaire ou qui se l'est fait
+  /// partager. Sans ce flux, « Piscine » n'apparaîtrait jamais dans mon
+  /// filtre alors que je vois déjà la photo.
+  ///
+  /// On reconstruit ces tags « fantômes » ([TagModel.isVirtual]) depuis les
+  /// `tagLabels` dénormalisés des souvenirs eux-mêmes (lisibles dès que le
+  /// souvenir l'est, sans avoir besoin de lire le tag original). Nature
+  /// (kind) devinée du mieux possible ; jamais éditables/partageables — voir
+  /// les garde-fous `!t.isVirtual` côté écrans (partage, courbe de
+  /// croissance).
+  static Stream<List<TagModel>> streamFilterable() {
+    final uid = _uid;
+    if (uid == null) return Stream.value(const []);
+    final controller = StreamController<List<TagModel>>.broadcast();
+    var real = <TagModel>[];
+    var memories = <MemoryModel>[];
+    var gotReal = false;
+    var gotMemories = false;
+    void emit() {
+      if (!gotReal || !gotMemories || controller.isClosed) return;
+      final byLabel = <String, TagModel>{
+        for (final t in real) t.label.trim().toLowerCase(): t,
+      };
+      final extra = <TagModel>[];
+      final seenExtra = <String>{};
+      for (final m in memories) {
+        final location = (m.location ?? '').trim().toLowerCase();
+        for (final rawLabel in m.tagLabels) {
+          final label = rawLabel.trim();
+          final key = label.toLowerCase();
+          if (label.isEmpty ||
+              byLabel.containsKey(key) ||
+              !seenExtra.add(key)) {
+            continue;
+          }
+          extra.add(TagModel(
+            id: '_virtual_$key',
+            userId: m.userId,
+            label: label,
+            kind: inferKind(label, isLocation: location == key),
+            createdAt: m.date,
+            isVirtual: true,
+          ));
+        }
+      }
+      final tags = [...real, ...extra]
+        ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
+      controller.add(tags);
+    }
+
+    final subReal = streamVisible().listen((v) {
+      real = v;
+      gotReal = true;
+      emit();
+    });
+    final subMem = MemoryQueryService.visible().listen((v) {
+      memories = v;
+      gotMemories = true;
+      emit();
+    });
+    controller.onCancel = () {
+      subReal.cancel();
+      subMem.cancel();
+    };
+    return controller.stream;
+  }
+
   static Future<TagModel?> byId(String tagId) async {
     final doc = await _col.doc(tagId).get();
     return doc.exists ? TagModel.fromFirestore(doc) : null;
@@ -136,6 +213,15 @@ class TagService {
   /// Retourne le tag portant ce libellé, en le créant s'il n'existe pas encore.
   /// La comparaison ignore la casse : « Été » et « été » sont le même tag.
   ///
+  /// Cherche d'abord parmi les tags VISIBLES (les miens + ceux qu'on m'a
+  /// partagés), pas seulement les miens : sinon, choisir dans le sélecteur un
+  /// tag qui m'a été partagé (ex. l'enfant d'un proche) créait en silence un
+  /// DOUBLICATA à mon nom, non partagé — le souvenir devenait invisible pour
+  /// qui me l'avait partagé (bug trouvé le 15.09.26, voir memoire
+  /// project_bloom_tag_sharing_audit). Un tag partagé n'est jamais reclassé
+  /// ici (seul son propriétaire le peut, voir setKindByLabel) — pas de
+  /// tentative d'écriture sur un document qui ne m'appartient pas.
+  ///
   /// Si le tag existe déjà mais sans nature (`libre`) alors qu'on en connaît
   /// une meilleure (année, lieu, enfant), on la lui donne au passage — les tags
   /// créés avant cette règle se rangent ainsi tout seuls dans le filtre.
@@ -144,10 +230,15 @@ class TagService {
     final clean = label.trim();
     if (uid == null || clean.isEmpty) return null;
 
-    final existing = await myTags();
+    // Priorité à un tag que je possède : sinon, avoir aussi un tag partagé du
+    // même nom ferait dépendre le résultat de l'ordre alphabétique plutôt que
+    // de mon intention (garder la main sur MES tags).
+    final existing = await visibleTags();
+    existing.sort((a, b) =>
+        (a.userId == uid ? 0 : 1).compareTo(b.userId == uid ? 0 : 1));
     for (final t in existing) {
       if (t.label.toLowerCase() != clean.toLowerCase()) continue;
-      if (t.kind == 'libre' && kind != 'libre') {
+      if (t.kind == 'libre' && kind != 'libre' && t.userId == uid) {
         await _col.doc(t.id).update({'kind': kind});
         return TagModel(
           id: t.id,

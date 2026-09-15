@@ -59,8 +59,17 @@ bool memoryMatchesTags(MemoryModel memory, List<TagModel> selectedTags) {
   for (final t in selectedTags) {
     byCategory.putIfAbsent(categoryOf(t), () => []).add(t);
   }
+  // Comparaison aussi par libellé (pas seulement par id) : un tag « fantôme »
+  // (TagModel.isVirtual, voir TagService.streamFilterable) n'a pas d'id réel
+  // à faire correspondre à `memory.tagIds` — c'est le libellé dénormalisé
+  // `memory.tagLabels` qui fait foi pour lui.
+  final labels = {
+    for (final l in memory.tagLabels) l.trim().toLowerCase(),
+  };
   for (final tags in byCategory.values) {
-    final hitsCategory = tags.any((t) => memory.tagIds.contains(t.id));
+    final hitsCategory = tags.any((t) =>
+        memory.tagIds.contains(t.id) ||
+        labels.contains(t.label.trim().toLowerCase()));
     if (!hitsCategory) return false;
   }
   return true;

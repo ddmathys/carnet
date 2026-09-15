@@ -37,6 +37,14 @@ class TagModel {
   final List<String> invitedEmails; // invitations en attente
   final DateTime createdAt;
 
+  // Tag « fantôme » : reconstruit depuis les `tagLabels` d'un souvenir
+  // partagé, pas depuis un vrai document `tags/{id}` (illisible — les règles
+  // Firestore n'autorisent que le propriétaire ou un collaborateur explicite
+  // du tag). Sert uniquement à filtrer/afficher ; jamais renommable,
+  // partageable ou navigable vers sa page croissance (voir
+  // TagService.streamFilterable).
+  final bool isVirtual;
+
   const TagModel({
     required this.id,
     required this.userId,
@@ -51,6 +59,7 @@ class TagModel {
     this.sharedWith = const [],
     this.invitedEmails = const [],
     required this.createdAt,
+    this.isVirtual = false,
   });
 
   bool get isShared => sharedWith.isNotEmpty || invitedEmails.isNotEmpty;
