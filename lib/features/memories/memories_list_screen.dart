@@ -20,7 +20,17 @@ import 'widgets/delete_memory.dart';
 class MemoriesListScreen extends StatefulWidget {
   /// Tag pré-sélectionné (arrivée depuis une puce de tag du dashboard).
   final String? initialTagId;
-  const MemoriesListScreen({super.key, this.initialTagId});
+  // Arrivée depuis la Chronologie des lieux (année + lieu tapés dans un
+  // souvenir) : on coche directement ces deux libellés, pas besoin de
+  // résoudre un id de tag (voir _applyInitialTag).
+  final String? initialYear;
+  final String? initialLocation;
+  const MemoriesListScreen({
+    super.key,
+    this.initialTagId,
+    this.initialYear,
+    this.initialLocation,
+  });
 
   @override
   State<MemoriesListScreen> createState() => _MemoriesListScreenState();
@@ -44,6 +54,12 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   @override
   void initState() {
     super.initState();
+    // Année/lieu (Chronologie) : simples libellés, pas besoin d'attendre les
+    // tags pour les cocher — contrairement à `initialTagId`, résolu par id.
+    if (widget.initialYear != null) _filterLabels.add(widget.initialYear!);
+    if (widget.initialLocation != null) {
+      _filterLabels.add(widget.initialLocation!);
+    }
     _tagsSub = TagService.streamFilterable().listen((tags) {
       if (!mounted) return;
       setState(() {
@@ -122,6 +138,11 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           onPressed: () => context.go('/home'),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.map_outlined, color: AppColors.textDark),
+            tooltip: 'Chronologie des lieux',
+            onPressed: () => context.push('/chronology'),
+          ),
           // Un tag « enfant » garde sa courbe de croissance — sauf un tag
           // fantôme (voir TagModel.isVirtual) : sa nature est fiable (mirroir
           // `tagKinds`), mais son id ne pointe vers aucun vrai document.

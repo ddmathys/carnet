@@ -16,6 +16,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../tags/person_avatar.dart';
 import '../tags/tag_picker_sheet.dart' show categoryOfKind, TagCategory;
+import 'share_link_sheet.dart';
 import 'widgets/delete_memory.dart';
 
 /// Vue LECTURE d'un souvenir : ce qu'on voit en tapant sur un polaroïd. La
@@ -237,6 +238,12 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
                 color: AppColors.textMedium,
               )),
           const Spacer(),
+          _RoundIcon(
+            icon: Icons.ios_share,
+            label: 'Envoyer par lien',
+            onTap: () => showShareLinkSheet(context, m),
+          ),
+          const SizedBox(width: 8),
           _RoundIcon(
             icon: Icons.delete_outline,
             label: 'Supprimer ce souvenir',

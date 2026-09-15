@@ -195,6 +195,7 @@ class _HomeScreenState extends State<HomeScreen> {
             onProfile: () => context.push('/profile'),
             onSpace: () => _showMonEspace(context),
             onShared: () => _showSharedTagsSheet(context),
+            onChronology: () => context.push('/chronology'),
           ),
         ),
         const SliverToBoxAdapter(child: PeopleStrip()),
@@ -730,11 +731,13 @@ class _TopBar extends StatelessWidget {
   final VoidCallback onProfile;
   final VoidCallback onSpace;
   final VoidCallback onShared;
+  final VoidCallback onChronology;
   const _TopBar({
     required this.initial,
     required this.onProfile,
     required this.onSpace,
     required this.onShared,
+    required this.onChronology,
   });
 
   @override
@@ -770,6 +773,19 @@ class _TopBar extends StatelessWidget {
               ],
             ),
             const Spacer(),
+            GestureDetector(
+              onTap: onChronology,
+              behavior: HitTestBehavior.opaque,
+              child: Container(
+                width: 38,
+                height: 38,
+                decoration: const BoxDecoration(
+                    color: AppColors.sageTint, shape: BoxShape.circle),
+                child: const Icon(Icons.map_outlined,
+                    size: 17, color: AppColors.sageDark),
+              ),
+            ),
+            const SizedBox(width: 10),
             GestureDetector(
               onTap: onShared,
               behavior: HitTestBehavior.opaque,

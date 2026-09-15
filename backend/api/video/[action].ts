@@ -167,6 +167,70 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  if (action === 'share') {
+    // PUBLIC par construction : lien envoyé à quelqu'un sans compte carnet
+    // (grand-parent, ami — demande de David, 15.09.26). Le token fait office
+    // de capacité non-devinable (même principe que les reels ci-dessus),
+    // mais CE lien expire (`expiresAt`, 7 jours à la création) — contrairement
+    // aux reels, pensé pour rester valable toute la vie du poster imprimé.
+    const token = (req.query.o ?? '') as string
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.setHeader('Cache-Control', 'no-store')
+
+    if (!token) {
+      return res.status(400).send(sharePage('Lien invalide', '<p>Identifiant manquant.</p>'))
+    }
+    try {
+      const shareSnap = await db.collection('shares').doc(token).get()
+      if (!shareSnap.exists) {
+        return res.status(404).send(sharePage('Introuvable', '<p>Ce lien n’existe plus.</p>'))
+      }
+      const share = shareSnap.data() as Record<string, unknown>
+      const expiresAt = typeof share.expiresAt === 'number' ? share.expiresAt : 0
+      if (expiresAt && Date.now() > expiresAt) {
+        return res.status(410).send(sharePage('Lien expiré', '<p>Ce lien de partage n’est plus valable.</p>'))
+      }
+
+      const photoKeys = Array.isArray(share.photoKeys)
+        ? (share.photoKeys as unknown[]).filter((x): x is string => typeof x === 'string')
+        : []
+      const videoKeys = Array.isArray(share.videoKeys)
+        ? (share.videoKeys as unknown[]).filter((x): x is string => typeof x === 'string')
+        : []
+      const legacyPhotoUrls = Array.isArray(share.legacyPhotoUrls)
+        ? (share.legacyPhotoUrls as unknown[]).filter((x): x is string => typeof x === 'string')
+        : []
+      const title = typeof share.title === 'string' ? share.title : ''
+      const message = typeof share.message === 'string' ? share.message : ''
+
+      const photoUrls = await Promise.all(photoKeys.map((k) => presignGet(k, 3600)))
+      const videoUrls = await Promise.all(videoKeys.map((k) => presignGet(k, 3600)))
+      const allPhotoUrls = [...photoUrls, ...legacyPhotoUrls]
+
+      if (allPhotoUrls.length === 0 && videoUrls.length === 0) {
+        return res.status(404).send(sharePage('Pas de média', '<p>Ce souvenir n’a plus de photo ni de vidéo.</p>'))
+      }
+
+      const counts = [
+        allPhotoUrls.length ? `${allPhotoUrls.length} photo${allPhotoUrls.length > 1 ? 's' : ''}` : '',
+        videoUrls.length ? `${videoUrls.length} vidéo${videoUrls.length > 1 ? 's' : ''}` : '',
+      ].filter(Boolean).join(' · ')
+
+      const body = `
+        <p class="shareCounts">${escapeHtml(counts)}</p>
+        ${message ? `<p class="shareMsg">« ${escapeHtml(message)} »</p>` : ''}
+        <div class="shareGrid">
+          ${allPhotoUrls.map((u) => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener"><img src="${escapeHtml(u)}" loading="lazy"/></a>`).join('')}
+          ${videoUrls.map((u) => `<video controls preload="metadata" src="${escapeHtml(u)}"></video>`).join('')}
+        </div>
+        <p class="shareHint">Touche une photo pour l’ouvrir en grand — appui long pour l’enregistrer.</p>
+      `
+      return res.status(200).send(sharePage(title || 'Un souvenir partagé', body))
+    } catch {
+      return res.status(500).send(sharePage('Erreur', '<p>Impossible de charger ce souvenir pour l’instant.</p>'))
+    }
+  }
+
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }
@@ -177,6 +241,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body =
     (typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body) ??
     {}
+
+  if (action === 'share-create') {
+    // Génère un lien public temporaire pour TOUS les médias d'un souvenir —
+    // demande de David (15.09.26) : envoyer un souvenir à quelqu'un sans
+    // compte carnet (grand-parent, ami), sans réimporter les photos. Expire
+    // après 7 jours (pas de config utilisateur pour l'instant — évite
+    // d'accumuler des liens publics ouverts indéfiniment sur R2).
+    const memoryId = (body.memoryId ?? '') as string
+    const message = typeof body.message === 'string' ? body.message.trim().slice(0, 300) : ''
+    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    if (!mem) return res.status(403).json({ error: 'Accès refusé' })
+
+    const photoKeys = photoKeysOf(mem)
+    const videoKeys = videoKeysOf(mem)
+    // Repli pour les anciennes photos (URL Firebase permanente, pas de clé R2
+    // à présigner — voir photoKeysOf) : on les inclut telles quelles.
+    const legacyPhotoUrls = photoKeys.length === 0 && Array.isArray(mem.mediaUrls)
+      ? (mem.mediaUrls as unknown[]).filter((x): x is string => typeof x === 'string')
+      : []
+    if (photoKeys.length === 0 && videoKeys.length === 0 && legacyPhotoUrls.length === 0) {
+      return res.status(400).json({ error: 'Aucun média sur ce souvenir' })
+    }
+
+    const token = randomUUID()
+    const createdAt = Date.now()
+    const expiresAt = createdAt + 7 * 24 * 3600 * 1000
+    await db.collection('shares').doc(token).set({
+      ownerUid: user.uid,
+      memoryId,
+      title: typeof mem.title === 'string' ? mem.title : '',
+      photoKeys,
+      videoKeys,
+      legacyPhotoUrls,
+      message,
+      createdAt,
+      expiresAt,
+    })
+    const host = req.headers['x-forwarded-host'] ?? req.headers.host ?? ''
+    const proto = (req.headers['x-forwarded-proto'] as string) ?? 'https'
+    return res.status(200).json({
+      token,
+      url: `${proto}://${host}/s/${token}`,
+      expiresAt,
+    })
+  }
 
   if (action === 'play') {
     // Lecture sécurisée : on ne délivre des URLs GET signées (durée courte) que
@@ -563,4 +672,55 @@ function reelPage(titleText: string, body: string): string {
   p{color:#7a6a5a;}
 </style></head>
 <body><div class="card"><div class="brand">carnet</div><h1>${escapeHtml(titleText)}</h1>${body}</div></body></html>`
+}
+
+// Gabarit HTML de la page publique `share` — un souvenir envoyé par lien à
+// quelqu'un sans compte carnet, avec une invitation discrète à installer
+// l'app à la fin (pas de compte requis pour VOIR les médias).
+function sharePage(titleText: string, body: string): string {
+  return `<!DOCTYPE html><html lang="fr"><head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>${escapeHtml(titleText)} · carnet</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;min-height:100vh;background:#f5ece0;
+    font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
+  .wrap{max-width:560px;margin:0 auto;padding:28px 18px 0;}
+  .brand{color:#3A6648;font-style:italic;font-weight:bold;font-size:20px;text-align:center;margin-bottom:18px;}
+  .card{background:#fff;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.08);
+    padding:28px 22px;text-align:center;}
+  h1{font-size:21px;color:#2d2d2d;margin:0 0 10px;}
+  .shareCounts{color:#3A6648;font-weight:600;font-size:13px;margin:0 0 10px;}
+  .shareMsg{color:#5a4d40;font-style:italic;font-size:14px;background:#f5ece0;
+    border-radius:12px;padding:12px 16px;margin:0 0 18px;}
+  .shareHint{color:#9a897a;font-size:11.5px;margin:12px 0 0;}
+  .shareGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px;}
+  .shareGrid a{display:block;aspect-ratio:1;overflow:hidden;border-radius:6px;}
+  .shareGrid img{width:100%;height:100%;object-fit:cover;display:block;}
+  .shareGrid video{grid-column:1/-1;width:100%;border-radius:10px;margin-top:6px;}
+  p{color:#7a6a5a;}
+  .cta{max-width:560px;margin:22px auto 0;background:#c9724c;border-radius:16px;
+    padding:16px 18px;display:flex;align-items:center;gap:12px;}
+  .cta .icn{width:36px;height:36px;border-radius:9px;background:rgba(255,255,255,.22);
+    display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
+  .cta .txt{flex:1;text-align:left;}
+  .cta .txt b{display:block;color:#fff;font-size:12.5px;}
+  .cta .txt span{color:rgba(255,255,255,.85);font-size:10.5px;}
+  .cta a{background:#fff;color:#c9724c;font-weight:700;font-size:11px;padding:8px 12px;
+    border-radius:9px;text-decoration:none;white-space:nowrap;}
+  .foot{max-width:560px;margin:0 auto;text-align:center;padding:14px 18px 28px;
+    color:#9a897a;font-size:10.5px;}
+</style></head>
+<body><div class="wrap">
+  <div class="brand">carnet</div>
+  <div class="card"><h1>${escapeHtml(titleText)}</h1>${body}</div>
+</div>
+<div class="cta">
+  <div class="icn">🌱</div>
+  <div class="txt"><b>Carnet</b><span>Le carnet de famille — installe l'app pour garder vos souvenirs</span></div>
+  <a href="https://dmathys.dev/download/carnet.apk">Installer</a>
+</div>
+<p class="foot">Lien envoyé depuis l'app Carnet — aucun compte requis pour voir ces médias.</p>
+</body></html>`
 }

@@ -3,7 +3,8 @@
     { "source": "/listen", "destination": "/api/listen" },
     { "source": "/watch", "destination": "/api/watch" },
     { "source": "/join", "destination": "/api/join" },
-    { "source": "/reel", "destination": "/api/video/poster-video-reel" }
+    { "source": "/reel", "destination": "/api/video/poster-video-reel" },
+    { "source": "/s/:token", "destination": "/api/video/share?o=:token" }
   ],
   "crons": [
     { "path": "/api/prodigi/poll", "schedule": "0 8 * * *" },

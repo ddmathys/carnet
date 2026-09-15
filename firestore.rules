@@ -198,6 +198,14 @@ service cloud.firestore {
       allow read, update, delete: if false;
     }
 
+    // Liens de partage temporaires d'un souvenir (`share-create`, page
+    // publique `share`) — même principe que `posterReels` : écrits et lus
+    // exclusivement par le backend (Admin SDK), jamais par l'app cliente.
+    // Fermé côté client par prudence.
+    match /shares/{token} {
+      allow read, write: if false;
+    }
+
     // ── Legacy : children ───────────────────────────────────────────────────
     match /children/{childId} {
       allow create: if isAuth()

@@ -21,6 +21,7 @@ import 'features/children/home_screen.dart';
 import 'features/growth/growth_screen.dart';
 import 'features/profile/profile_screen.dart';
 import 'features/memories/memories_list_screen.dart';
+import 'features/timeline/chronology_screen.dart';
 import 'features/memories/memory_create_screen.dart';
 import 'features/memories/memory_detail_screen.dart';
 import 'features/books/book_generate_screen.dart';
@@ -72,9 +73,14 @@ final _router = GoRouter(
     // ── Souvenirs (organisés par tags, plus par carnets) ──
     GoRoute(
       path: '/memories',
-      builder: (_, state) =>
-          MemoriesListScreen(initialTagId: state.uri.queryParameters['tag']),
+      builder: (_, state) => MemoriesListScreen(
+        initialTagId: state.uri.queryParameters['tag'],
+        initialYear: state.uri.queryParameters['year'],
+        initialLocation: state.uri.queryParameters['loc'],
+      ),
     ),
+    GoRoute(
+        path: '/chronology', builder: (_, __) => const ChronologyScreen()),
     GoRoute(
       path: '/memory/new',
       builder: (_, state) => MemoryCreateScreen(
