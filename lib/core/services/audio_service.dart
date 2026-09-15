@@ -29,13 +29,17 @@ class AudioService {
   }) async {
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (token == null) return null;
+    int sizeBytes = 0;
+    try {
+      sizeBytes = await audio.length();
+    } catch (_) {}
     final signRes = await http.post(
       Uri.parse('${AppConfig.backendUrl}/api/video/audio-upload-url'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({'notebookId': notebookId}),
+      body: jsonEncode({'notebookId': notebookId, 'sizeBytes': sizeBytes}),
     );
     if (signRes.statusCode != 200) return null;
     final data = jsonDecode(signRes.body) as Map<String, dynamic>;

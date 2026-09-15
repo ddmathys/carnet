@@ -10,7 +10,7 @@ import {
   PRODIGI_API_URL,
   PRODIGI_OPEN_STATUSES,
 } from '../../lib/prodigi'
-import { computePrice, printablePages, type CoverType } from '../../lib/pricing'
+import { computePrice, printablePages, resolveCoverType, type CoverType } from '../../lib/pricing'
 import {
   posterCatalogEntry,
   computePosterPrice,
@@ -48,18 +48,26 @@ import {
 // facturée et fabriquée pour de vrai. (Constante définie une seule fois dans
 // lib/prodigi.ts, importée ici pour ne jamais diverger entre les deux fichiers.)
 
-function countryToIso(c: string): string {
+// Renvoie null si le pays n'est pas reconnu — NE PAS retomber sur un pays par
+// défaut (ex. 'CH') en silence : le champ est un texte libre côté app
+// (`book_generate_screen.dart`/`poster_generate_screen.dart`), une faute de
+// frappe ou un pays non listé enverrait sinon un colis avec un `countryCode`
+// qui ne correspond pas à l'adresse réelle, sans aucune alerte avant
+// réclamation client.
+function countryToIso(c: string): string | null {
   const map: Record<string, string> = {
     suisse: 'CH', switzerland: 'CH', schweiz: 'CH', svizzera: 'CH',
     france: 'FR', belgique: 'BE', belgium: 'BE',
     allemagne: 'DE', germany: 'DE', deutschland: 'DE',
     luxembourg: 'LU', italie: 'IT', italy: 'IT', italia: 'IT',
-    espagne: 'ES', spain: 'ES',
+    espagne: 'ES', spain: 'ES', autriche: 'AT', austria: 'AT', österreich: 'AT',
+    'pays-bas': 'NL', netherlands: 'NL', nederland: 'NL',
+    portugal: 'PT', 'royaume-uni': 'GB', 'united kingdom': 'GB', uk: 'GB',
   }
   const key = (c ?? '').trim().toLowerCase()
   if (map[key]) return map[key]
   if (/^[a-z]{2}$/i.test(key)) return key.toUpperCase()
-  return 'CH'
+  return null
 }
 
 // SKU à définir dans les env Vercel (PRODIGI_SKU_SOFT / PRODIGI_SKU_HARD /
@@ -210,8 +218,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     }
     trustedPrice = computePosterPrice(o.posterSize, o.posterOrientation)
   } else {
-    const orderCoverType: CoverType =
-      o.coverType === 'hard' || o.coverType === 'layflat' ? o.coverType : 'soft'
+    const orderCoverType = resolveCoverType(o.coverType)
     const { sku, envName } = skuFor(orderCoverType)
     if (!sku) {
       return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
@@ -225,6 +232,13 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     trustedPrice = pageCount ? computePrice(orderCoverType, pageCount) : null
   }
 
+  const recipientCountryCode = countryToIso(String(o.country ?? 'Suisse'))
+  if (!recipientCountryCode) {
+    return res.status(400).json({
+      error: `Pays de livraison non reconnu : « ${String(o.country ?? '')} » — corrige l'adresse de la commande avant de l'envoyer à Prodigi.`,
+    })
+  }
+
   const payload = {
     merchantReference: orderId,
     shippingMethod: 'Standard',
@@ -233,7 +247,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       address: {
         line1: String(o.street ?? ''),
         postalOrZipCode: String(o.npa ?? ''),
-        countryCode: countryToIso(String(o.country ?? 'Suisse')),
+        countryCode: recipientCountryCode,
         townOrCity: String(o.city ?? ''),
       },
     },
@@ -379,11 +393,16 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     localPriceChf = computePrice(coverType as CoverType, pageCount as number)
   }
 
+  const quoteCountryCode = countryToIso(country ?? 'Suisse')
+  if (!quoteCountryCode) {
+    return res.status(400).json({ error: `Pays non reconnu pour le devis : « ${String(country ?? '')} »` })
+  }
+
   const payload = {
     // Comparaison de méthode d'envoi (débogage prix admin) — 'Standard' par
     // défaut, override possible via le body pour comparer avec 'Budget'.
     shippingMethod: shippingMethod ?? 'Standard',
-    destinationCountryCode: countryToIso(country ?? 'Suisse'),
+    destinationCountryCode: quoteCountryCode,
     // USD pour comparer directement aux constantes calibrées dans
     // lib/pricing.ts (elles-mêmes en USD) — la conversion CHF est ensuite
     // faite localement des deux côtés avec le même taux, donc un écart révèle

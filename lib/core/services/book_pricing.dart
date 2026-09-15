@@ -34,8 +34,8 @@ class BookPricing {
   };
 
   // ── Marge visée ──────────────────────────────────────────────────────────
-  // 20% du coût, avec un PLANCHER absolu de 8 CHF : sur un petit livre (peu
-  // de pages), 20% ne représenterait que quelques francs — insuffisant pour
+  // 40% du coût, avec un PLANCHER absolu de 10 CHF : sur un petit livre (peu
+  // de pages), 40% ne représenterait que quelques francs — insuffisant pour
   // couvrir le suivi de la commande et les frais annexes. Le plancher protège
   // ces petites commandes ; au-delà, c'est le pourcentage qui prend le relais
   // (gros livres = marge plus élevée).
@@ -53,7 +53,7 @@ class BookPricing {
     return usd * _usdToChf;
   }
 
-  /// Marge appliquée sur un coût donné : max(20% du coût, plancher 8 CHF).
+  /// Marge appliquée sur un coût donné : max(40% du coût, plancher 10 CHF).
   static double marginFor(double cost) =>
       cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
 

@@ -51,13 +51,16 @@ class PhotoService {
   }) async {
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (token == null) return null;
+    // Compression AVANT de signer l'URL : le backend a besoin de la taille
+    // finale (sizeBytes) pour pouvoir la contraindre dans la signature R2.
+    final bytes = await _compress(photo) ?? await photo.readAsBytes();
     final signRes = await http.post(
       Uri.parse('${AppConfig.backendUrl}/api/video/photo-upload-url'),
       headers: {
         'Authorization': 'Bearer $token',
         'Content-Type': 'application/json',
       },
-      body: jsonEncode({'notebookId': notebookId}),
+      body: jsonEncode({'notebookId': notebookId, 'sizeBytes': bytes.length}),
     );
     if (signRes.statusCode != 200) return null;
     final data = jsonDecode(signRes.body) as Map<String, dynamic>;
@@ -65,7 +68,6 @@ class PhotoService {
     final key = data['key'] as String?;
     final contentType = (data['contentType'] as String?) ?? 'image/jpeg';
     if (uploadUrl == null || key == null) return null;
-    final bytes = await _compress(photo) ?? await photo.readAsBytes();
     final putRes = await http.put(Uri.parse(uploadUrl),
         headers: {'Content-Type': contentType}, body: bytes);
     if (putRes.statusCode != 200 && putRes.statusCode != 201) return null;

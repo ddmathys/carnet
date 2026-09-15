@@ -581,14 +581,35 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
           // Coût réellement facturé par Prodigi vs. prix payé par le client :
           // un vrai poster A1 a déjà été facturé $44.95 pour CHF 30 encaissés
           // (voir backend/api/prodigi/[action].ts). Sans les deux montants
-          // côte à côte, l'écart passait inaperçu.
+          // côte à côte, l'écart passait inaperçu. Mise en évidence ajoutée le
+          // 15.09.26 (audit) : le prix client est calibré UNIQUEMENT sur des
+          // devis Suisse (voir pricing.ts/poster_pricing.ts) — une commande
+          // livrée hors CH peut coûter plus cher chez Prodigi sans qu'aucun
+          // garde-fou ne le corrige à l'avance ; ce texte reste le seul filet
+          // de sécurité, colorié dès que l'écart dépasse un seuil raisonnable.
           if (o.prodigiChargedTotal != null)
-            Text(
-              'Facturé par Prodigi : '
-              '${o.prodigiChargedCurrency ?? ''} ${o.prodigiChargedTotal!.toStringAsFixed(2)}'
-              ' · encaissé CHF ${o.price.toStringAsFixed(2)}',
-              style: const TextStyle(fontSize: 11, color: AppColors.textMedium),
-            ),
+            Builder(builder: (context) {
+              // Taux approximatif, pour ALERTER seulement — jamais utilisé pour
+              // facturer (voir _usdToChf dans book_pricing.dart, la vraie
+              // source de prix, non accessible ici car privée à ce fichier).
+              const approxUsdToChf = 0.90;
+              final chargedChf = (o.prodigiChargedCurrency ?? '').toUpperCase() == 'USD'
+                  ? o.prodigiChargedTotal! * approxUsdToChf
+                  : o.prodigiChargedTotal!;
+              final gap = chargedChf - o.price;
+              final isAnomaly = gap > 3.0 || gap > o.price * 0.15;
+              return Text(
+                'Facturé par Prodigi : '
+                '${o.prodigiChargedCurrency ?? ''} ${o.prodigiChargedTotal!.toStringAsFixed(2)}'
+                ' · encaissé CHF ${o.price.toStringAsFixed(2)}'
+                '${isAnomaly ? '  ⚠️ écart ~CHF ${gap.toStringAsFixed(2)}' : ''}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: isAnomaly ? AppColors.error : AppColors.textMedium,
+                  fontWeight: isAnomaly ? FontWeight.w600 : FontWeight.normal,
+                ),
+              );
+            }),
           const SizedBox(height: 8),
           _checkButton(),
           const SizedBox(height: 8),

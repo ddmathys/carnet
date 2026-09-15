@@ -522,7 +522,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Génère le PDF d'aperçu — mêmes octets que le téléchargement (sans bourrage
   // de pages blanches), pour un aperçu strictement identique au rendu final.
-  Future<({Uint8List bytes, int pageCount, int photoCount})>
+  Future<({Uint8List bytes, int pageCount, int photoCount, List<String> qualityWarnings})>
       _buildPreviewPdf() async {
     final coverColor = _notebook!.coverColor.isNotEmpty
         ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
@@ -598,6 +598,17 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _generating = false;
         _showPreview = true;
       });
+      // Prévient AVANT l'achat plutôt que de laisser découvrir une photo
+      // floue à réception — jamais bloquant, l'utilisateur reste libre de
+      // continuer (cf. book_pdf_service.dart::_photoPageQualityWarnings).
+      if (gen.qualityWarnings.isNotEmpty) {
+        final n = gen.qualityWarnings.length;
+        _showSnack(
+          n == 1
+              ? '1 photo risque d\'être floue à l\'impression (résolution trop faible pour sa taille dans le livre).'
+              : '$n photos risquent d\'être floues à l\'impression (résolution trop faible pour leur taille dans le livre).',
+        );
+      }
     } catch (e) {
       _progressTimer?.cancel();
       if (!mounted) return;

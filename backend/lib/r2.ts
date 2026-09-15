@@ -42,16 +42,23 @@ export function publicUrlForKey(key: string): string {
   return `https://${publicHost}/${key}`
 }
 
-/** URL PUT signée (valable [expiresIn] s) pour uploader directement sur R2. */
+/** URL PUT signée (valable [expiresIn] s) pour uploader directement sur R2.
+ *  `contentLength`, si fourni, est inclus dans la signature : le PUT direct
+ *  app → R2 doit alors envoyer EXACTEMENT ce nombre d'octets (R2 rejette la
+ *  requête sinon, `Content-Length` étant un en-tête signé) — garde-fou ajouté
+ *  le 15.09.26, avant quoi rien ne bornait la taille d'un upload côté serveur
+ *  (seuils type "180 Mo" purement côté app, contournables). */
 export async function presignPut(
   key: string,
   contentType: string,
-  expiresIn = 600
+  expiresIn = 600,
+  contentLength?: number
 ): Promise<string> {
   const cmd = new PutObjectCommand({
     Bucket: bucket,
     Key: key,
     ContentType: contentType,
+    ...(contentLength != null ? { ContentLength: contentLength } : {}),
   })
   return getSignedUrl(s3, cmd, { expiresIn })
 }
@@ -89,7 +96,7 @@ export async function putObject(
 
 // ── URL stable d'un PDF (imprimeur) ─────────────────────────────────────────
 //
-// Gelato exige une URL qui marche encore le jour de l'impression : une URL R2
+// Prodigi exige une URL qui marche encore le jour de l'impression : une URL R2
 // signée expire (7 jours au plus), et le bucket est privé. On publie donc une
 // URL BACKEND permanente, signée d'un HMAC, qui redirige à chaque appel vers une
 // URL R2 fraîchement signée. Rien à changer si le bucket ou le domaine bouge.

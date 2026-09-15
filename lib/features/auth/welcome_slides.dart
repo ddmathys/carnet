@@ -274,8 +274,7 @@ class _SlideCopy extends StatelessWidget {
 
 class _DuoPhoto extends StatelessWidget {
   final String path;
-  final BoxFit fit;
-  const _DuoPhoto({required this.path, this.fit = BoxFit.cover});
+  const _DuoPhoto({required this.path});
 
   @override
   Widget build(BuildContext context) {
@@ -288,7 +287,8 @@ class _DuoPhoto extends StatelessWidget {
           0.2126, 0.7152, 0.0722, 0, 0,
           0, 0, 0, 1, 0,
         ]),
-        child: Image.asset(path, fit: fit, width: double.infinity, height: double.infinity),
+        child: Image.asset(path,
+            fit: BoxFit.cover, width: double.infinity, height: double.infinity),
       ),
     );
   }

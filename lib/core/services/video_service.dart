@@ -273,6 +273,11 @@ class VideoService {
     // lieu d'abandonner le clip, on retente quelques fois — en resignant une URL
     // FRAÎCHE à chaque essai (une URL déjà tentée peut être inexploitable). La
     // progression repart de 0 à chaque essai : la bannière le montre honnêtement.
+    int uploadSizeBytes = 0;
+    try {
+      uploadSizeBytes = await toUpload.length();
+    } catch (_) {}
+
     const maxAttempts = 3;
     for (var attempt = 1; attempt <= maxAttempts; attempt++) {
       final hasRetryLeft = attempt < maxAttempts;
@@ -285,7 +290,8 @@ class VideoService {
                 'Authorization': 'Bearer $token',
                 'Content-Type': 'application/json',
               },
-              body: jsonEncode({'notebookId': notebookId}),
+              body: jsonEncode(
+                  {'notebookId': notebookId, 'sizeBytes': uploadSizeBytes}),
             )
             .timeout(const Duration(seconds: 30));
         if (signRes.statusCode != 200) {

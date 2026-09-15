@@ -1,7 +1,12 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from '../../lib/verify'
 import { db } from '../../lib/firebase'
-import { computePrice, type CoverType } from '../../lib/pricing'
+import { computePrice, resolveCoverType } from '../../lib/pricing'
+import {
+  computePosterPrice,
+  isPosterOrientation,
+  isPosterSize,
+} from '../../lib/poster_pricing'
 
 // Crée une session Stripe Checkout pour payer une commande (TWINT + carte).
 // Le montant est RECALCULÉ ici depuis coverType + pageCount (lib/pricing.ts) —
@@ -36,14 +41,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'Not your order' })
   }
 
-  const rawPages = Number(o.pageCount ?? 0)
-  if (!rawPages || rawPages <= 0) {
-    return res
-      .status(400)
-      .json({ error: 'pageCount manquant sur la commande — PDF non généré ?' })
+  const isPoster = o.productType === 'poster'
+
+  let trustedPrice: number
+  let productName: string
+  if (isPoster) {
+    if (!isPosterSize(o.posterSize) || !isPosterOrientation(o.posterOrientation)) {
+      return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur la commande' })
+    }
+    const price = computePosterPrice(o.posterSize, o.posterOrientation)
+    if (price == null) {
+      return res.status(400).json({ error: `Aucun tarif poster pour ${o.posterSize}/${o.posterOrientation}` })
+    }
+    trustedPrice = price
+    const orientationLabel = o.posterOrientation === 'landscape' ? 'paysage' : 'portrait'
+    productName = `Tirage ${o.posterSize} ${orientationLabel}`
+  } else {
+    const rawPages = Number(o.pageCount ?? 0)
+    if (!rawPages || rawPages <= 0) {
+      return res
+        .status(400)
+        .json({ error: 'pageCount manquant sur la commande — PDF non généré ?' })
+    }
+    const coverType = resolveCoverType(o.coverType)
+    trustedPrice = computePrice(coverType, rawPages)
+    const bookTitle = String(o.bookTitle ?? 'Livre')
+    const cover =
+      coverType === 'hard' ? 'rigide' : coverType === 'layflat' ? 'layflat' : 'souple'
+    productName = `${bookTitle} — couverture ${cover}`
   }
-  const coverType: CoverType = o.coverType === 'hard' ? 'hard' : 'soft'
-  const trustedPrice = computePrice(coverType, rawPages)
   const amount = Math.round(trustedPrice * 100) // centimes
 
   // Le prix stocké venait du client à la création — on le corrige ici pour que
@@ -52,9 +78,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     await snap.ref.update({ price: trustedPrice })
   }
 
-  const bookTitle = String(o.bookTitle ?? 'Livre')
-  const cover = coverType === 'hard' ? 'rigide' : 'souple'
-
   const params = new URLSearchParams()
   params.set('mode', 'payment')
   params.append('payment_method_types[0]', 'twint')
@@ -62,10 +85,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   params.set('line_items[0][quantity]', '1')
   params.set('line_items[0][price_data][currency]', 'chf')
   params.set('line_items[0][price_data][unit_amount]', String(amount))
-  params.set(
-    'line_items[0][price_data][product_data][name]',
-    `${bookTitle} — couverture ${cover}`
-  )
+  params.set('line_items[0][price_data][product_data][name]', productName)
   params.set('metadata[orderId]', orderId)
   params.set('client_reference_id', orderId)
   if (o.userEmail) params.set('customer_email', String(o.userEmail))

@@ -22,6 +22,26 @@ import { ADMIN_EMAIL } from '../../lib/resend'
 // La migration des médias travaille par lots : on lui laisse le temps d'un lot.
 export const config = { maxDuration: 60 }
 
+// Plafonds serveur ajoutés le 15.09.26 — jusque-là, aucune limite de taille
+// n'était appliquée à l'upload (seuils comme "180 Mo vidéo" purement côté
+// app, contournables par tout appelant avec un token valide, avec impact
+// direct sur les coûts de stockage R2). Généreux par rapport à l'usage réel
+// (photo compressée ~2048px ≈ quelques centaines de Ko, mémo vocal m4a de
+// quelques minutes ≈ quelques Mo) pour ne jamais bloquer un cas légitime.
+const MAX_PHOTO_BYTES = 50 * 1024 * 1024 // 50 Mo
+const MAX_AUDIO_BYTES = 100 * 1024 * 1024 // 100 Mo
+const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024 // 2 Go
+
+/** Valide `sizeBytes` (optionnel, envoyé par l'app avant l'upload) contre un
+ *  plafond. Absent/invalide → undefined (URL signée SANS contrainte de
+ *  taille, pour rester compatible avec un client pas encore à jour). Un
+ *  entier positif au-delà du plafond → 'too_large' (l'appelant doit refuser
+ *  la requête). */
+function clampSizeBytes(raw: unknown, max: number): number | undefined | 'too_large' {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined
+  return raw > max ? 'too_large' : Math.round(raw)
+}
+
 /** URL backend permanente d'un PDF (voir lib/r2.ts) : elle redirige vers une
  *  URL R2 signée fraîche à chaque accès — c'est ce qu'on donne à l'imprimeur. */
 function stablePdfUrl(req: VercelRequest, key: string): string {
@@ -49,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   if (action === 'book-pdf') {
-    // PUBLIC par construction : c'est l'URL qu'on donne à l'imprimeur (Gelato),
+    // PUBLIC par construction : c'est l'URL qu'on donne à l'imprimeur (Prodigi),
     // qui n'a évidemment pas de compte carnet. Elle n'ouvre RIEN d'autre que le
     // PDF dont la clé est signée — sans le HMAC, la clé ne vaut rien, et une
     // clé signée ne permet pas d'en deviner une autre.
@@ -175,6 +195,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!notebookId) {
       return res.status(400).json({ error: 'notebookId manquant' })
     }
+    const sizeBytes = clampSizeBytes(body.sizeBytes, MAX_VIDEO_BYTES)
+    if (sizeBytes === 'too_large') {
+      return res.status(400).json({
+        error: `Vidéo trop volumineuse (max ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} Mo)`,
+      })
+    }
     // La clé inclut l'uid → l'utilisateur ne peut écrire/supprimer que ses objets.
     const contentType = 'video/mp4'
     const key = `videos/${user.uid}/${notebookId}/${randomUUID()}.mp4`
@@ -182,7 +208,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // 1 h de validité : une vidéo de plusieurs centaines de Mo sur un réseau
       // mobile peut dépasser les 10 min par défaut, et l'URL expirerait en plein
       // envoi (R2 rejetterait alors le PUT).
-      const uploadUrl = await presignPut(key, contentType, 3600)
+      const uploadUrl = await presignPut(key, contentType, 3600, sizeBytes)
       return res.status(200).json({ uploadUrl, key, contentType })
     } catch {
       return res.status(500).json({ error: 'Signature impossible' })
@@ -210,10 +236,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!notebookId) {
       return res.status(400).json({ error: 'notebookId manquant' })
     }
+    const sizeBytes = clampSizeBytes(body.sizeBytes, MAX_PHOTO_BYTES)
+    if (sizeBytes === 'too_large') {
+      return res.status(400).json({
+        error: `Photo trop volumineuse (max ${Math.round(MAX_PHOTO_BYTES / (1024 * 1024))} Mo)`,
+      })
+    }
     const contentType = 'image/jpeg'
     const key = `photos/${user.uid}/${notebookId}/${randomUUID()}.jpg`
     try {
-      const uploadUrl = await presignPut(key, contentType)
+      const uploadUrl = await presignPut(key, contentType, 600, sizeBytes)
       return res.status(200).json({ uploadUrl, key, contentType })
     } catch {
       return res.status(500).json({ error: 'Signature impossible' })
@@ -292,10 +324,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!notebookId) {
       return res.status(400).json({ error: 'notebookId manquant' })
     }
+    const sizeBytes = clampSizeBytes(body.sizeBytes, MAX_AUDIO_BYTES)
+    if (sizeBytes === 'too_large') {
+      return res.status(400).json({
+        error: `Mémo vocal trop volumineux (max ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} Mo)`,
+      })
+    }
     const contentType = 'audio/mp4'
     const key = `audio/${user.uid}/${notebookId}/${randomUUID()}.m4a`
     try {
-      const uploadUrl = await presignPut(key, contentType)
+      const uploadUrl = await presignPut(key, contentType, 600, sizeBytes)
       return res.status(200).json({ uploadUrl, key, contentType })
     } catch {
       return res.status(500).json({ error: 'Signature impossible' })

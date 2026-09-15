@@ -34,6 +34,14 @@ const MARGIN_FLOOR = 10.0
 
 export type CoverType = 'hard' | 'soft' | 'layflat'
 
+// Un seul endroit pour "quel type de couverture pour cette valeur brute
+// venue de Firestore/du client" — dupliqué avant le 15.09.26 dans
+// checkout.ts et prodigi/[action].ts avec un ternaire qui a divergé une fois
+// (checkout.ts ignorait 'layflat' et facturait au tarif 'soft', moins cher).
+export function resolveCoverType(raw: unknown): CoverType {
+  return raw === 'hard' || raw === 'layflat' ? raw : 'soft'
+}
+
 // Nombre de pages réellement facturable : PAIR par précaution (règle non
 // confirmée comme rejetée par Prodigi — testé le 06.08.26 via de vrais
 // POST /v4.0/quotes avec pages impaires, acceptés sans erreur ; peut-être

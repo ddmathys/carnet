@@ -142,7 +142,7 @@ class BookPdfService {
 
   // ── Notebook version (multi-template) ─────────────────────────────────────
 
-  static Future<({Uint8List bytes, int pageCount, int photoCount})> generateForNotebook({
+  static Future<({Uint8List bytes, int pageCount, int photoCount, List<String> qualityWarnings})> generateForNotebook({
     required NotebookModel notebook,
     required Color coverColor,
     required List<MemoryModel> memories,
@@ -465,6 +465,14 @@ class BookPdfService {
       }
     }
 
+    // Contrôle qualité DPI — trouvé absent à l'audit du 15.09.26 : une photo
+    // compressée à 2048px (voir photo_service.dart) utilisée en pleine page
+    // A4 (_Tpl.v1/h1) tombe autour de 175-250 DPI réel, sous le seuil
+    // `_minDpi`. `PosterQualityService` faisait déjà ce calcul pour le
+    // produit poster ; jamais branché sur le livre standard (le cas le plus
+    // fréquent) avant ça. Purement informatif — n'influence aucun rendu.
+    final qualityWarnings = _photoPageQualityWarnings(photoPages);
+
     final pdfCover = _toPdf(coverColor);
 
     // Pages courbe de croissance : une par enfant de `growthChildren` dont
@@ -640,7 +648,12 @@ class BookPdfService {
     } else {
       bytes = await buildAndSave(null);
     }
-    return (bytes: bytes, pageCount: finalPageCount, photoCount: successfulPhotos.length);
+    return (
+      bytes: bytes,
+      pageCount: finalPageCount,
+      photoCount: successfulPhotos.length,
+      qualityWarnings: qualityWarnings,
+    );
   }
 
   // Arrondit au nombre de pages valide le plus proche par le haut : PAIR.
@@ -678,6 +691,70 @@ class BookPdfService {
   // PosterQualityService pour le contrôle qualité DPI) ; wrapper conservé ici
   // pour ne pas toucher tous les appels internes de ce fichier.
   static ({int w, int h})? _imgDims(Uint8List bytes) => img_dims.imageDims(bytes);
+
+  // ── Contrôle qualité DPI (ajouté le 15.09.26) ────────────────────────────
+
+  static const double _idealDpi = 300.0;
+  static const double _minDpi = 150.0;
+
+  /// Fraction (largeur, hauteur) de chaque case pour un template donné —
+  /// reflet EXACT de la géométrie calculée dans `cell()`/`_photoPage` (avec
+  /// `_pageMargin == _gap == 0`, donc case = fraction de la page entière).
+  /// Dupliqué plutôt que partagé avec `_photoPage` pour ne jamais risquer de
+  /// toucher le rendu : cette liste ne sert QU'au calcul de DPI ci-dessous,
+  /// jamais au PDF lui-même — une divergence éventuelle ne produirait qu'un
+  /// avertissement imprécis, jamais un artefact visuel.
+  static List<({double w, double h})> _cellFractions(_Tpl tpl) {
+    switch (tpl) {
+      case _Tpl.v4:
+      case _Tpl.h4:
+        return const [
+          (w: 0.5, h: 0.5),
+          (w: 0.5, h: 0.5),
+          (w: 0.5, h: 0.5),
+          (w: 0.5, h: 0.5),
+        ];
+      case _Tpl.v3:
+        return const [(w: 1.0, h: 0.56), (w: 0.5, h: 0.44), (w: 0.5, h: 0.44)];
+      case _Tpl.v2:
+      case _Tpl.h2:
+        return const [(w: 1.0, h: 0.5), (w: 1.0, h: 0.5)];
+      case _Tpl.v1:
+      case _Tpl.h1:
+        return const [(w: 1.0, h: 1.0)];
+    }
+  }
+
+  /// Avertissements « photo trop peu résolue pour la taille où elle est
+  /// imprimée » (< `_minDpi`), tous souvenirs confondus — même principe que
+  /// `PosterQualityService` (produit poster), jamais appliqué au livre
+  /// standard avant l'audit du 15.09.26. Purement informatif : n'empêche
+  /// jamais la génération, sert seulement à prévenir l'utilisateur AVANT
+  /// l'achat plutôt que de le laisser découvrir une photo floue à réception.
+  static List<String> _photoPageQualityWarnings(List<_BookPhotoPage> photoPages) {
+    final warnings = <String>[];
+    for (final page in photoPages) {
+      final fractions = _cellFractions(page.tpl);
+      for (var i = 0; i < page.entries.length && i < fractions.length; i++) {
+        final e = page.entries[i];
+        final dims = _imgDims(e.bytes);
+        if (dims == null || dims.w <= 0 || dims.h <= 0) continue;
+        final f = fractions[i];
+        final reqW = f.w * 2480;
+        final reqH = f.h * 3507;
+        if (reqW <= 0 || reqH <= 0) continue;
+        final dpiW = dims.w / reqW * _idealDpi;
+        final dpiH = dims.h / reqH * _idealDpi;
+        final dpi = dpiW < dpiH ? dpiW : dpiH;
+        if (dpi < _minDpi) {
+          final label =
+              (e.title?.isNotEmpty ?? false) ? e.title! : 'photo du ${e.date}';
+          warnings.add('$label (~${dpi.round()} DPI, sous $_minDpi)');
+        }
+      }
+    }
+    return warnings;
+  }
 
   static List<String> _coverHighlights(List<MemoryModel> memories) {
     final result = <String>[];

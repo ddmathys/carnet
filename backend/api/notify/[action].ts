@@ -327,26 +327,45 @@ async function handleSendNow(req: VercelRequest, res: VercelResponse) {
 async function handleOrdersPending(req: VercelRequest, res: VercelResponse) {
   if (!authorized(req)) return res.status(401).json({ error: 'Unauthorized' })
 
-  const snap = await db.collection('orders').where('status', '==', 'received').get()
-  if (snap.empty) return res.status(200).json({ ok: true, pending: 0, sent: false })
+  // Deux catégories distinctes, toutes deux "bloquées sur une action admin" :
+  // - 'received' : le client n'a pas encore payé (ou l'admin n'a pas encore
+  //   marqué le paiement reçu).
+  // - 'paid' sans prodigiOrderId : payée mais jamais transmise à Prodigi —
+  //   trou de suivi découvert à l'audit du 15.09.26, ce cas n'était avant
+  //   couvert par AUCUN rappel automatique et pouvait rester invisible
+  //   indéfiniment si l'admin oubliait de l'envoyer à l'impression.
+  const [receivedSnap, paidSnap] = await Promise.all([
+    db.collection('orders').where('status', '==', 'received').get(),
+    db.collection('orders').where('status', '==', 'paid').get(),
+  ])
+  const unsentPaidDocs = paidSnap.docs.filter((d) => !d.data().prodigiOrderId)
+
+  if (receivedSnap.empty && unsentPaidDocs.length === 0) {
+    return res.status(200).json({ ok: true, pending: 0, sent: false })
+  }
 
   const now = Date.now()
-  const rows = snap.docs
-    .map((d) => {
-      const o = d.data() as Record<string, any>
-      const createdAt = toDate(o.createdAt)
-      const days = createdAt ? Math.floor((now - createdAt.getTime()) / 86400000) : null
-      return {
-        ref: `#${d.id.slice(0, 8).toUpperCase()}`,
-        name: `${o.firstName ?? ''} ${o.lastName ?? ''}`.trim() || '—',
-        item:
-          o.productType === 'poster'
-            ? `Tirage ${String(o.posterSize ?? '')}`
-            : String(o.bookTitle ?? 'Livre'),
-        price: `CHF ${Number(o.price ?? 0).toFixed(2)}`,
-        days,
-      }
-    })
+  const toRow = (d: FirebaseFirestore.QueryDocumentSnapshot, stage: string) => {
+    const o = d.data() as Record<string, any>
+    const createdAt = toDate(o.createdAt)
+    const days = createdAt ? Math.floor((now - createdAt.getTime()) / 86400000) : null
+    return {
+      ref: `#${d.id.slice(0, 8).toUpperCase()}`,
+      name: `${o.firstName ?? ''} ${o.lastName ?? ''}`.trim() || '—',
+      item:
+        o.productType === 'poster'
+          ? `Tirage ${String(o.posterSize ?? '')}`
+          : String(o.bookTitle ?? 'Livre'),
+      price: `CHF ${Number(o.price ?? 0).toFixed(2)}`,
+      days,
+      stage,
+    }
+  }
+
+  const rows = [
+    ...receivedSnap.docs.map((d) => toRow(d, 'en attente de validation')),
+    ...unsentPaidDocs.map((d) => toRow(d, 'payée, pas encore envoyée à l\'impression')),
+  ]
     // La plus ancienne (donc la plus urgente) en premier.
     .sort((a, b) => (b.days ?? 0) - (a.days ?? 0))
 
@@ -354,28 +373,34 @@ async function handleOrdersPending(req: VercelRequest, res: VercelResponse) {
     .map((r) =>
       row(
         `<strong>${r.ref}</strong>`,
-        `${r.name} · ${r.item} · ${r.price}` +
+        `${r.name} · ${r.item} · ${r.price} · ${r.stage}` +
           (r.days !== null ? ` · depuis ${r.days} j` : '')
       )
     )
     .join('')
 
   const count = rows.length
+  const unsentPaidCount = unsentPaidDocs.length
   const html = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">
-      ⏳ ${count} commande${count > 1 ? 's' : ''} en attente de validation — n'attends pas !
+      ⏳ ${count} commande${count > 1 ? 's' : ''} en attente d'une action — n'attends pas !
     </p>
     ${listHtml}
     <p style="margin:20px 0 0;font-size:13px;color:#888;line-height:1.6;">
-      Une fois le paiement reçu, marque la commande « payée » dans l'app pour
-      lancer l'impression. Ce rappel revient chaque jour tant qu'une commande
-      reste en attente.
+      Une commande « en attente de validation » : marque-la « payée » dans
+      l'app pour lancer l'impression.${
+        unsentPaidCount > 0
+          ? ` Une commande « payée, pas encore envoyée » : le paiement est
+      confirmé mais elle n'a pas (encore) été transmise à Prodigi — envoie-la
+      depuis la console admin.`
+          : ''
+      } Ce rappel revient chaque jour tant qu'une commande reste bloquée.
     </p>
   `)
 
   const sent = await sendEmail({
     to: ADMIN_EMAIL,
-    subject: `⏳ ${count} commande${count > 1 ? 's' : ''} en attente de validation`,
+    subject: `⏳ ${count} commande${count > 1 ? 's' : ''} en attente d'une action`,
     html,
   })
 

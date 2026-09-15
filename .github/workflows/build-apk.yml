@@ -8,6 +8,35 @@ on:
     branches: [ master ]
 
 jobs:
+  # Ajouté le 15.09.26 (audit) — job indépendant, ne touche jamais au build
+  # APK/AAB ni au déploiement Vercel (géré par l'intégration GitHub de
+  # Vercel, hors de ce workflow) : juste de la visibilité qui manquait
+  # totalement avant (le code backend/ n'était vérifié par RIEN en CI).
+  backend-checks:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - name: Checkout du code
+        uses: actions/checkout@v4
+
+      - name: Installer Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Dépendances
+        run: npm ci
+
+      - name: Vérification des types (tsc --noEmit)
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
   build:
     runs-on: ubuntu-latest
     steps:
@@ -50,6 +79,14 @@ jobs:
 
       - name: Dépendances
         run: flutter pub get
+
+      # Ajouté le 15.09.26 (audit) — jusque-là, RIEN ne vérifiait le code
+      # avant de partir en build (ni analyse statique, ni tests) : une
+      # régression n'était visible qu'en prod. `--no-fatal-infos` : les infos
+      # de style (withOpacity déprécié, prefer_const…) ne bloquent pas le
+      # build — seules les vraies erreurs/warnings le font.
+      - name: Analyse statique (flutter analyze)
+        run: flutter analyze --no-fatal-infos
 
       # Le numéro de build (visible dans l'app sur l'écran de connexion,
       # "v1.0.0 (N)") ne bougeait jamais (fixé à 1 dans pubspec.yaml) — donc
