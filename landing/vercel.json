@@ -7,6 +7,10 @@
     {
       "source": "/download/carnet.aab",
       "destination": "https://firebasestorage.googleapis.com/v0/b/bloom-bcb1f.firebasestorage.app/o/public%2Fcarnet.aab?alt=media"
+    },
+    {
+      "source": "/s/:token",
+      "destination": "https://bloom-backend-gray.vercel.app/s/:token"
     }
   ]
 }

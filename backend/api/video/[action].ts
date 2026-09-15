@@ -219,7 +219,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const body = `
         <p class="shareCounts">${escapeHtml(counts)}</p>
         ${message ? `<p class="shareMsg">« ${escapeHtml(message)} »</p>` : ''}
-        <div class="shareGrid">
+        <div class="shareStack">
           ${allPhotoUrls.map((u) => `<a href="${escapeHtml(u)}" target="_blank" rel="noopener"><img src="${escapeHtml(u)}" loading="lazy"/></a>`).join('')}
           ${videoUrls.map((u) => `<video controls preload="metadata" src="${escapeHtml(u)}"></video>`).join('')}
         </div>
@@ -278,11 +278,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       createdAt,
       expiresAt,
     })
-    const host = req.headers['x-forwarded-host'] ?? req.headers.host ?? ''
-    const proto = (req.headers['x-forwarded-proto'] as string) ?? 'https'
+    // Domaine fixe et lisible plutôt que l'hôte réel de la requête (qui
+    // serait bloom-backend-gray.vercel.app, peu présentable dans un message
+    // WhatsApp/mail) — dmathys.dev proxie /s/:token vers ce backend, voir
+    // landing/vercel.json.
     return res.status(200).json({
       token,
-      url: `${proto}://${host}/s/${token}`,
+      url: `https://dmathys.dev/s/${token}`,
       expiresAt,
     })
   }
@@ -675,8 +677,11 @@ function reelPage(titleText: string, body: string): string {
 }
 
 // Gabarit HTML de la page publique `share` — un souvenir envoyé par lien à
-// quelqu'un sans compte carnet, avec une invitation discrète à installer
-// l'app à la fin (pas de compte requis pour VOIR les médias).
+// quelqu'un sans compte carnet. L'invitation à installer l'app est un
+// EN-TÊTE tout en haut (pas un bandeau en bas, jugé trop facile à manquer —
+// demande de David, 15.09.26) ; les photos s'enchaînent une par une, pleine
+// largeur, plutôt qu'en grille (plus proche d'un fil de souvenirs à faire
+// défiler qu'une planche-contact).
 function sharePage(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
@@ -686,7 +691,15 @@ function sharePage(titleText: string, body: string): string {
   *{box-sizing:border-box}
   body{margin:0;min-height:100vh;background:#f5ece0;
     font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;}
-  .wrap{max-width:560px;margin:0 auto;padding:28px 18px 0;}
+  .cta{background:#c9724c;padding:12px 16px;display:flex;align-items:center;gap:11px;}
+  .cta .icn{width:32px;height:32px;border-radius:8px;background:rgba(255,255,255,.22);
+    display:flex;align-items:center;justify-content:center;font-size:15px;flex-shrink:0;}
+  .cta .txt{flex:1;text-align:left;min-width:0;}
+  .cta .txt b{display:block;color:#fff;font-size:12px;}
+  .cta .txt span{color:rgba(255,255,255,.85);font-size:10px;}
+  .cta a{background:#fff;color:#c9724c;font-weight:700;font-size:11px;padding:8px 13px;
+    border-radius:9px;text-decoration:none;white-space:nowrap;flex-shrink:0;}
+  .wrap{max-width:560px;margin:0 auto;padding:24px 18px 0;}
   .brand{color:#3A6648;font-style:italic;font-weight:bold;font-size:20px;text-align:center;margin-bottom:18px;}
   .card{background:#fff;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.08);
     padding:28px 22px;text-align:center;}
@@ -695,31 +708,23 @@ function sharePage(titleText: string, body: string): string {
   .shareMsg{color:#5a4d40;font-style:italic;font-size:14px;background:#f5ece0;
     border-radius:12px;padding:12px 16px;margin:0 0 18px;}
   .shareHint{color:#9a897a;font-size:11.5px;margin:12px 0 0;}
-  .shareGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;margin-top:6px;}
-  .shareGrid a{display:block;aspect-ratio:1;overflow:hidden;border-radius:6px;}
-  .shareGrid img{width:100%;height:100%;object-fit:cover;display:block;}
-  .shareGrid video{grid-column:1/-1;width:100%;border-radius:10px;margin-top:6px;}
+  .shareStack{display:flex;flex-direction:column;gap:10px;margin-top:6px;}
+  .shareStack a{display:block;border-radius:12px;overflow:hidden;line-height:0;}
+  .shareStack img{width:100%;height:auto;display:block;}
+  .shareStack video{width:100%;border-radius:12px;display:block;}
   p{color:#7a6a5a;}
-  .cta{max-width:560px;margin:22px auto 0;background:#c9724c;border-radius:16px;
-    padding:16px 18px;display:flex;align-items:center;gap:12px;}
-  .cta .icn{width:36px;height:36px;border-radius:9px;background:rgba(255,255,255,.22);
-    display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;}
-  .cta .txt{flex:1;text-align:left;}
-  .cta .txt b{display:block;color:#fff;font-size:12.5px;}
-  .cta .txt span{color:rgba(255,255,255,.85);font-size:10.5px;}
-  .cta a{background:#fff;color:#c9724c;font-weight:700;font-size:11px;padding:8px 12px;
-    border-radius:9px;text-decoration:none;white-space:nowrap;}
-  .foot{max-width:560px;margin:0 auto;text-align:center;padding:14px 18px 28px;
+  .foot{max-width:560px;margin:0 auto;text-align:center;padding:18px 18px 28px;
     color:#9a897a;font-size:10.5px;}
 </style></head>
-<body><div class="wrap">
-  <div class="brand">carnet</div>
-  <div class="card"><h1>${escapeHtml(titleText)}</h1>${body}</div>
-</div>
+<body>
 <div class="cta">
   <div class="icn">🌱</div>
   <div class="txt"><b>Carnet</b><span>Le carnet de famille — installe l'app pour garder vos souvenirs</span></div>
   <a href="https://dmathys.dev/download/carnet.apk">Installer</a>
+</div>
+<div class="wrap">
+  <div class="brand">carnet</div>
+  <div class="card"><h1>${escapeHtml(titleText)}</h1>${body}</div>
 </div>
 <p class="foot">Lien envoyé depuis l'app Carnet — aucun compte requis pour voir ces médias.</p>
 </body></html>`
