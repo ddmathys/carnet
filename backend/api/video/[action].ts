@@ -699,6 +699,8 @@ function sharePage(titleText: string, body: string): string {
   .cta .txt span{color:rgba(255,255,255,.85);font-size:10px;}
   .cta a{background:#fff;color:#c9724c;font-weight:700;font-size:11px;padding:8px 13px;
     border-radius:9px;text-decoration:none;white-space:nowrap;flex-shrink:0;}
+  .ctaNote{max-width:560px;margin:0 auto;padding:8px 18px 0;text-align:center;
+    color:#9a897a;font-size:10.5px;line-height:1.4;}
   .wrap{max-width:560px;margin:0 auto;padding:24px 18px 0;}
   .brand{color:#3A6648;font-style:italic;font-weight:bold;font-size:20px;text-align:center;margin-bottom:18px;}
   .card{background:#fff;border-radius:20px;box-shadow:0 4px 24px rgba(0,0,0,.08);
@@ -719,9 +721,10 @@ function sharePage(titleText: string, body: string): string {
 <body>
 <div class="cta">
   <div class="icn">🌱</div>
-  <div class="txt"><b>Carnet</b><span>Le carnet de famille — installe l'app pour garder vos souvenirs</span></div>
+  <div class="txt"><b>Carnet</b><span>L'app de David Mathys 🙂 — installe-la pour garder vos souvenirs</span></div>
   <a href="https://dmathys.dev/download/carnet.apk">Installer</a>
 </div>
+<p class="ctaNote">⚠️ Chrome peut afficher un avertissement au téléchargement — normal pour une app hors Play Store, tu peux continuer sans crainte.</p>
 <div class="wrap">
   <div class="brand">carnet</div>
   <div class="card"><h1>${escapeHtml(titleText)}</h1>${body}</div>
