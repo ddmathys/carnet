@@ -128,7 +128,6 @@ flutter:
   assets:
     - assets/images/
     - assets/images/animals/
-    - assets/icons/
     - assets/welcome/
     - assets/branding/svg/
     - assets/branding/splash/
