@@ -127,10 +127,16 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
   // local pour que la puce change de section tout de suite. La base, elle, est
   // déjà mise à jour par TagService.setKindByLabel.
   final Map<String, String> _kindOverride = {};
+  // Recherche texte dans la feuille (utile dès qu'on a beaucoup de tags) : ne
+  // filtre que l'AFFICHAGE des puces, jamais `_selected` — un tag coché
+  // reste coché même si on tape autre chose ensuite.
+  final _searchCtrl = TextEditingController();
+  String _query = '';
 
   @override
   void dispose() {
     _newTagCtrl.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -138,6 +144,10 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     final map = <TagCategory, List<String>>{
       for (final c in TagCategory.values) c: [],
     };
+    // Filtre texte : ne réduit que l'affichage, jamais `_selected` — voir
+    // le commentaire sur `_query`.
+    final q = _query.trim().toLowerCase();
+    bool matches(String label) => q.isEmpty || label.toLowerCase().contains(q);
     // La feuille travaille en LIBELLÉS, pas en documents : deux tags de même nom
     // (un souvenir partagé, un doublon en base) ne doivent donner qu'une puce —
     // sinon « 2025 » s'affiche deux fois. Cocher ce libellé sélectionne bien
@@ -146,6 +156,7 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     for (final t in widget.tags) {
       final label = t.label.trim();
       if (label.isEmpty || !seen.add(label.toLowerCase())) continue;
+      if (!matches(label)) continue;
       final override = _kindOverride[label.toLowerCase()];
       final category =
           override != null ? categoryOfKind(override) : categoryOf(t);
@@ -154,7 +165,7 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
     // Les tags créés à l'instant sont des événements tant qu'ils n'ont pas de
     // kind — c'est le cas courant (« Vacances », « Amis »).
     for (final label in _created) {
-      if (seen.add(label.toLowerCase())) {
+      if (matches(label) && seen.add(label.toLowerCase())) {
         map[TagCategory.evenement]!.add(label);
       }
     }
@@ -291,12 +302,43 @@ class _TagPickerSheetState extends State<_TagPickerSheet> {
               ],
             ),
           ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 0, 22, 8),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _query = v),
+              decoration: InputDecoration(
+                isDense: true,
+                hintText: 'Rechercher un tag…',
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _query.isEmpty
+                    ? null
+                    : IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () => setState(() {
+                          _searchCtrl.clear();
+                          _query = '';
+                        }),
+                      ),
+              ),
+            ),
+          ),
           Flexible(
             child: SingleChildScrollView(
               padding: const EdgeInsets.fromLTRB(22, 4, 22, 8),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  if (_query.trim().isNotEmpty &&
+                      categories.values.every((l) => l.isEmpty))
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      child: Text(
+                        'Aucun tag ne correspond à « ${_query.trim()} ».',
+                        style: const TextStyle(
+                            color: AppColors.textMedium, fontSize: 13),
+                      ),
+                    ),
                   for (final c in TagCategory.values)
                     if (categories[c]!.isNotEmpty) ...[
                       Row(

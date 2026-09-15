@@ -1427,6 +1427,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // les règles Firestore pour autoriser un collaborateur à voir le souvenir.
       final tagIds = <String>[];
       final tagLabels = <String>[];
+      // Miroir de la nature de chaque tag (parallèle à tagLabels) — permet à
+      // un collaborateur qui voit ce souvenir via un AUTRE tag partagé de
+      // classer correctement celui-ci dans son filtre (Personne/Lieu/Année)
+      // sans avoir le droit de lire le document du tag original (voir
+      // TagService.streamFilterable).
+      final tagKinds = <String>[];
       final personLabels = _personLabels;
       for (final label in _tagLabels) {
         // Un tag qui reprend le lieu du souvenir EST un tag de lieu : c'est sa
@@ -1442,6 +1448,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         if (tag == null) continue;
         tagIds.add(tag.id);
         tagLabels.add(tag.label);
+        tagKinds.add(tag.kind);
       }
       final allTags = await TagService.visibleTags();
       final uid = FirebaseAuth.instance.currentUser!.uid;
@@ -1462,6 +1469,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         'userId': ownerUid,
         'tagIds': tagIds,
         'tagLabels': tagLabels,
+        'tagKinds': tagKinds,
         'sharedWith': sharedWith,
         'type': category,
         'subType': _selectedSubType,

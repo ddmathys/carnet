@@ -122,8 +122,10 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           onPressed: () => context.go('/home'),
         ),
         actions: [
-          // Un tag « enfant » garde sa courbe de croissance.
-          if (tag != null && tag.isChild)
+          // Un tag « enfant » garde sa courbe de croissance — sauf un tag
+          // fantôme (voir TagModel.isVirtual) : sa nature est fiable (mirroir
+          // `tagKinds`), mais son id ne pointe vers aucun vrai document.
+          if (tag != null && tag.isChild && !tag.isVirtual)
             IconButton(
               icon: const Icon(Icons.show_chart, color: AppColors.textDark),
               tooltip: 'Croissance',

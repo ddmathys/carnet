@@ -10,6 +10,15 @@ class MemoryModel {
   final String userId;
   final List<String> tagIds;
   final List<String> tagLabels;
+  // Miroir de la NATURE (kind) de chaque tag, parallèle à `tagLabels` — sert
+  // à ranger correctement un tag dans le bon filtre (Personne/Lieu/Année)
+  // même pour qui ne peut pas lire le document `tags/{id}` d'origine (un
+  // collaborateur voit ce souvenir via un AUTRE tag partagé, mais les règles
+  // Firestore ne l'autorisent pas à lire un tag qu'on ne lui a pas
+  // explicitement partagé — voir TagService.streamFilterable). Absent sur les
+  // souvenirs créés avant cette mirror (2026-09-15) : le classement retombe
+  // alors sur une devinette best-effort (TagService.inferKind).
+  final List<String> tagKinds;
   final List<String> sharedWith;
   final String type;
   final String? subType;
@@ -54,6 +63,7 @@ class MemoryModel {
     this.userId = '',
     this.tagIds = const [],
     this.tagLabels = const [],
+    this.tagKinds = const [],
     this.sharedWith = const [],
     required this.type,
     this.subType,
@@ -89,6 +99,7 @@ class MemoryModel {
       userId: d['userId'] ?? '',
       tagIds: List<String>.from(d['tagIds'] ?? []),
       tagLabels: List<String>.from(d['tagLabels'] ?? []),
+      tagKinds: List<String>.from(d['tagKinds'] ?? []),
       sharedWith: List<String>.from(d['sharedWith'] ?? []),
       type: d['type'] ?? 'anecdote',
       subType: d['subType'],
@@ -143,6 +154,7 @@ class MemoryModel {
         'userId': userId,
         'tagIds': tagIds,
         'tagLabels': tagLabels,
+        'tagKinds': tagKinds,
         'sharedWith': sharedWith,
         'type': type,
         'subType': subType,
@@ -185,6 +197,7 @@ class MemoryModel {
         userId: userId,
         tagIds: tagIds,
         tagLabels: tagLabels,
+        tagKinds: tagKinds,
         sharedWith: sharedWith,
         type: type,
         subType: subType,

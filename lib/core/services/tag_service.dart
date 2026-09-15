@@ -129,9 +129,15 @@ class TagService {
   ///
   /// On reconstruit ces tags « fantômes » ([TagModel.isVirtual]) depuis les
   /// `tagLabels` dénormalisés des souvenirs eux-mêmes (lisibles dès que le
-  /// souvenir l'est, sans avoir besoin de lire le tag original). Nature
-  /// (kind) devinée du mieux possible ; jamais éditables/partageables — voir
-  /// les garde-fous `!t.isVirtual` côté écrans (partage, courbe de
+  /// souvenir l'est, sans avoir besoin de lire le tag original). Leur nature
+  /// (kind) vient elle aussi du miroir dénormalisé `tagKinds` du souvenir
+  /// (même index que `tagLabels`) — sinon un tag « Personne » ajouté par un
+  /// collaborateur tombait toujours sous « Événement », faute de pouvoir lire
+  /// le vrai `kind` du tag original. Repli sur une devinette best-effort
+  /// (`inferKind`, ne reconnaît que année/lieu) pour les souvenirs créés avant
+  /// ce mirroir (2026-09-15) ou si les deux tableaux divergent en longueur.
+  /// Ces tags fantômes restent jamais éditables/partageables/navigables —
+  /// voir les garde-fous `!t.isVirtual` côté écrans (partage, courbe de
   /// croissance).
   static Stream<List<TagModel>> streamFilterable() {
     final uid = _uid;
@@ -150,19 +156,23 @@ class TagService {
       final seenExtra = <String>{};
       for (final m in memories) {
         final location = (m.location ?? '').trim().toLowerCase();
-        for (final rawLabel in m.tagLabels) {
-          final label = rawLabel.trim();
+        final hasKinds = m.tagKinds.length == m.tagLabels.length;
+        for (var i = 0; i < m.tagLabels.length; i++) {
+          final label = m.tagLabels[i].trim();
           final key = label.toLowerCase();
           if (label.isEmpty ||
               byLabel.containsKey(key) ||
               !seenExtra.add(key)) {
             continue;
           }
+          final kind = hasKinds && m.tagKinds[i].isNotEmpty
+              ? m.tagKinds[i]
+              : inferKind(label, isLocation: location == key);
           extra.add(TagModel(
             id: '_virtual_$key',
             userId: m.userId,
             label: label,
-            kind: inferKind(label, isLocation: location == key),
+            kind: kind,
             createdAt: m.date,
             isVirtual: true,
           ));
