@@ -1222,7 +1222,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       : formatDateWithPrecision(_selectedDate, _datePrecision);
 
   Future<void> _openDatePicker() async {
-    final minDate = _childTag?.birthdate ?? DateTime(2000);
+    // Plancher large (pas de vraie borne métier) : bloquait avant 2000,
+    // empêchant de dater une vieille photo de famille numérisée.
+    final minDate = _childTag?.birthdate ?? DateTime(1900);
     final result = await showModalBottomSheet<Map<String, dynamic>>(
       context: context,
       isScrollControlled: true,
@@ -1265,9 +1267,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   String? get _missingFieldsHint {
     final missing = <String>[];
-    if (_titleRequiredEmpty) missing.add('titre');
+    // Une mesure de croissance n'affiche ni titre ni lieu (voir le parcours
+    // en étapes plus bas) : les exiger n'aurait aucun champ visible à
+    // remplir pour les satisfaire.
+    if (_selectedCategory != 'taille_poids') {
+      if (_titleRequiredEmpty) missing.add('titre');
+      if (_locationRequiredEmpty) missing.add('lieu');
+    }
     if (_dateNeedsConfirmation) missing.add('date');
-    if (_locationRequiredEmpty) missing.add('lieu');
     switch (_selectedCategory) {
       case 'parole':
       case 'mouvement':
@@ -1309,20 +1316,93 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       );
 
   bool get _saveEnabled {
-    if (_titleRequiredEmpty || _locationRequiredEmpty) return false;
     if (_dateNeedsConfirmation) return false;
     switch (_selectedCategory) {
       case 'parole':
       case 'mouvement':
+        if (_titleRequiredEmpty || _locationRequiredEmpty) return false;
         return _selectedSubType != null;
       case 'taille_poids':
+        // Titre et lieu facultatifs pour une mesure (demande de David,
+        // 15.09.26) : seuls la date, le poids/la taille et l'enfant
+        // comptent — voir le parcours en étapes dédié plus bas.
         return !_measurementMissing && _childTag != null;
       case 'anecdote':
       case null:
         // Description facultative → titre + lieu + date suffisent.
+        if (_titleRequiredEmpty || _locationRequiredEmpty) return false;
         return true;
       default:
+        if (_titleRequiredEmpty || _locationRequiredEmpty) return false;
         return true;
+    }
+  }
+
+  // ── Parcours en étapes (création uniquement — l'édition reste en un seul
+  // écran éditorial, _buildEditorialScaffold). Un souvenir normal traverse
+  // médias → titre → tags → lieu → mémo vocal ; le toggle croissance (posé
+  // sur l'étape médias) fait basculer sur un parcours à 2 étapes seulement.
+  // `_step` est un index dans `_steps`, jamais interprété autrement — voir
+  // `_currentStepId`.
+  int _step = 0;
+  static const List<String> _stepsNormal = ['media', 'title', 'tags', 'lieu', 'voice'];
+  static const List<String> _stepsGrowth = ['media', 'growth'];
+
+  List<String> get _steps =>
+      _selectedCategory == 'taille_poids' ? _stepsGrowth : _stepsNormal;
+
+  String get _currentStepId {
+    final steps = _steps;
+    return steps[_step.clamp(0, steps.length - 1)];
+  }
+
+  /// Un champ manquant bloque l'étape où il est affiché (pas seulement
+  /// l'enregistrement final) — cohérent avec `_saveEnabled`/
+  /// `_missingFieldsHint` : arrivé à la dernière étape, ces deux-là sont
+  /// nécessairement déjà satisfaits.
+  bool get _stepValid {
+    switch (_currentStepId) {
+      case 'title':
+        return !_titleRequiredEmpty;
+      case 'tags':
+        return !_dateNeedsConfirmation;
+      case 'lieu':
+        return !_locationRequiredEmpty;
+      case 'growth':
+        return !_dateNeedsConfirmation && !_measurementMissing && _childTag != null;
+      default:
+        return true;
+    }
+  }
+
+  String? get _stepHint {
+    switch (_currentStepId) {
+      case 'title':
+        return _titleRequiredEmpty ? 'Un titre est nécessaire pour continuer' : null;
+      case 'tags':
+        return _dateNeedsConfirmation ? 'Confirme la date de ce souvenir' : null;
+      case 'lieu':
+        return _locationRequiredEmpty ? 'Le lieu est nécessaire pour continuer' : null;
+      case 'growth':
+        if (_dateNeedsConfirmation) return 'Confirme la date de la mesure';
+        if (_measurementMissing) return 'Renseigne au moins le poids ou la taille';
+        if (_childTag == null) return 'Choisis pour quel enfant';
+        return null;
+      default:
+        return null;
+    }
+  }
+
+  void _stepBack() {
+    if (_step > 0) setState(() => _step--);
+  }
+
+  void _stepNext() {
+    if (!_stepValid) return;
+    if (_step < _steps.length - 1) {
+      setState(() => _step++);
+    } else {
+      _save();
     }
   }
 
@@ -2499,10 +2579,14 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           activeTrackColor: AppColors.sage,
           onChanged: (v) => setState(() {
             _selectedCategory = v ? 'taille_poids' : 'anecdote';
-            // Une mesure de croissance n'accepte pas de photo (section
-            // retirée de _buildTaillePoidsForm) — si des photos avaient déjà
-            // été choisies côté souvenir normal, on les efface ici plutôt
-            // que de les enregistrer quand même malgré le champ masqué.
+            // Le toggle vit sur l'étape « médias » (index 0) dans les deux
+            // parcours — sécurité, pas censé être atteignable ailleurs.
+            _step = 0;
+            // Une mesure de croissance n'accepte ni photo ni vidéo, ni
+            // titre/lieu (parcours en étapes dédié, juste date/poids-taille/
+            // enfant) — si des médias ou du texte avaient déjà été saisis
+            // côté souvenir normal, on les efface ici plutôt que de les
+            // enregistrer quand même malgré des champs devenus masqués.
             if (v) {
               for (final url in List<String>.of(_existingPhotoUrls)) {
                 final key = _existingKeyByUrl.remove(url);
@@ -2518,6 +2602,20 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               }
               _photoTickets.clear();
               _localPhotos.clear();
+
+              _removedVideoKeys.addAll(_existingVideoKeys);
+              _existingVideoKeys.clear();
+              _existingVideoDurations.clear();
+              for (final t in _videoTickets) {
+                DraftMediaUploader.instance.cancel(t);
+              }
+              _videoTickets.clear();
+              _localVideoPaths.clear();
+              _localVideoDurations.clear();
+
+              _titleController.clear();
+              _locationController.clear();
+              _autoLocationLabel = null;
             }
           }),
         ),
@@ -2525,7 +2623,126 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  Widget _buildTaillePoidsForm() {
+  // ══ PARCOURS EN ÉTAPES (création) ═══════════════════════════════════════
+  // Remplace l'ancien long scroll unique (David : « trop compliqué », Karin
+  // ne savait pas quoi faire après avoir chargé les photos) — validé sur
+  // maquette interactive avant implémentation (15.09.26). Une seule étape
+  // visible à la fois, garde-fous par étape (`_stepValid`/`_stepHint`),
+  // barre d'action fixe en bas (`_StepActionBar`, Retour + Continuer).
+
+  Widget _buildTaillePoidsForm() => _buildStepScaffold(_growthStepContent);
+
+  Widget _buildAnecdoteForm() => _buildStepScaffold(_anecdoteStepContent);
+
+  Widget _buildStepScaffold(Widget Function() content) {
+    final steps = _steps;
+    return Column(
+      children: [
+        _StepHeader(index: _step, total: steps.length),
+        Expanded(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+            child: content(),
+          ),
+        ),
+        _StepActionBar(
+          canGoBack: _step > 0,
+          enabled: _stepValid,
+          loading: _loading,
+          label: switch (_currentStepId) {
+            'voice' => 'Enregistrer ce souvenir',
+            'growth' => 'Enregistrer',
+            _ => 'Continuer',
+          },
+          hint: _stepHint,
+          onBack: _stepBack,
+          onPrimary: _stepNext,
+        ),
+      ],
+    );
+  }
+
+  /// Étape « médias », commune aux deux parcours : photos/vidéos (sauf en
+  /// mode croissance, qui n'en accepte pas) + le toggle qui bascule entre
+  /// les deux, toujours accessible ici puisque c'est la toute première étape
+  /// des deux parcours.
+  Widget _mediaStepContent() {
+    final isGrowth = _selectedCategory == 'taille_poids';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!isGrowth)
+          _FormCard(children: [
+            _buildPhotoSection(),
+            const SizedBox(height: 16),
+            _buildVideoSection(),
+          ])
+        else
+          _FormCard(children: const [
+            Text(
+              'Une mesure de croissance ne prend ni photo ni vidéo — juste '
+              'la date, le poids ou la taille, et l\'enfant concerné.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
+            ),
+          ]),
+        const SizedBox(height: 14),
+        _FormCard(children: [_growthToggleRow(on: isGrowth)]),
+      ],
+    );
+  }
+
+  Widget _anecdoteStepContent() {
+    switch (_currentStepId) {
+      case 'media':
+        return _mediaStepContent();
+      case 'title':
+        return _FormCard(children: [
+          _titleField('Ex : Premier pas dans la neige'),
+          const SizedBox(height: 16),
+          TextField(
+            controller: _textController,
+            maxLines: 5,
+            decoration: const InputDecoration(
+              hintText:
+                  'Qu\'est-ce qui t\'a marqué pour ce souvenir ? (facultatif)',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
+        ]);
+      case 'tags':
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _FormCard(children: [_buildDateCollapsible()]),
+            const SizedBox(height: 14),
+            _buildPersonPastilleRow(),
+            const SizedBox(height: 16),
+            _FormCard(children: [_buildTagSection()]),
+          ],
+        );
+      case 'lieu':
+        return _FormCard(children: [_buildLocationCollapsible()]);
+      case 'voice':
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _FormCard(children: [_buildVoiceMemoSection()]),
+            const SizedBox(height: 10),
+            const Text(
+              'Facultatif — appuie sur Enregistrer pour l\'ignorer.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.textMedium, fontSize: 11.5),
+            ),
+          ],
+        );
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Widget _growthStepContent() {
+    if (_currentStepId == 'media') return _mediaStepContent();
+
     final weightVal =
         double.tryParse(_weightController.text.replaceAll(',', '.'));
     final heightVal =
@@ -2545,176 +2762,89 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     final showWeight = weightVal != null && weightVal > 0;
     final showHeight = heightVal != null && heightVal > 0;
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 36),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildPersonPastilleRow(),
-          const SizedBox(height: 16),
-          _growthToggleRow(on: true),
-          const SizedBox(height: 10),
-          _FormCard(children: [
-            _SectionTitle('📊 MESURES', error: _measurementMissing),
-            const SizedBox(height: 4),
-            Text(
-              _childTag == null
-                  ? 'Choisis l\'enfant concerné — c\'est lui qui relie cette '
-                      'mesure à sa courbe de croissance.'
-                  : 'Cette mesure alimentera la courbe de ${_childTag!.label}.',
-              style: TextStyle(
-                color: _childTag == null ? AppColors.error : AppColors.textMedium,
-                fontSize: 12,
-              ),
-            ),
-            const SizedBox(height: 10),
-            _buildChildSelector(),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _weightController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Poids (kg)',
-                      hintText: '8.5',
-                      suffixText: 'kg',
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextField(
-                    controller: _heightController,
-                    keyboardType: const TextInputType.numberWithOptions(
-                        decimal: true),
-                    decoration: const InputDecoration(
-                      labelText: 'Taille (cm)',
-                      hintText: '72',
-                      suffixText: 'cm',
-                    ),
-                    onChanged: (_) => setState(() {}),
-                  ),
-                ),
-              ],
-            ),
-            if (isEnfant) ...[
-              const SizedBox(height: 22),
-              if (showWeight) ...[
-                GrowthCurveChart(
-                  gender: gender,
-                  isWeight: true,
-                  ageMonths: ageAtDate,
-                  value: weightVal,
-                ),
-                const SizedBox(height: 18),
-              ],
-              if (showHeight) ...[
-                GrowthCurveChart(
-                  gender: gender,
-                  isWeight: false,
-                  ageMonths: ageAtDate,
-                  value: heightVal,
-                ),
-                const SizedBox(height: 18),
-              ],
-              if (!showWeight && !showHeight) ...[
-                GrowthCurveChart(
-                  gender: gender,
-                  isWeight: true,
-                  ageMonths: ageAtDate,
-                  value: null,
-                ),
-              ],
-            ],
-          ]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_titleField('Ex : Visite chez le pédiatre')]),
-          const SizedBox(height: 14),
-          // Pas de section photo ici, volontairement : une mesure de
-          // croissance n'en accepte pas (voir _growthToggleRow, qui efface
-          // aussi toute photo déjà choisie côté souvenir normal en basculant
-          // vers ce mode) — la vidéo reste possible.
-          _FormCard(children: [_buildVideoSection()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildDateCollapsible()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildLocationCollapsible()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildTagSection()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildVoiceMemoSection()]),
-          const SizedBox(height: 26),
-          _SaveButton(
-              enabled: _saveEnabled,
-              loading: _loading,
-              label:
-                  _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
-              hint: _missingFieldsHint,
-              onPressed: _save),
-        ],
-      ),
-    );
-  }
-
-  /// Le formulaire du souvenir, dans l'ordre du geste : les médias qu'on vient
-  /// d'importer, ce qu'on en dit, quand et où, les tags — et le mémo vocal en
-  /// dernier, facultatif.
-  Widget _buildAnecdoteForm() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 10, 20, 36),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _buildPersonPastilleRow(),
-          const SizedBox(height: 16),
-          _FormCard(children: [
-            _buildPhotoSection(),
-            const SizedBox(height: 16),
-            _buildVideoSection(),
-          ]),
-          const SizedBox(height: 14),
-          _FormCard(children: [
-            _titleField('Ex : Premier pas dans la neige'),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _textController,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText:
-                    'Qu\'est-ce qui t\'a marqué pour ce souvenir ? (facultatif)',
-              ),
-              onChanged: (_) => setState(() {}),
-            ),
-          ]),
-          const SizedBox(height: 10),
-          // Rien à voir avec le titre/la description : c'est un aiguillage
-          // vers l'autre formulaire (_buildTaillePoidsForm), pas un champ de
-          // ce souvenir-ci. La mesure devient un souvenir à part entière
-          // (type taille_poids) — pas des champs ajoutés à celui-ci — pour
-          // ne pas l'exclure du rendu photo normal du livre.
-          _growthToggleRow(on: false),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _FormCard(children: [_buildDateCollapsible()]),
+        const SizedBox(height: 14),
+        _FormCard(children: [
+          _SectionTitle('📊 MESURES', error: _measurementMissing),
           const SizedBox(height: 4),
-          _FormCard(children: [_buildDateCollapsible()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildLocationCollapsible()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildTagSection()]),
-          const SizedBox(height: 14),
-          _FormCard(children: [_buildVoiceMemoSection()]),
-          const SizedBox(height: 26),
-          _SaveButton(
-              enabled: _saveEnabled,
-              loading: _loading,
-              label:
-                  _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
-              hint: _missingFieldsHint,
-              onPressed: _save),
-        ],
-      ),
+          Text(
+            _childTag == null
+                ? 'Choisis l\'enfant concerné — c\'est lui qui relie cette '
+                    'mesure à sa courbe de croissance.'
+                : 'Cette mesure alimentera la courbe de ${_childTag!.label}.',
+            style: TextStyle(
+              color: _childTag == null ? AppColors.error : AppColors.textMedium,
+              fontSize: 12,
+            ),
+          ),
+          const SizedBox(height: 10),
+          _buildChildSelector(),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _weightController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Poids (kg)',
+                    hintText: '8.5',
+                    suffixText: 'kg',
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: TextField(
+                  controller: _heightController,
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
+                  decoration: const InputDecoration(
+                    labelText: 'Taille (cm)',
+                    hintText: '72',
+                    suffixText: 'cm',
+                  ),
+                  onChanged: (_) => setState(() {}),
+                ),
+              ),
+            ],
+          ),
+          if (isEnfant) ...[
+            const SizedBox(height: 22),
+            if (showWeight) ...[
+              GrowthCurveChart(
+                gender: gender,
+                isWeight: true,
+                ageMonths: ageAtDate,
+                value: weightVal,
+              ),
+              const SizedBox(height: 18),
+            ],
+            if (showHeight) ...[
+              GrowthCurveChart(
+                gender: gender,
+                isWeight: false,
+                ageMonths: ageAtDate,
+                value: heightVal,
+              ),
+              const SizedBox(height: 18),
+            ],
+            if (!showWeight && !showHeight) ...[
+              GrowthCurveChart(
+                gender: gender,
+                isWeight: true,
+                ageMonths: ageAtDate,
+                value: null,
+              ),
+            ],
+          ],
+        ]),
+      ],
     );
   }
 
@@ -3290,7 +3420,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   Widget _buildDateSection({bool showTitle = true}) {
-    final minDate = _childTag?.birthdate ?? DateTime(2000);
+    final minDate = _childTag?.birthdate ?? DateTime(1900);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3710,6 +3840,141 @@ class _Pill extends StatelessWidget {
   }
 }
 
+/// En-tête du parcours en étapes : « Étape X / N » + puces de progression.
+/// Fixe (pas dans le scroll) — toujours visible, comme la barre d'action en
+/// bas.
+class _StepHeader extends StatelessWidget {
+  final int index;
+  final int total;
+  const _StepHeader({required this.index, required this.total});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 8),
+      child: Row(
+        children: [
+          Text(
+            'ÉTAPE ${index + 1} / $total',
+            style: const TextStyle(
+              fontFamily: 'Outfit',
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.w700,
+              color: AppColors.textMedium,
+            ),
+          ),
+          const Spacer(),
+          for (var i = 0; i < total; i++)
+            AnimatedContainer(
+              duration: const Duration(milliseconds: 160),
+              margin: const EdgeInsets.only(left: 5),
+              width: i == index ? 16 : 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: i <= index ? AppColors.sageDark : AppColors.softGray,
+                borderRadius: BorderRadius.circular(4),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Barre d'action fixe en bas du parcours en étapes : Retour (si applicable)
+/// + Continuer/Enregistrer, toujours groupés — plus besoin de scroller pour
+/// trouver le bouton ou deviner ce qui manque (demande de David, 15.09.26).
+class _StepActionBar extends StatelessWidget {
+  final bool canGoBack;
+  final bool enabled;
+  final bool loading;
+  final String label;
+  final String? hint;
+  final VoidCallback onBack;
+  final VoidCallback onPrimary;
+
+  const _StepActionBar({
+    required this.canGoBack,
+    required this.enabled,
+    required this.loading,
+    required this.label,
+    required this.onBack,
+    required this.onPrimary,
+    this.hint,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else ...[
+              if (!enabled && hint != null) ...[
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.error_outline,
+                        size: 14, color: AppColors.error),
+                    const SizedBox(width: 5),
+                    Flexible(
+                      child: Text(
+                        hint!,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.error,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+              ],
+              Row(
+                children: [
+                  if (canGoBack) ...[
+                    OutlinedButton(
+                      onPressed: onBack,
+                      style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(96, 50),
+                        side: const BorderSide(color: AppColors.border),
+                        foregroundColor: AppColors.textMedium,
+                      ),
+                      child: const Text('Retour'),
+                    ),
+                    const SizedBox(width: 10),
+                  ],
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: enabled ? onPrimary : null,
+                      style: ElevatedButton.styleFrom(
+                        disabledBackgroundColor: AppColors.background,
+                        disabledForegroundColor: AppColors.softGray,
+                      ),
+                      child: Text(label),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _SaveButton extends StatelessWidget {
   final bool enabled;
   final bool loading;
@@ -3840,7 +4105,7 @@ class _AddChildSheetState extends State<_AddChildSheet> {
             const SizedBox(height: 14),
             DateMaskField(
               label: 'Date de naissance',
-              firstDate: DateTime(2000),
+              firstDate: DateTime(1900),
               lastDate: DateTime.now(),
               onChanged: (d) => setState(() => _birthdate = d),
             ),
