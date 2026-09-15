@@ -413,16 +413,26 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _editOwnerUid = data['userId'] as String?;
       _editNotebookId = data['notebookId'] as String?;
       // Tags du souvenir : on repart des libellés (le sélecteur travaille en
-      // libellés) — d'abord ceux résolus par id, puis le miroir `tagLabels`
-      // pour les tags d'un autre propriétaire (souvenir partagé).
+      // libellés) — résolus par id quand je peux lire le tag, sinon on garde
+      // au moins le libellé du miroir `tagLabels` (même index que `tagIds`).
+      // Sans ce repli PAR TAG (pas juste "si la liste entière est vide"), un
+      // souvenir partagé qui mélange MES tags et ceux d'un collaborateur (ex.
+      // un lieu qu'il a tapé lui-même, jamais partagé) perdait silencieusement
+      // ces derniers dès que j'éditais et réenregistrais le souvenir — trouvé
+      // le 15.09.26 sur un vrai souvenir (2021 + Grau du Roi disparus).
       final ids = List<String>.from(data['tagIds'] ?? []);
+      final labelsMirror = List<String>.from(data['tagLabels'] ?? []);
       final byId = {for (final t in tags) t.id: t};
-      for (final id in ids) {
-        final t = byId[id];
-        if (t != null) _tagLabels.add(t.label);
+      for (var i = 0; i < ids.length; i++) {
+        final t = byId[ids[i]];
+        if (t != null) {
+          _tagLabels.add(t.label);
+        } else if (i < labelsMirror.length && labelsMirror[i].isNotEmpty) {
+          _tagLabels.add(labelsMirror[i]);
+        }
       }
       if (_tagLabels.isEmpty) {
-        _tagLabels.addAll(List<String>.from(data['tagLabels'] ?? []));
+        _tagLabels.addAll(labelsMirror);
       }
       _selectedCategory = data['type'];
       _selectedSubType = data['subType'];
