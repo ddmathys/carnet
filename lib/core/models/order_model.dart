@@ -208,7 +208,7 @@ class OrderModel {
   // transporteur, lié depuis l'écran de commande, qui dit si c'est arrivé.
   static const _statusLabels = {
     'received': 'Commande reçue',
-    'paid':     'Payée',
+    'paid':     'En validation',
     'shipped':  'Expédiée',
     // 'archived' : le client a confirmé avoir reçu son colis (bouton "J'ai
     // bien reçu ma commande") — état terminal, non affiché dans le suivi
@@ -227,7 +227,7 @@ class OrderModel {
   /// vraiment à ce moment-là plutôt que de laisser deviner.
   static const statusHints = {
     'received': 'On a reçu ta commande, en attente du paiement.',
-    'paid':     'Paiement confirmé — direction l\'atelier d\'impression.',
+    'paid':     'En validation par notre équipe — direction l\'atelier d\'impression dès que c\'est bon.',
     'shipped':  'Le colis a quitté l\'atelier, suis-le avec le numéro ci-dessous.',
     'archived': 'Reçue, merci !',
   };

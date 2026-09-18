@@ -19,6 +19,12 @@ class MemoryPolaroid extends StatelessWidget {
   /// vignette (et l'appui long la déclenche aussi). L'appelant confirme.
   final VoidCallback? onDelete;
 
+  /// Mode sélection (choix des souvenirs pour un livre/calendrier/etc.) :
+  /// `null` = pas de sélection (comportement normal, tap = ouvrir le
+  /// souvenir) ; sinon un rond coché/vide apparaît en bas à gauche —
+  /// jamais en même temps qu'[onDelete] (les deux occupent ce coin).
+  final bool? selected;
+
   const MemoryPolaroid({
     super.key,
     required this.memory,
@@ -27,6 +33,7 @@ class MemoryPolaroid extends StatelessWidget {
     required this.onTap,
     this.onLongPress,
     this.onDelete,
+    this.selected,
   });
 
   /// Pastille « Partagé » — texte, pas juste une icône, pour rester lisible
@@ -99,8 +106,14 @@ class MemoryPolaroid extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: Colors.white,
+            // Fond `surface` (même carte que le reste de l'app, voir
+            // app_theme.dart) au lieu d'un blanc pur qui tranchait sur le
+            // thème espresso — texte donc en textDark/textMedium (variantes
+            // claires, pensées pour un fond sombre), pas ink/inkMedium
+            // (réservées aux fonds clairs).
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: AppColors.border, width: 0.5),
             boxShadow: [
               BoxShadow(
                   color: Colors.black.withOpacity(0.10),
@@ -229,6 +242,37 @@ class MemoryPolaroid extends StatelessWidget {
                             ),
                           ),
                         ),
+                      if (selected != null)
+                        Positioned(
+                          bottom: 6,
+                          left: 6,
+                          child: Semantics(
+                            label: selected!
+                                ? 'Souvenir sélectionné'
+                                : 'Sélectionner ce souvenir',
+                            button: true,
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: selected!
+                                    ? AppColors.sageDark
+                                    : Colors.black.withOpacity(0.45),
+                                shape: BoxShape.circle,
+                                border: selected!
+                                    ? null
+                                    : Border.all(
+                                        color: Colors.white.withOpacity(0.8),
+                                        width: 1.5),
+                              ),
+                              child: selected!
+                                  ? const Icon(Icons.check,
+                                      size: 15, color: AppColors.background)
+                                  : null,
+                            ),
+                          ),
+                        ),
                     ],
                   ),
                 ),
@@ -243,7 +287,7 @@ class MemoryPolaroid extends StatelessWidget {
                       fontStyle: FontStyle.italic,
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
-                      color: AppColors.ink)),
+                      color: AppColors.textDark)),
               const SizedBox(height: 3),
               Text(sub,
                   maxLines: 1,
@@ -252,7 +296,7 @@ class MemoryPolaroid extends StatelessWidget {
                   style: const TextStyle(
                       fontSize: 10,
                       letterSpacing: 0.5,
-                      color: AppColors.inkMedium)),
+                      color: AppColors.textMedium)),
               const SizedBox(height: 4),
             ],
           ),

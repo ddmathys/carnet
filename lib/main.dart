@@ -9,7 +9,6 @@ import 'package:intl/date_symbol_data_local.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
 import 'core/services/app_messenger.dart';
-import 'core/services/notification_service.dart';
 import 'core/services/shared_media_service.dart';
 import 'core/services/tag_service.dart';
 import 'firebase_options.dart';
@@ -29,6 +28,7 @@ import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
 import 'features/posters/poster_select_screen.dart';
 import 'features/posters/poster_generate_screen.dart';
+import 'features/products/product_format_screen.dart';
 import 'features/retro/retro_view_screen.dart';
 import 'features/retro/retro_data.dart';
 import 'features/orders/order_tracking_screen.dart';
@@ -77,6 +77,9 @@ final _router = GoRouter(
         initialTagId: state.uri.queryParameters['tag'],
         initialYear: state.uri.queryParameters['year'],
         initialLocation: state.uri.queryParameters['loc'],
+        // `select=1` : ouvert pour CHOISIR des souvenirs (voir
+        // ProductFormatScreen) plutôt que pour les consulter.
+        selectionMode: state.uri.queryParameters['select'] == '1',
       ),
     ),
     GoRoute(
@@ -102,6 +105,12 @@ final _router = GoRouter(
       path: '/memory/:memoryId',
       builder: (_, state) =>
           MemoryDetailScreen(memoryId: state.pathParameters['memoryId']!),
+    ),
+
+    // ── Créer un souvenir imprimé (choix du format) ──
+    GoRoute(
+      path: '/product/new',
+      builder: (_, __) => const ProductFormatScreen(),
     ),
 
     // ── Livres ──
@@ -217,18 +226,12 @@ class _BloomAppState extends State<BloomApp> {
   final _appLinks = AppLinks();
   StreamSubscription<Uri>? _linkSub;
   StreamSubscription<List<SharedMediaItem>>? _sharedMediaSub;
-  StreamSubscription? _notificationTapSub;
 
   @override
   void initState() {
     super.initState();
     _initDeepLinks();
     _initSharedMedia();
-    // Notification « souvenir du jour » tapée appli déjà lancée → on ouvre le
-    // souvenir. (Appli fermée : c'est le splash qui s'en charge.)
-    _notificationTapSub = NotificationService.listenTaps(
-      (memoryId) => _router.push('/memory/$memoryId'),
-    );
   }
 
   /// Partage reçu alors que l'appli est déjà ouverte : on saute directement au
@@ -292,7 +295,6 @@ class _BloomAppState extends State<BloomApp> {
   void dispose() {
     _linkSub?.cancel();
     _sharedMediaSub?.cancel();
-    _notificationTapSub?.cancel();
     super.dispose();
   }
 

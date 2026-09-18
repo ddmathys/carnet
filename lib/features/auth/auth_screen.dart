@@ -7,7 +7,6 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/config/app_config.dart';
 import '../../core/services/migration_service.dart';
-import '../../core/services/notification_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 
@@ -33,8 +32,6 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _obscurePass = true;
   String? _error;
   String? _versionLabel;
-  // Compte tout juste créé → on propose le souvenir du jour avant d'entrer.
-  bool _justSignedUp = false;
 
   @override
   void initState() {
@@ -69,7 +66,6 @@ class _AuthScreenState extends State<AuthScreen> {
       } else {
         await FirebaseAuth.instance.createUserWithEmailAndPassword(
             email: _emailCtrl.text.trim(), password: _passCtrl.text);
-        _justSignedUp = true;
       }
     } on FirebaseAuthException catch (e) {
       if (mounted) {
@@ -87,7 +83,6 @@ class _AuthScreenState extends State<AuthScreen> {
       await UserService.onLogin();
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
-    if (_justSignedUp && mounted) await _offerNotifications();
     if (mounted) context.go('/home');
   }
 
@@ -103,12 +98,9 @@ class _AuthScreenState extends State<AuthScreen> {
         return;
       }
       final gAuth = await gUser.authentication;
-      final credential = await FirebaseAuth.instance.signInWithCredential(
+      await FirebaseAuth.instance.signInWithCredential(
           GoogleAuthProvider.credential(
               accessToken: gAuth.accessToken, idToken: gAuth.idToken));
-      // Avec Google, rien ne distingue une inscription d'une connexion — sauf
-      // ce drapeau renvoyé par Firebase.
-      _justSignedUp = credential.additionalUserInfo?.isNewUser ?? false;
     } catch (e) {
       // Cause la plus fréquente sur Android : aucune empreinte SHA-1 de
       // l'app enregistrée dans Firebase pour cette clé de signature
@@ -131,99 +123,7 @@ class _AuthScreenState extends State<AuthScreen> {
       await UserService.onLogin();
     } catch (_) {}
     if (mounted) setState(() => _loading = false);
-    if (_justSignedUp && mounted) await _offerNotifications();
     if (mounted) context.go('/home');
-  }
-
-  /// Compte tout juste créé : on propose le « souvenir du jour » avec une vraie
-  /// explication AVANT la demande système. L'ordre compte — sur Android 13+ et
-  /// sur iOS, la demande système ne se pose qu'une fois : refusée, elle ne
-  /// revient plus, et il faut aller la chercher dans les réglages du téléphone.
-  Future<void> _offerNotifications() async {
-    final chosen = await showModalBottomSheet<NotifyFrequency>(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: AppColors.surface,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 36,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: AppColors.softGray.withOpacity(0.4),
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Icon(Icons.auto_awesome_outlined,
-                  size: 30, color: AppColors.sage),
-              const SizedBox(height: 14),
-              const Text(
-                'Un souvenir de temps en temps ?',
-                style: TextStyle(
-                  fontFamily: 'Fraunces',
-                  fontSize: 21,
-                  fontWeight: FontWeight.w600,
-                  color: AppColors.textDark,
-                ),
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Carnet peut te ressortir une photo au hasard de ton carnet, '
-                'comme un « il y a trois ans, jour pour jour ». '
-                'Tu pourras changer ou couper ça à tout moment dans ton profil.',
-                style: TextStyle(
-                    fontSize: 14, height: 1.45, color: AppColors.textMedium),
-              ),
-              const SizedBox(height: 22),
-              SizedBox(
-                width: double.infinity,
-                child: FilledButton(
-                  onPressed: () =>
-                      Navigator.pop(ctx, NotifyFrequency.daily),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.sageDark,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                  ),
-                  child: const Text('Oui, chaque jour'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton(
-                  onPressed: () =>
-                      Navigator.pop(ctx, NotifyFrequency.weekly),
-                  child: const Text('Une fois par semaine'),
-                ),
-              ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: () => Navigator.pop(ctx, null),
-                  child: const Text('Plus tard',
-                      style: TextStyle(color: AppColors.textMedium)),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (chosen == null) return;
-    // C'est ce set qui déclenche la demande système d'Android / iOS.
-    await NotificationService.setFrequency(chosen);
   }
 
   /// Passe par le backend (Resend) plutôt que

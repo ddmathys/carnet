@@ -25,11 +25,24 @@ class MemoriesListScreen extends StatefulWidget {
   // résoudre un id de tag (voir _applyInitialTag).
   final String? initialYear;
   final String? initialLocation;
+
+  /// Mode sélection : ouvert pour CHOISIR des souvenirs (ex. composer un
+  /// livre) plutôt que pour les consulter. Un tap coche/décoche au lieu
+  /// d'ouvrir le souvenir ; une barre "Continuer" en bas renvoie la
+  /// sélection via `context.pop(ids)` — l'appelant décide de ce qu'il en
+  /// fait (aucune notion de "livre"/"produit" ici, cet écran reste générique).
+  final bool selectionMode;
+  final String confirmLabel;
+  final int minSelection;
+
   const MemoriesListScreen({
     super.key,
     this.initialTagId,
     this.initialYear,
     this.initialLocation,
+    this.selectionMode = false,
+    this.confirmLabel = 'Continuer',
+    this.minSelection = 1,
   });
 
   @override
@@ -41,6 +54,8 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
   final Set<String> _filterLabels = {};
   final _searchController = TextEditingController();
   String _searchQuery = '';
+  // Mode sélection uniquement (widget.selectionMode) : souvenirs cochés.
+  final Set<String> _selectedIds = {};
   // Mes tags + ceux qu'on m'a partagés + les tags « fantômes » qui n'existent
   // que sur des souvenirs déjà visibles pour moi (voir
   // TagService.streamFilterable) — avant, cet écran ne listait que
@@ -126,7 +141,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
         backgroundColor: AppColors.background,
         elevation: 0,
         title: Text(
-          tag?.label ?? 'Mes souvenirs',
+          widget.selectionMode ? 'Choisis tes souvenirs' : (tag?.label ?? 'Mes souvenirs'),
           style: const TextStyle(
             fontFamily: 'Fraunces',
             fontWeight: FontWeight.w600,
@@ -134,10 +149,18 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           ),
         ),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
-          onPressed: () => context.go('/home'),
+          icon: Icon(
+            widget.selectionMode ? Icons.close : Icons.arrow_back,
+            color: AppColors.textDark,
+          ),
+          // En mode sélection, on revient à l'écran appelant (choix du
+          // format) — jamais au dashboard, qui casserait ce parcours.
+          onPressed: () =>
+              widget.selectionMode ? context.pop() : context.go('/home'),
         ),
-        actions: [
+        actions: widget.selectionMode
+            ? const []
+            : [
           IconButton(
             icon: const Icon(Icons.map_outlined, color: AppColors.textDark),
             tooltip: 'Chronologie des lieux',
@@ -169,7 +192,47 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
         children: [
           const UploadStatusBanner(),
           Expanded(child: _buildMemoriesStream()),
+          if (widget.selectionMode) _buildSelectionBar(),
         ],
+      ),
+    );
+  }
+
+  /// Barre fixe en bas (mode sélection uniquement) : compteur + "Continuer",
+  /// désactivé tant que [MemoriesListScreen.minSelection] n'est pas atteint.
+  Widget _buildSelectionBar() {
+    final count = _selectedIds.length;
+    final enabled = count >= widget.minSelection;
+    return SafeArea(
+      top: false,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(20, 12, 20, 14),
+        decoration: const BoxDecoration(
+          color: AppColors.background,
+          border: Border(top: BorderSide(color: AppColors.border, width: 0.5)),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(
+                count == 0
+                    ? 'Aucun souvenir sélectionné'
+                    : '$count souvenir${count > 1 ? 's' : ''} sélectionné${count > 1 ? 's' : ''}',
+                style: const TextStyle(
+                    fontSize: 13.5, color: AppColors.textMedium, fontWeight: FontWeight.w600),
+              ),
+            ),
+            const SizedBox(width: 12),
+            ElevatedButton(
+              onPressed: enabled ? () => context.pop(_selectedIds.toList()) : null,
+              style: ElevatedButton.styleFrom(
+                minimumSize: const Size(0, 46),
+                padding: const EdgeInsets.symmetric(horizontal: 22),
+              ),
+              child: Text('${widget.confirmLabel}${count > 0 ? ' ($count)' : ''}'),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -195,7 +258,10 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
             children: [
               _buildSearchBar(),
               if (_tags.isNotEmpty) _buildFilterBar(),
-              if (tagFiltered.length >= 10)
+              // CTA "Générer le livre" : uniquement en consultation normale —
+              // en mode sélection, la barre du bas ("Continuer") fait déjà ce
+              // rôle, un 2ᵉ bouton serait redondant/déroutant.
+              if (!widget.selectionMode && tagFiltered.length >= 10)
                 _BookCta(
                     count: tagFiltered.length,
                     tagId: _selectedRealTags.length == 1
@@ -229,8 +295,18 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                             memory: m,
                             cat: _safeCat(m.type),
                             tilt: (i % 2 == 0) ? -0.02 : 0.02,
-                            onTap: () => context.push('/memory/${m.id}'),
-                            onDelete: () => confirmAndDeleteMemory(context, m),
+                            onTap: widget.selectionMode
+                                ? () => setState(() {
+                                      if (!_selectedIds.remove(m.id)) {
+                                        _selectedIds.add(m.id);
+                                      }
+                                    })
+                                : () => context.push('/memory/${m.id}'),
+                            onDelete: widget.selectionMode
+                                ? null
+                                : () => confirmAndDeleteMemory(context, m),
+                            selected:
+                                widget.selectionMode ? _selectedIds.contains(m.id) : null,
                           );
                         },
                       ),

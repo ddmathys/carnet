@@ -5,7 +5,6 @@ import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/services/backend_client.dart';
 import '../../core/services/book_pricing.dart';
-import '../../core/services/notification_service.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -21,75 +20,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? _error;
   bool _deletingAccount = false;
 
-  // Notifications « souvenir du jour ».
-  NotifyFrequency _notifyFrequency = NotifyFrequency.none;
-  bool _notifyLoading = true;
-  bool _sendingTest = false;
-
   @override
   void initState() {
     super.initState();
     final user = FirebaseAuth.instance.currentUser;
     _nameController.text = user?.displayName ?? '';
-    _loadNotifyFrequency();
-  }
-
-  Future<void> _loadNotifyFrequency() async {
-    final frequency = await NotificationService.currentFrequency();
-    if (!mounted) return;
-    setState(() {
-      _notifyFrequency = frequency;
-      _notifyLoading = false;
-    });
-  }
-
-  /// Changement de fréquence. Si l'autorisation système est refusée, le réglage
-  /// NE bascule PAS : afficher « chaque jour » alors qu'aucune notification ne
-  /// peut arriver serait un mensonge à l'écran.
-  Future<void> _setNotifyFrequency(NotifyFrequency frequency) async {
-    if (frequency == _notifyFrequency || _notifyLoading) return;
-    setState(() => _notifyLoading = true);
-    final ok = await NotificationService.setFrequency(frequency);
-    if (!mounted) return;
-    setState(() {
-      if (ok) _notifyFrequency = frequency;
-      _notifyLoading = false;
-    });
-    if (!ok) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Notifications refusées. Autorise-les pour Carnet dans les '
-            'réglages de ton téléphone, puis reviens ici.',
-          ),
-          duration: Duration(seconds: 5),
-        ),
-      );
-    }
-  }
-
-  // Envoi immédiat, pour vérifier tout de suite plutôt que d'attendre le
-  // cron quotidien (7h UTC) — surtout utile juste après avoir activé les
-  // notifications, ou après une mise à jour du backend.
-  Future<void> _sendTestNow() async {
-    if (_sendingTest) return;
-    setState(() => _sendingTest = true);
-    try {
-      await NotificationService.sendNow();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Notification envoyée — regarde ton téléphone.')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString().replaceFirst('Exception: ', ''))),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => _sendingTest = false);
-    }
   }
 
   @override
@@ -113,9 +48,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> _signOut() async {
-    // Avant le signOut, tant qu'on connaît encore l'uid : cet appareil ne doit
-    // plus recevoir les souvenirs du compte qu'on quitte.
-    await NotificationService.forgetDevice();
     await FirebaseAuth.instance.signOut();
     if (mounted) context.go('/auth');
   }
@@ -217,7 +149,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
     // Le compte Firebase Auth a déjà été supprimé côté serveur ; on nettoie
     // juste la session locale avant de renvoyer vers l'écran de connexion.
-    await NotificationService.forgetDevice();
     await FirebaseAuth.instance.signOut();
     if (mounted) context.go('/auth');
   }
@@ -368,70 +299,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     user.email ?? '—',
                     style: const TextStyle(fontSize: 15, color: AppColors.textDark),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 28),
-
-            // Notifications « souvenir du jour »
-            _SectionLabel(label: 'Souvenir du jour'),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              decoration: BoxDecoration(
-                color: AppColors.surface,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.border),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.auto_awesome_outlined,
-                          size: 18, color: AppColors.sage),
-                      const SizedBox(width: 10),
-                      const Expanded(
-                        child: Text(
-                          'Une photo de ton carnet, ressortie au hasard.',
-                          style: TextStyle(
-                              fontSize: 13.5, color: AppColors.textDark),
-                        ),
-                      ),
-                      if (_notifyLoading)
-                        const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: 6),
-                  for (final frequency in NotifyFrequency.values)
-                    _FrequencyOption(
-                      label: frequency.label,
-                      selected: frequency == _notifyFrequency,
-                      onTap: _notifyLoading
-                          ? null
-                          : () => _setNotifyFrequency(frequency),
-                    ),
-                  if (_notifyFrequency != NotifyFrequency.none) ...[
-                    const SizedBox(height: 8),
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: TextButton.icon(
-                        onPressed: _sendingTest ? null : _sendTestNow,
-                        icon: _sendingTest
-                            ? const SizedBox(
-                                width: 14,
-                                height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.send_outlined, size: 16),
-                        label: const Text('Envoyer maintenant (test)'),
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),
@@ -769,51 +636,6 @@ class _SectionLabel extends StatelessWidget {
           fontWeight: FontWeight.w600,
           color: AppColors.softGray,
           letterSpacing: 0.5),
-    );
-  }
-}
-
-/// Une ligne du choix de fréquence. Écrit à la main plutôt qu'avec
-/// `RadioListTile` : l'API `groupValue` des Radio est dépréciée côté Flutter
-/// récent, et ça colle mieux au reste de l'écran, entièrement en conteneurs
-/// maison.
-class _FrequencyOption extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback? onTap;
-  const _FrequencyOption({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final color = selected ? AppColors.sageDark : AppColors.textMedium;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(8),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        child: Row(
-          children: [
-            Icon(
-              selected ? Icons.radio_button_checked : Icons.radio_button_off,
-              size: 18,
-              color: selected ? AppColors.sage : AppColors.softGray,
-            ),
-            const SizedBox(width: 10),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: 14,
-                color: color,
-                fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

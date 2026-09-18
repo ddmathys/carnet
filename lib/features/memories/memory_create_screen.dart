@@ -1362,6 +1362,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// nécessairement déjà satisfaits.
   bool get _stepValid {
     switch (_currentStepId) {
+      case 'media':
+        // Import (sélection + lecture EXIF) encore en cours : `_preparingVideo`
+        // pilote déjà le spinner de `_buildVideoSection` (photos ET vidéos,
+        // voir son commentaire) — Continuer ne doit pas être cliquable tant
+        // qu'il tourne, sinon on peut avancer avant que le média soit même
+        // ajouté à la liste.
+        return !_preparingVideo;
       case 'title':
         return !_titleRequiredEmpty;
       case 'tags':
@@ -1377,6 +1384,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
   String? get _stepHint {
     switch (_currentStepId) {
+      case 'media':
+        return _preparingVideo ? 'Import des médias en cours…' : null;
       case 'title':
         return _titleRequiredEmpty ? 'Un titre est nécessaire pour continuer' : null;
       case 'tags':

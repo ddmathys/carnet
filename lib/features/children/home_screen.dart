@@ -23,8 +23,6 @@ import '../memories/widgets/import_media_cta.dart';
 import '../memories/widgets/delete_memory.dart';
 import '../shared/upload_status_banner.dart';
 import '../tags/people_strip.dart';
-import '../tags/tag_picker_sheet.dart';
-import '../tags/share_tag_sheet.dart';
 import '../tags/shared_tags_sheet.dart';
 
 /// Dashboard : importer un média (le geste principal), les derniers souvenirs,
@@ -44,9 +42,6 @@ class _HomeScreenState extends State<HomeScreen> {
   List<TagModel> _myTags = [];
   List<TagModel> _sharedTags = [];
   List<MemoryModel> _recentMemories = [];
-
-  /// Filtre courant : les libellés de tags cochés dans le sélecteur.
-  final Set<String> _filterLabels = {};
 
   StreamSubscription? _myTagsSub;
   StreamSubscription? _sharedTagsSub;
@@ -114,42 +109,21 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       _sharedById = lot;
     }
-    if (mounted) setState(_applyFilter);
+    if (mounted) setState(_refreshRecentMemories);
   }
 
-  /// Les 6 derniers souvenirs — filtrés si des tags sont cochés.
+  /// Les 2 derniers souvenirs ajoutés — pas de filtre ici, c'est le raccourci
+  /// "vient d'arriver" du dashboard (le filtre par tag complet vit sur
+  /// `/memories`).
   ///
   /// Triés par DATE D'AJOUT (createdAt), pas par la date du souvenir : un
   /// souvenir tout juste importé (ex. une vieille photo d'enfance) doit
   /// apparaître en premier ici, même si sa date le placerait ailleurs dans
   /// le carnet chronologique (`/memories`, qui lui reste trié par `date`).
-  void _applyFilter() {
-    final selected = _selectedTags;
-    final all = _memoriesById.values
-        .where((m) => memoryMatchesTags(m, selected))
-        .toList()
+  void _refreshRecentMemories() {
+    final all = _memoriesById.values.toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    _recentMemories = all.take(6).toList();
-  }
-
-  List<TagModel> get _allTags => [..._myTags, ..._sharedTags];
-
-  List<TagModel> get _selectedTags =>
-      [for (final t in _allTags) if (_filterLabels.contains(t.label)) t];
-
-  Future<void> _openFilter() async {
-    final result = await showTagPickerSheet(
-      context,
-      tags: _allTags,
-      initialLabels: _filterLabels,
-    );
-    if (result == null || !mounted) return;
-    setState(() {
-      _filterLabels
-        ..clear()
-        ..addAll(result);
-      _applyFilter();
-    });
+    _recentMemories = all.take(2).toList();
   }
 
   Future<void> _loadQuota() async {
@@ -214,20 +188,17 @@ class _HomeScreenState extends State<HomeScreen> {
           const SliverToBoxAdapter(child: _EmptyState()),
         ] else ...[
           // 1) Le geste principal (importer) au-dessus du titre de la
-          // section, puis le filtre par tags (date / lieu / événement), puis
-          // les souvenirs.
+          // section, puis les 2 derniers souvenirs ajoutés (pas de filtre
+          // ici — le filtre complet par tag vit sur /memories).
           SliverToBoxAdapter(
             child: ImportMediaCta(
                 onTap: () => context.push('/memory/new?import=1')),
           ),
           _sectionHeader(
-            _filterLabels.isEmpty
-                ? 'Mes derniers souvenirs'
-                : 'Souvenirs filtrés',
+            'Mes derniers souvenirs',
             'Tout voir',
             onAction: () => context.push('/memories'),
           ),
-          SliverToBoxAdapter(child: _filterBar(context)),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
         ],
 
@@ -247,7 +218,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
         // 5) Créer un livre — tout en bas, l'aboutissement.
         SliverToBoxAdapter(
-          child: _CreateBookCta(onTap: () => context.push('/book/select')),
+          child: _CreateBookCta(onTap: () => context.push('/product/new')),
         ),
         // 6) Créer un poster — juste en dessous, même geste d'aboutissement.
         SliverToBoxAdapter(
@@ -258,198 +229,38 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Barre de filtre : un bouton qui ouvre le sélecteur (Date / Lieu /
-  /// Événement, multi-sélection), et le rappel des tags cochés.
-  Widget _filterBar(BuildContext context) {
-    final selected = _filterLabels.toList()..sort();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 0, 22, 6),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              GestureDetector(
-                onTap: _openFilter,
-                child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                  decoration: BoxDecoration(
-                    color: _filterLabels.isEmpty
-                        ? AppColors.surface
-                        : AppColors.sageDark,
-                    borderRadius: BorderRadius.circular(50),
-                    border: Border.all(
-                      color: _filterLabels.isEmpty
-                          ? AppColors.border
-                          : AppColors.sageDark,
-                      width: _filterLabels.isEmpty ? 0.5 : 1.5,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.tune,
-                          size: 16,
-                          color: _filterLabels.isEmpty
-                              ? AppColors.textMedium
-                              : Colors.white),
-                      const SizedBox(width: 6),
-                      Text(
-                        _filterLabels.isEmpty
-                            ? 'Filtrer par tag'
-                            : '${_filterLabels.length} tag${_filterLabels.length > 1 ? 's' : ''}',
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: _filterLabels.isEmpty
-                              ? AppColors.textMedium
-                              : Colors.white,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              if (_filterLabels.isNotEmpty) ...[
-                // Les tags cochés se partagent d'un seul lien — un pour tous.
-                IconButton(
-                  onPressed: () => showShareTagSheet(context, _selectedTags),
-                  icon: const Icon(Icons.ios_share,
-                      size: 18, color: AppColors.sageDark),
-                  tooltip: _selectedTags.length == 1
-                      ? 'Partager ce tag'
-                      : 'Partager ces ${_selectedTags.length} tags',
-                  constraints:
-                      const BoxConstraints(minWidth: 38, minHeight: 38),
-                ),
-                TextButton(
-                  onPressed: () => setState(() {
-                    _filterLabels.clear();
-                    _applyFilter();
-                  }),
-                  child: const Text('Effacer',
-                      style:
-                          TextStyle(color: AppColors.textMedium, fontSize: 13)),
-                ),
-              ],
-            ],
-          ),
-          if (selected.isNotEmpty) ...[
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 7,
-              runSpacing: 7,
-              children: [
-                for (final label in selected)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: AppColors.sageTint,
-                      borderRadius: BorderRadius.circular(50),
-                    ),
-                    child: Text(label,
-                        style: const TextStyle(
-                            fontSize: 12,
-                            color: AppColors.sageDark,
-                            fontWeight: FontWeight.w600)),
-                  ),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  /// Les 6 derniers souvenirs (du filtre courant), en polaroïdes — le tout
-  /// premier (le plus récemment ajouté) est mis en avant en grand plutôt que
-  /// noyé dans la grille, pour que "je viens d'importer quelque chose" se
-  /// voie vraiment sans avoir à chercher.
+  /// Les 2 derniers souvenirs ajoutés, en polaroïdes carrés côte à côte
+  /// (gauche = le plus récent). Remplace l'ancien duo "grande carte + grille"
+  /// — demande explicite de David (18.09.26) : juste les 2 derniers, pas de
+  /// hiérarchie visuelle entre eux.
   Widget _recentMemoriesGrid(BuildContext context) {
     if (_recentMemories.isEmpty) {
       return const Padding(
         padding: EdgeInsets.fromLTRB(22, 14, 22, 10),
         child: Text(
-          'Aucun souvenir avec ces tags.',
+          'Aucun souvenir pour l\'instant.',
           style: TextStyle(color: AppColors.textMedium, fontSize: 13),
         ),
       );
     }
-    final featured = _recentMemories.first;
-    final rest = _recentMemories.skip(1).toList();
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
-      child: Column(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          SizedBox(
-            height: 230,
-            child: Stack(
-              children: [
-                Positioned.fill(
-                  child: MemoryPolaroid(
-                    memory: featured,
-                    cat: _safeCat(featured.type),
-                    tilt: 0,
-                    onTap: () => context.push('/memory/${featured.id}'),
-                    onDelete: () => _deleteMemory(featured),
-                  ),
+          for (var i = 0; i < _recentMemories.length; i++) ...[
+            if (i > 0) const SizedBox(width: 14),
+            Expanded(
+              child: AspectRatio(
+                aspectRatio: 1,
+                child: MemoryPolaroid(
+                  memory: _recentMemories[i],
+                  cat: _safeCat(_recentMemories[i].type),
+                  tilt: 0,
+                  onTap: () => context.push('/memory/${_recentMemories[i].id}'),
+                  onDelete: () => _deleteMemory(_recentMemories[i]),
                 ),
-                Positioned(
-                  top: 14,
-                  right: 14,
-                  child: Transform.rotate(
-                    angle: 0.05,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 9, vertical: 5),
-                      decoration: BoxDecoration(
-                        color: AppColors.sageDark,
-                        borderRadius: BorderRadius.circular(99),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.25),
-                            blurRadius: 8,
-                            offset: const Offset(0, 3),
-                          ),
-                        ],
-                      ),
-                      child: const Text(
-                        '🆕 Dernier ajouté',
-                        style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 10.5,
-                            fontWeight: FontWeight.w700),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (rest.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            GridView.builder(
-              shrinkWrap: true,
-              physics: const NeverScrollableScrollPhysics(),
-              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                crossAxisCount: 2,
-                mainAxisSpacing: 18,
-                crossAxisSpacing: 14,
-                childAspectRatio: 0.66,
               ),
-              itemCount: rest.length,
-              itemBuilder: (_, i) {
-                final m = rest[i];
-                return MemoryPolaroid(
-                  memory: m,
-                  cat: _safeCat(m.type),
-                  tilt: (i % 2 == 0) ? -0.02 : 0.02,
-                  onTap: () => context.push('/memory/${m.id}'),
-                  onDelete: () => _deleteMemory(m),
-                );
-              },
             ),
           ],
         ],
@@ -464,7 +275,7 @@ class _HomeScreenState extends State<HomeScreen> {
     setState(() {
       _mineById.remove(m.id);
       _sharedById.remove(m.id);
-      _applyFilter();
+      _refreshRecentMemories();
     });
     _loadQuota(); // les quotas viennent de baisser
     if (!mounted) return;
@@ -1192,7 +1003,7 @@ class _CreateBookCta extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Créer un livre',
+                    Text('Créer un souvenir imprimé',
                         style: TextStyle(
                           fontFamily: 'Fraunces',
                           fontSize: 19,
@@ -1200,7 +1011,7 @@ class _CreateBookCta extends StatelessWidget {
                           color: Colors.white,
                         )),
                     SizedBox(height: 3),
-                    Text('Choisis un tag ou tes souvenirs un par un.',
+                    Text('Livre, calendrier, puzzle et plus.',
                         style: TextStyle(fontSize: 12.5, color: Colors.white70)),
                   ],
                 ),

@@ -1,7 +1,6 @@
 import { initializeApp, getApps, cert, applicationDefault } from 'firebase-admin/app'
 import { getAuth } from 'firebase-admin/auth'
 import { getFirestore } from 'firebase-admin/firestore'
-import { getMessaging } from 'firebase-admin/messaging'
 import { getStorage } from 'firebase-admin/storage'
 
 // FIREBASE_SERVICE_ACCOUNT = JSON complet du compte de service (Console Firebase
@@ -27,9 +26,6 @@ const app = initApp()
 
 export const auth = getAuth(app)
 export const db = getFirestore(app)
-
-/** Notifications push (« souvenir du jour »). */
-export const messaging = getMessaging(app)
 
 export const projectId =
   resolvedProjectId || (app.options.projectId as string | undefined) || ''

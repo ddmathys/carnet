@@ -77,12 +77,6 @@
             android:name="com.yalantis.ucrop.UCropActivity"
             android:screenOrientation="portrait"
             android:theme="@style/Theme.AppCompat.Light.NoActionBar"/>
-        <!-- Canal par défaut des push reçus quand l'appli est fermée. Il doit
-             porter le même id que le canal créé dans MainActivity, sinon
-             Android range les notifications dans un canal « Divers » sans nom. -->
-        <meta-data
-            android:name="com.google.firebase.messaging.default_notification_channel_id"
-            android:value="souvenirs" />
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
