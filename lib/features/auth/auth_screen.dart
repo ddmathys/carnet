@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:math' show Random;
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_sign_in/google_sign_in.dart';
@@ -11,9 +13,29 @@ import '../../core/services/tag_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 
-/// Écran de connexion / inscription — volontairement très simple : juste
-/// email + mot de passe (et Google), sans décor. La promesse de l'app se
-/// raconte sur l'écran d'accueil qui précède ; ici, on veut juste entrer.
+/// Photos d'illustration de l'en-tête (voyage / naissance / famille — thèmes
+/// de l'app), une tirée au hasard à chaque ouverture de cet écran (David
+/// 22.09.26 : "une photo de ta bibliothèque et ça tourne"). Avant la
+/// connexion il n'y a par définition aucun souvenir à montrer (contrairement
+/// au dashboard, voir home_screen.dart::_maybePickHero) — banque Unsplash,
+/// licence gratuite, aucune attribution requise, URLs vérifiées le 22.09.26
+/// (chaque `images.unsplash.com/photo-…` répond 200, image/jpeg).
+const _authHeaderPhotos = <String>[
+  'https://images.unsplash.com/photo-1543342384-1f1350e27861', // parents + bébé
+  'https://images.unsplash.com/photo-1591161555818-7b9debeccc07', // bébé, noir et blanc
+  'https://images.unsplash.com/photo-1610901158532-d246c011729e', // enfant, bonnet
+  'https://images.unsplash.com/photo-1637184572364-a231e8b4c716', // parents portant bébé
+  'https://images.unsplash.com/photo-1581952975975-08cd95a728d4', // couple, mariage
+  'https://images.unsplash.com/photo-1562494794-d59c886e2bf2', // famille, mains
+  'https://images.unsplash.com/photo-1636830632657-1dcda9360a3a', // parents portant bébé
+  'https://images.unsplash.com/photo-1475503572774-15a45e5d60b9', // famille, plage
+  'https://images.unsplash.com/photo-1628705250580-80b96d4657f6', // famille, cerf-volant
+  'https://images.unsplash.com/photo-1539635278303-d4002c07eae3', // famille, plein air
+];
+
+/// Écran de connexion / inscription — le formulaire reste volontairement
+/// simple (juste email + mot de passe et Google), mais porte désormais en
+/// en-tête une photo illustrative (voir _authHeaderPhotos) plutôt que rien.
 class AuthScreen extends StatefulWidget {
   /// 'signup' ouvre directement sur la création de compte ; sinon connexion.
   final String? initialMode;
@@ -33,6 +55,8 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _obscurePass = true;
   String? _error;
   String? _versionLabel;
+  late final String _headerPhoto =
+      _authHeaderPhotos[Random().nextInt(_authHeaderPhotos.length)];
 
   @override
   void initState() {
@@ -205,29 +229,106 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(28, 8, 28, 24),
-          child: Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+      body: Column(
+        children: [
+          SizedBox(
+            height: 220,
+            width: double.infinity,
+            child: Stack(
+              fit: StackFit.expand,
               children: [
-                IconButton(
-                  onPressed: () =>
-                      context.canPop() ? context.pop() : context.go('/welcome'),
-                  icon: const Icon(Icons.arrow_back, color: AppColors.textDark),
-                  padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(),
+                CachedNetworkImage(
+                  imageUrl: '$_headerPhoto?auto=format&fit=crop&w=900&q=70',
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => const ColoredBox(color: AppColors.surface),
+                  errorWidget: (_, __, ___) => const ColoredBox(color: AppColors.surface),
                 ),
-                const SizedBox(height: 20),
-                Text(_isLogin ? 'Bon retour' : 'Créer un compte',
-                    style: const TextStyle(
-                      fontFamily: 'Fraunces',
-                      fontWeight: FontWeight.w600,
-                      fontSize: 30,
-                      color: AppColors.textDark,
-                    )),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        Colors.black.withOpacity(0.35),
+                        Colors.black.withOpacity(0.15),
+                        Colors.black.withOpacity(0.65),
+                      ],
+                      stops: const [0, 0.5, 1],
+                    ),
+                  ),
+                ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  child: SafeArea(
+                    bottom: false,
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 6, 0, 0),
+                      child: GestureDetector(
+                        onTap: () => context.canPop()
+                            ? context.pop()
+                            : context.go('/welcome'),
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.18),
+                              shape: BoxShape.circle),
+                          child: const Icon(Icons.arrow_back,
+                              color: Colors.white, size: 18),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Positioned(
+                  left: 24,
+                  right: 24,
+                  bottom: 18,
+                  child: Row(
+                    children: [
+                      const Text('carnet',
+                          style: TextStyle(
+                            fontFamily: 'Fraunces',
+                            fontStyle: FontStyle.italic,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                            height: 1,
+                          )),
+                      const Text('.',
+                          style: TextStyle(
+                            fontFamily: 'Fraunces',
+                            fontStyle: FontStyle.italic,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w700,
+                            color: AppColors.sageDark,
+                            height: 1,
+                          )),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: SafeArea(
+              top: false,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(28, 20, 28, 24),
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_isLogin ? 'Bon retour' : 'Créer un compte',
+                          style: const TextStyle(
+                            fontFamily: 'Fraunces',
+                            fontWeight: FontWeight.w600,
+                            fontSize: 30,
+                            color: AppColors.textDark,
+                          )),
                 const SizedBox(height: 6),
                 Text(
                   _isLogin
@@ -401,10 +502,13 @@ class _AuthScreenState extends State<AuthScreen> {
                             color: AppColors.textMedium.withOpacity(0.6))),
                   ),
                 ],
-              ],
+                    ],
+                  ),
+                ),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }

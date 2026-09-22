@@ -271,24 +271,29 @@ class _HomeScreenState extends State<HomeScreen> {
           else
             const DecoratedBox(decoration: fallbackGradient),
 
-          // Voile : lisible en haut (icônes) et en bas (légende), quelle que
-          // soit la photo.
+          // Voile : lisible en haut (icônes + légende, maintenant regroupées
+          // là — voir plus bas) ; un peu de voile en bas aussi pour que les
+          // pastilles restent nettes quelle que soit la photo.
           DecoratedBox(
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 begin: Alignment.topCenter,
                 end: Alignment.bottomCenter,
                 colors: [
+                  Colors.black.withOpacity(0.6),
+                  Colors.black.withOpacity(0.05),
+                  Colors.black.withOpacity(0.05),
                   Colors.black.withOpacity(0.55),
-                  Colors.black.withOpacity(0.0),
-                  Colors.black.withOpacity(0.0),
-                  Colors.black.withOpacity(0.85),
                 ],
-                stops: const [0, 0.22, 0.58, 1],
+                stops: const [0, 0.42, 0.7, 1],
               ),
             ),
           ),
 
+          // En-tête ET légende regroupés en haut à gauche (David 22.09.26 :
+          // "les pastilles cachent la description" — la légende vivait en
+          // bas, sous les pastilles qui chevauchent la photo. Les deux
+          // blocs ne se disputent plus le même espace.
           Positioned(
             top: 0,
             left: 0,
@@ -297,85 +302,79 @@ class _HomeScreenState extends State<HomeScreen> {
               bottom: false,
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(20, 10, 18, 0),
-                child: Row(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('carnet',
-                        style: TextStyle(
-                          fontFamily: 'Fraunces',
-                          fontStyle: FontStyle.italic,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                          height: 1,
-                        )),
-                    const Text('.',
-                        style: TextStyle(
-                          fontFamily: 'Fraunces',
-                          fontStyle: FontStyle.italic,
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: AppColors.sageDark,
-                          height: 1,
-                        )),
-                    const Spacer(),
-                    _heroIconButton(Icons.map_outlined, 'Chronologie',
-                        () => context.push('/chronology')),
-                    const SizedBox(width: 8),
-                    _heroIconButton(Icons.people_alt_outlined, 'Partagé avec moi',
-                        () => _showSharedTagsSheet(context)),
-                    const SizedBox(width: 8),
-                    _heroIconButton(Icons.folder_outlined, 'Mon espace',
-                        () => _showMonEspace(context)),
-                    const SizedBox(width: 10),
-                    GestureDetector(
-                      onTap: () => context.push('/profile'),
-                      child: Container(
-                        width: 34,
-                        height: 34,
-                        decoration: const BoxDecoration(
-                            color: AppColors.sageDark, shape: BoxShape.circle),
-                        child: Center(
-                          child: Text(_initial,
-                              style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.w600,
-                                  fontSize: 13)),
+                    Row(
+                      children: [
+                        const Text('carnet',
+                            style: TextStyle(
+                              fontFamily: 'Fraunces',
+                              fontStyle: FontStyle.italic,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white,
+                              height: 1,
+                            )),
+                        const Text('.',
+                            style: TextStyle(
+                              fontFamily: 'Fraunces',
+                              fontStyle: FontStyle.italic,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.sageDark,
+                              height: 1,
+                            )),
+                        const Spacer(),
+                        _heroIconButton(Icons.map_outlined, 'Chronologie',
+                            () => context.push('/chronology')),
+                        const SizedBox(width: 8),
+                        _heroIconButton(Icons.people_alt_outlined,
+                            'Partagé avec moi', () => _showSharedTagsSheet(context)),
+                        const SizedBox(width: 8),
+                        _heroIconButton(Icons.folder_outlined, 'Mon espace',
+                            () => _showMonEspace(context)),
+                        const SizedBox(width: 10),
+                        GestureDetector(
+                          onTap: () => context.push('/profile'),
+                          child: Container(
+                            width: 34,
+                            height: 34,
+                            decoration: const BoxDecoration(
+                                color: AppColors.sageDark, shape: BoxShape.circle),
+                            child: Center(
+                              child: Text(_initial,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 13)),
+                            ),
+                          ),
                         ),
-                      ),
+                      ],
                     ),
+                    const SizedBox(height: 18),
+                    Text(_greeting,
+                        style: const TextStyle(
+                            fontSize: 11.5,
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w600,
+                            letterSpacing: 0.3)),
+                    if (hero != null) ...[
+                      const SizedBox(height: 3),
+                      Text(_heroTitle(hero),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white)),
+                      Text(DateFormat('d MMMM', 'fr').format(hero.date),
+                          style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
+                    ],
                   ],
                 ),
               ),
-            ),
-          ),
-
-          Positioned(
-            left: 20,
-            right: 20,
-            bottom: 40,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(_greeting,
-                    style: const TextStyle(
-                        fontSize: 11.5,
-                        color: Colors.white70,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: 0.3)),
-                if (hero != null) ...[
-                  const SizedBox(height: 3),
-                  Text(_heroTitle(hero),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                          fontSize: 17,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white)),
-                  Text(DateFormat('d MMMM', 'fr').format(hero.date),
-                      style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
-                ],
-              ],
             ),
           ),
 
@@ -414,9 +413,10 @@ class _HomeScreenState extends State<HomeScreen> {
     return words.isNotEmpty ? words : 'Souvenir';
   }
 
-  /// Les 3 derniers souvenirs ajoutés, en polaroïdes carrés côte à côte
-  /// (gauche = le plus récent) — max 3 en rangée horizontale (David
-  /// 22.09.26), pas de hiérarchie visuelle entre eux.
+  /// Les 3 derniers souvenirs ajoutés (gauche = le plus récent), en rangée
+  /// scrollable — 2 cartes visibles à l'écran, la 3ᵉ à un tap-scroll (David
+  /// 22.09.26 : 3 côte à côte dans une Row les rendait trop petites pour
+  /// être lisibles ; le scroll horizontal laisse chaque carte respirer).
   Widget _recentMemoriesGrid(BuildContext context) {
     if (_recentMemories.isEmpty) {
       return const Padding(
@@ -427,27 +427,24 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       );
     }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(18, 8, 18, 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (var i = 0; i < _recentMemories.length; i++) ...[
-            if (i > 0) const SizedBox(width: 14),
-            Expanded(
-              child: AspectRatio(
-                aspectRatio: 1,
-                child: MemoryPolaroid(
-                  memory: _recentMemories[i],
-                  cat: _safeCat(_recentMemories[i].type),
-                  tilt: 0,
-                  onTap: () => context.push('/memory/${_recentMemories[i].id}'),
-                  onDelete: () => _deleteMemory(_recentMemories[i]),
-                ),
-              ),
-            ),
-          ],
-        ],
+    return SizedBox(
+      height: 176,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+        itemCount: _recentMemories.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
+        itemBuilder: (_, i) => SizedBox(
+          width: 168,
+          height: 168,
+          child: MemoryPolaroid(
+            memory: _recentMemories[i],
+            cat: _safeCat(_recentMemories[i].type),
+            tilt: 0,
+            onTap: () => context.push('/memory/${_recentMemories[i].id}'),
+            onDelete: () => _deleteMemory(_recentMemories[i]),
+          ),
+        ),
       ),
     );
   }

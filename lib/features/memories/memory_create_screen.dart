@@ -2567,70 +2567,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     });
   }
 
-  /// Bascule mesure de croissance ⇄ souvenir normal — un simple `Switch`
-  /// plutôt qu'un lien texte, moins ambigu qu'un tap sur une étiquette.
-  /// [on] reflète l'état déjà connu par l'appelant (évite de relire
-  /// `_selectedCategory` deux fois pour la même info).
-  Widget _growthToggleRow({required bool on}) {
-    return Row(
-      children: [
-        const Icon(Icons.monitor_weight_outlined,
-            size: 16, color: AppColors.sage),
-        const SizedBox(width: 8),
-        const Expanded(
-          child: Text(
-            'Mesure de croissance (taille/poids)',
-            style: TextStyle(color: AppColors.textDark, fontSize: 13),
-          ),
-        ),
-        Switch(
-          value: on,
-          activeTrackColor: AppColors.sage,
-          onChanged: (v) => setState(() {
-            _selectedCategory = v ? 'taille_poids' : 'anecdote';
-            // Le toggle vit sur l'étape « médias » (index 0) dans les deux
-            // parcours — sécurité, pas censé être atteignable ailleurs.
-            _step = 0;
-            // Une mesure de croissance n'accepte ni photo ni vidéo, ni
-            // titre/lieu (parcours en étapes dédié, juste date/poids-taille/
-            // enfant) — si des médias ou du texte avaient déjà été saisis
-            // côté souvenir normal, on les efface ici plutôt que de les
-            // enregistrer quand même malgré des champs devenus masqués.
-            if (v) {
-              for (final url in List<String>.of(_existingPhotoUrls)) {
-                final key = _existingKeyByUrl.remove(url);
-                if (key != null) {
-                  _removedPhotoKeys.add(key);
-                } else {
-                  _removedPhotoUrls.add(url);
-                }
-              }
-              _existingPhotoUrls.clear();
-              for (final t in _photoTickets) {
-                DraftMediaUploader.instance.cancel(t);
-              }
-              _photoTickets.clear();
-              _localPhotos.clear();
-
-              _removedVideoKeys.addAll(_existingVideoKeys);
-              _existingVideoKeys.clear();
-              _existingVideoDurations.clear();
-              for (final t in _videoTickets) {
-                DraftMediaUploader.instance.cancel(t);
-              }
-              _videoTickets.clear();
-              _localVideoPaths.clear();
-              _localVideoDurations.clear();
-
-              _titleController.clear();
-              _locationController.clear();
-              _autoLocationLabel = null;
-            }
-          }),
-        ),
-      ],
-    );
-  }
 
   // ══ PARCOURS EN ÉTAPES (création) ═══════════════════════════════════════
   // Remplace l'ancien long scroll unique (David : « trop compliqué », Karin
@@ -2672,9 +2608,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   }
 
   /// Étape « médias », commune aux deux parcours : photos/vidéos (sauf en
-  /// mode croissance, qui n'en accepte pas) + le toggle qui bascule entre
-  /// les deux, toujours accessible ici puisque c'est la toute première étape
-  /// des deux parcours.
+  /// mode croissance, qui n'en accepte pas).
+  ///
+  /// Le toggle "Mesure de croissance" qui vivait ici a été retiré (David
+  /// 22.09.26) : ajouter une mesure passe désormais uniquement par la
+  /// pastille d'un enfant sur le dashboard (badge toise, voir
+  /// people_strip.dart → GrowthScreen/MeasureSheet), plus direct que ce
+  /// détour par "Ajouter un souvenir". `isGrowth` reste possible ici en
+  /// MODIFICATION d'une mesure déjà créée par cette voie (_selectedCategory
+  /// vient alors des données chargées, voir _loadForEdit) — jamais pour une
+  /// nouvelle création, faute de toggle pour y entrer.
   Widget _mediaStepContent() {
     final isGrowth = _selectedCategory == 'taille_poids';
     return Column(
@@ -2694,8 +2637,6 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               style: TextStyle(color: AppColors.textMedium, fontSize: 12.5),
             ),
           ]),
-        const SizedBox(height: 14),
-        _FormCard(children: [_growthToggleRow(on: isGrowth)]),
       ],
     );
   }
