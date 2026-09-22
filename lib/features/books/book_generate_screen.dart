@@ -682,6 +682,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   }
 
   Future<void> _placeOrder() async {
+    // Garde de ré-entrance : le bouton disparaît dès `_ordering`, mais un
+    // double-tap dans la même frame appelle encore deux fois cette méthode
+    // via la closure `onPressed` capturée au build précédent — sans ce
+    // court-circuit, ça crée deux commandes identiques.
+    if (_ordering) return;
     // Garde-fou : au cas où l'étape précédente serait contournée, on bloque
     // ici aussi — un livre trop long envoyé à l'impression avec un pageCount
     // tronqué causerait un nombre de pages annoncé différent du PDF

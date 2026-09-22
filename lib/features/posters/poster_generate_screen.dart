@@ -327,6 +327,11 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   }
 
   Future<void> _placeOrder() async {
+    // Garde de ré-entrance : même raisonnement que book_generate_screen
+    // (_placeOrder) — le bouton disparaît dès `_ordering`, mais un
+    // double-tap dans la même frame peut encore appeler cette méthode deux
+    // fois via la closure `onPressed` du build précédent.
+    if (_ordering) return;
     final sizeError = _sizeValidationError();
     if (sizeError != null) {
       _showSnack(sizeError);

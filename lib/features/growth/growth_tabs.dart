@@ -660,6 +660,14 @@ class MeasureSheetState extends State<MeasureSheet> {
   }
 
   Future<void> _save() async {
+    // Garde de ré-entrance : le bouton se désactive dès `_saving`, mais SA
+    // closure `onPressed` reste celle capturée au dernier build tant que le
+    // rebuild n'est pas passé — un double-tap dans la même frame peut donc
+    // encore déclencher deux appels. Même défense que memory_create_screen
+    // (_save), qui coupe court ici plutôt que de compter sur le seul état
+    // visuel du bouton.
+    if (_saving) return;
+
     final heightCm =
         double.tryParse(_heightCtrl.text.trim().replaceAll(',', '.'));
     final weightKg =
