@@ -40,11 +40,9 @@ class _HomeScreenState extends State<HomeScreen> {
   QuotaStatus? _audioQuota;
 
   List<TagModel> _myTags = [];
-  List<TagModel> _sharedTags = [];
   List<MemoryModel> _recentMemories = [];
 
   StreamSubscription? _myTagsSub;
-  StreamSubscription? _sharedTagsSub;
   StreamSubscription? _mineSub;
   StreamSubscription? _sharedMemSub;
 
@@ -57,13 +55,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Map<String, MemoryModel> get _memoriesById => {..._sharedById, ..._mineById};
 
-  // Raccourci direct vers /growth/:tagId — sans ça, la courbe de croissance
-  // n'était atteignable qu'en filtrant "Mes souvenirs" sur UN SEUL tag
-  // enfant pour faire apparaître une icône dans l'appbar (très peu
-  // découvrable, cause fréquente de "je ne trouve pas où saisir la taille").
-  List<TagModel> get _childTags =>
-      [..._myTags, ..._sharedTags].where((t) => t.isChild).toList();
-
   @override
   void initState() {
     super.initState();
@@ -74,7 +65,6 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _myTagsSub?.cancel();
-    _sharedTagsSub?.cancel();
     _mineSub?.cancel();
     _sharedMemSub?.cancel();
     super.dispose();
@@ -85,9 +75,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
     _myTagsSub = TagService.streamMine().listen((tags) {
       if (mounted) setState(() => _myTags = tags);
-    });
-    _sharedTagsSub = TagService.streamSharedWithMe().listen((tags) {
-      if (mounted) setState(() => _sharedTags = tags);
     });
 
     final memories = FirebaseFirestore.instance.collection('memories');
@@ -200,12 +187,6 @@ class _HomeScreenState extends State<HomeScreen> {
             onAction: () => context.push('/memories'),
           ),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
-        ],
-
-        // 3b) Courbe de croissance — un raccourci direct par tag enfant.
-        if (_childTags.isNotEmpty) ...[
-          _sectionHeader('Croissance', ''),
-          SliverToBoxAdapter(child: _growthShortcuts(context)),
         ],
 
         // 4) Les livres déjà faits (PDF générés et livres commandés) — la
@@ -415,45 +396,6 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       );
-
-  Widget _growthShortcuts(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 0, 22, 6),
-      child: Column(
-        children: [
-          for (final tag in _childTags)
-            GestureDetector(
-              onTap: () => context.push('/growth/${tag.id}'),
-              child: Container(
-                margin: const EdgeInsets.only(bottom: 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppColors.border, width: 0.5),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.show_chart, color: AppColors.sage),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Text('Courbe de croissance · ${tag.label}',
-                          style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: AppColors.textDark)),
-                    ),
-                    const Icon(Icons.chevron_right,
-                        color: AppColors.softGray, size: 20),
-                  ],
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
 
   MilestoneCategory? _safeCat(String type) {
     try {

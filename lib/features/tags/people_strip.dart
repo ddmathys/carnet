@@ -13,9 +13,10 @@ import 'tag_picker_sheet.dart' show categoryOfKind, TagCategory;
 /// Rangée horizontale des personnes connues, en haut du dashboard : leur
 /// pastille (photo ou initiales), pour en ajouter et leur donner une photo
 /// sans passer par la création d'un souvenir. Tap sur « + » pour en ajouter
-/// une nouvelle ; tap sur une personne propose de changer sa photo ou
-/// d'ouvrir directement sa rétrospective — c'est la seule entrée vers la
-/// rétrospective, il n'y a plus d'écran « choisis un sujet » à part.
+/// une nouvelle ; tap sur une personne propose de changer sa photo, d'ouvrir
+/// directement sa rétrospective, et (tags `enfant` seulement) sa courbe de
+/// croissance — c'est la seule entrée vers ces deux écrans, plus de
+/// raccourci permanent sur le dashboard (voir home_screen.dart).
 class PeopleStrip extends StatefulWidget {
   const PeopleStrip({super.key});
 
@@ -99,6 +100,13 @@ class _PeopleStripState extends State<PeopleStrip> {
               ),
             ),
             const SizedBox(height: 6),
+            if (tag.isChild)
+              ListTile(
+                leading: const Icon(Icons.show_chart,
+                    color: AppColors.sageDark),
+                title: const Text('Courbe de croissance'),
+                onTap: () => Navigator.pop(ctx, 'growth'),
+              ),
             ListTile(
               leading: const Icon(Icons.auto_stories_outlined,
                   color: AppColors.sageDark),
@@ -130,6 +138,8 @@ class _PeopleStripState extends State<PeopleStrip> {
       _openRetro(tag);
     } else if (choice == 'memories') {
       context.push('/memories?tag=${tag.id}');
+    } else if (choice == 'growth') {
+      context.push('/growth/${tag.id}');
     }
   }
 

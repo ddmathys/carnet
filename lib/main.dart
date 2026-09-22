@@ -16,6 +16,7 @@ import 'core/theme/app_theme.dart';
 import 'features/splash/splash_screen.dart';
 import 'features/auth/welcome_screen.dart';
 import 'features/auth/auth_screen.dart';
+import 'features/auth/onboarding_people_screen.dart';
 import 'features/children/home_screen.dart';
 import 'features/growth/growth_screen.dart';
 import 'features/profile/profile_screen.dart';
@@ -68,6 +69,10 @@ final _router = GoRouter(
           AuthScreen(initialMode: state.uri.queryParameters['mode']),
     ),
     GoRoute(path: '/home', builder: (_, __) => const HomeScreen()),
+    GoRoute(
+      path: '/onboarding/people',
+      builder: (_, __) => const OnboardingPeopleScreen(),
+    ),
     GoRoute(path: '/profile', builder: (_, __) => const ProfileScreen()),
 
     // ── Souvenirs (organisés par tags, plus par carnets) ──

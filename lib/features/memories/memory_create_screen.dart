@@ -826,7 +826,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool get _hasVideo => _videoCount > 0;
   bool get _canAddVideo => _videoCount < _maxVideosPerMemory;
 
-  // Durée max par clip en texte lisible (ex. « 10 min », « 2 min », « 90 s »).
+  // Durée max par clip en texte lisible (ex. « 3 min », « 2 min », « 90 s »).
   String get _videoDurationLabel => _videoDurationCapSec % 60 == 0
       ? '${_videoDurationCapSec ~/ 60} min'
       : '$_videoDurationCapSec s';

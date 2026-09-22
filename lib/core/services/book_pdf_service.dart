@@ -1623,7 +1623,7 @@ class BookPdfService {
 
     return pw.Container(
       color: _cream,
-      padding: const pw.EdgeInsets.fromLTRB(28, 28, 28, 20),
+      padding: const pw.EdgeInsets.fromLTRB(28, 28, 28, 16),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
@@ -1646,46 +1646,44 @@ class BookPdfService {
               style: pw.TextStyle(font: dm, fontSize: 7, color: _textMedium),
             ),
           ),
-          pw.SizedBox(height: 18),
+          pw.SizedBox(height: 16),
 
-          // Two columns: height + weight
-          pw.Row(
-            crossAxisAlignment: pw.CrossAxisAlignment.start,
-            children: [
-              if (heights.isNotEmpty)
-                pw.Expanded(
-                  child: _measureColumn(
-                    label: 'Taille (cm)',
-                    isWeight: false,
-                    measures: heights,
-                    getValue: (m) => m.heightCm!,
-                    formatVal: (v) => '${v.toStringAsFixed(0)} cm',
-                    cover: cover,
-                    child: child,
-                    pB: pB,
-                    dm: dm,
-                  ),
-                ),
-              if (heights.isNotEmpty && weights.isNotEmpty)
-                pw.SizedBox(width: 14),
-              if (weights.isNotEmpty)
-                pw.Expanded(
-                  child: _measureColumn(
-                    label: 'Poids (kg)',
-                    isWeight: true,
-                    measures: weights,
-                    getValue: (m) => m.weightKg!,
-                    formatVal: (v) => '${v.toStringAsFixed(1)} kg',
-                    cover: cover,
-                    child: child,
-                    pB: pB,
-                    dm: dm,
-                  ),
-                ),
-            ],
-          ),
+          // Chaque graphique occupe la moitié de la hauteur restante (empilés,
+          // pleine largeur) — un vrai graphique encadré, pas une vignette à
+          // côté d'une liste.
+          if (heights.isNotEmpty)
+            pw.Expanded(
+              child: _measureBlock(
+                label: 'Taille',
+                unit: 'cm',
+                isWeight: false,
+                measures: heights,
+                getValue: (m) => m.heightCm!,
+                formatVal: (v) => '${v.toStringAsFixed(0)} cm',
+                cover: cover,
+                child: child,
+                pB: pB,
+                dm: dm,
+              ),
+            ),
+          if (heights.isNotEmpty && weights.isNotEmpty)
+            pw.SizedBox(height: 16),
+          if (weights.isNotEmpty)
+            pw.Expanded(
+              child: _measureBlock(
+                label: 'Poids',
+                unit: 'kg',
+                isWeight: true,
+                measures: weights,
+                getValue: (m) => m.weightKg!,
+                formatVal: (v) => '${v.toStringAsFixed(1)} kg',
+                cover: cover,
+                child: child,
+                pB: pB,
+                dm: dm,
+              ),
+            ),
 
-          pw.Spacer(),
           pw.Align(
             alignment: pw.Alignment.centerRight,
             child: pw.Text(
@@ -1756,10 +1754,10 @@ class BookPdfService {
     }
 
     pw.LineDataSet ref(List<GrowthPoint> pts, double Function(GrowthPoint) y,
-            {required double width}) =>
+            {required PdfColor color, required double width}) =>
         pw.LineDataSet(
           data: pts.map((p) => pw.PointChartValue(p.month.toDouble(), y(p))).toList(),
-          color: PdfColors.grey400,
+          color: color,
           drawPoints: false,
           lineWidth: width,
         );
@@ -1769,35 +1767,40 @@ class BookPdfService {
         xAxis: pw.FixedAxis<double>(
           ticks(0, maxX, xInterval),
           format: (v) => '${v.toInt()}m',
-          textStyle: pw.TextStyle(font: dm, fontSize: 6, color: _textMedium),
+          textStyle: pw.TextStyle(font: dm, fontSize: 7, color: _textMedium),
           divisions: true,
-          divisionsColor: PdfColors.grey300,
+          divisionsColor: PdfColors.grey200,
         ),
         yAxis: pw.FixedAxis<double>(
           ticks(dynMinY, dynMaxY, yInterval),
           format: (v) => v.toStringAsFixed(isWeight ? 1 : 0),
-          textStyle: pw.TextStyle(font: dm, fontSize: 6, color: _textMedium),
+          textStyle: pw.TextStyle(font: dm, fontSize: 7, color: _textMedium),
           divisions: true,
-          divisionsColor: PdfColors.grey300,
+          divisionsColor: PdfColors.grey200,
         ),
       ),
       datasets: [
-        ref(refData, (p) => p.p97, width: 0.75),
-        ref(refData, (p) => p.p50, width: 1),
-        ref(refData, (p) => p.p3, width: 0.75),
+        ref(refData, (p) => p.p97, color: PdfColors.grey300, width: 0.75),
+        ref(refData, (p) => p.p50, color: PdfColors.grey500, width: 1),
+        ref(refData, (p) => p.p3, color: PdfColors.grey300, width: 0.75),
         pw.LineDataSet(
           data: childPoints,
           color: cover,
           drawPoints: true,
-          pointSize: 2,
-          lineWidth: 1.5,
+          pointSize: 3,
+          lineWidth: 2,
         ),
       ],
     );
   }
 
-  static pw.Widget _measureColumn({
+  /// Bloc « graphique » plein format (label + légende, graphique encadré,
+  /// puces des dernières mesures) — remplace l'ancienne mini-colonne pour
+  /// que chaque courbe (taille, poids) lise comme un vrai graphique de livre,
+  /// pas comme une vignette technique.
+  static pw.Widget _measureBlock({
     required String label,
+    required String unit,
     required bool isWeight,
     required List<MilestoneModel> measures,
     required double Function(MilestoneModel) getValue,
@@ -1810,71 +1813,94 @@ class BookPdfService {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(label,
-            style: pw.TextStyle(font: pB, fontSize: 10, color: _textDark)),
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.center,
+          children: [
+            pw.Text('$label ($unit)',
+                style: pw.TextStyle(font: pB, fontSize: 11, color: _textDark)),
+            pw.SizedBox(width: 16),
+            _legendEntry(color: PdfColors.grey300, label: 'P3–P97', dm: dm),
+            pw.SizedBox(width: 10),
+            _legendEntry(color: PdfColors.grey500, label: 'Médiane', dm: dm),
+            pw.SizedBox(width: 10),
+            _legendEntry(color: cover, label: child.firstName, dm: dm),
+          ],
+        ),
         pw.SizedBox(height: 8),
 
         // Vraie courbe OMS (P3/P50/P97, mêmes données que l'écran in-app,
         // voir getGrowthData) + la courbe de l'enfant par-dessus — même
         // algorithme d'échelle que growth_screen.dart::_MultiPointChart pour
-        // que le PDF corresponde visuellement à l'app.
-        pw.SizedBox(
-          height: 100,
-          child: _growthChart(
-            child: child,
-            isWeight: isWeight,
-            measures: measures,
-            getValue: getValue,
-            cover: cover,
-            dm: dm,
+        // que le PDF corresponde visuellement à l'app. Encadré dans une
+        // carte pour se détacher du fond crème de la page.
+        pw.Expanded(
+          child: pw.Container(
+            width: double.infinity,
+            padding: const pw.EdgeInsets.fromLTRB(8, 14, 16, 8),
+            decoration: pw.BoxDecoration(
+              color: PdfColors.white,
+              borderRadius: pw.BorderRadius.all(pw.Radius.circular(10)),
+              border: pw.Border.all(color: PdfColors.grey200, width: 0.75),
+            ),
+            child: _growthChart(
+              child: child,
+              isWeight: isWeight,
+              measures: measures,
+              getValue: getValue,
+              cover: cover,
+              dm: dm,
+            ),
           ),
         ),
-        pw.SizedBox(height: 4),
-        pw.Text(
-          'Repères OMS P3–P97 en gris',
-          style: pw.TextStyle(font: dm, fontSize: 6, color: _textMedium),
-        ),
+        pw.SizedBox(height: 8),
 
-        pw.SizedBox(height: 10),
-
-        // Measurements list
-        ...measures.reversed.take(6).map((m) {
-          final isLatest = m == measures.last;
-          final date = m.dateLabel ??
-              formatDateWithPrecision(
-                  m.date, datePrecisionFromString(m.datePrecision));
-          return pw.Padding(
-            padding: const pw.EdgeInsets.only(bottom: 5),
-            child: pw.Row(
-              children: [
-                pw.Container(
-                  width: 5,
-                  height: 5,
-                  decoration: pw.BoxDecoration(
-                    color: isLatest ? cover : _textMedium,
-                    shape: pw.BoxShape.circle,
-                  ),
+        // Dernières mesures, en puces plutôt qu'en liste verticale — le
+        // graphique porte désormais l'essentiel de la lecture.
+        pw.Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            for (final m in measures.reversed.take(4))
+              pw.Container(
+                padding:
+                    const pw.EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: pw.BoxDecoration(
+                  color: m == measures.last
+                      ? PdfColor(cover.red, cover.green, cover.blue, 0.12)
+                      : PdfColors.grey100,
+                  borderRadius: pw.BorderRadius.all(pw.Radius.circular(20)),
                 ),
-                pw.SizedBox(width: 5),
-                pw.Expanded(
-                  child: pw.Text(
-                    date,
-                    style: pw.TextStyle(
-                        font: dm, fontSize: 7.5, color: _textMedium),
-                  ),
-                ),
-                pw.Text(
-                  formatVal(getValue(m)),
+                child: pw.Text(
+                  '${m.dateLabel ?? formatDateWithPrecision(m.date, datePrecisionFromString(m.datePrecision))} · ${formatVal(getValue(m))}',
                   style: pw.TextStyle(
                     font: pB,
-                    fontSize: 8.5,
-                    color: isLatest ? cover : _textDark,
+                    fontSize: 7.5,
+                    color: m == measures.last ? cover : _textMedium,
                   ),
                 ),
-              ],
-            ),
-          );
-        }),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static pw.Widget _legendEntry({
+    required PdfColor color,
+    required String label,
+    required pw.Font dm,
+  }) {
+    return pw.Row(
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [
+        pw.Container(
+          width: 10,
+          height: 2.5,
+          decoration: pw.BoxDecoration(color: color),
+        ),
+        pw.SizedBox(width: 4),
+        pw.Text(label,
+            style: pw.TextStyle(font: dm, fontSize: 6.5, color: _textMedium)),
       ],
     );
   }

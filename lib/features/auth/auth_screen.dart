@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:package_info_plus/package_info_plus.dart';
 import '../../core/config/app_config.dart';
 import '../../core/services/migration_service.dart';
+import '../../core/services/tag_service.dart';
 import '../../core/services/user_service.dart';
 import '../../core/theme/app_theme.dart';
 
@@ -53,6 +54,20 @@ class _AuthScreenState extends State<AuthScreen> {
     super.dispose();
   }
 
+  /// `/onboarding/people` si l'utilisateur n'a encore aucune personne (donc
+  /// à la création d'un compte), sinon `/home` directement — un compte
+  /// existant qui se reconnecte a déjà passé cette étape.
+  Future<String> _postAuthRoute() async {
+    try {
+      final tags = await TagService.myTags();
+      final hasPerson =
+          tags.any((t) => t.kind == 'personne' || t.kind == 'enfant');
+      return hasPerson ? '/home' : '/onboarding/people';
+    } catch (_) {
+      return '/home';
+    }
+  }
+
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() {
@@ -82,8 +97,10 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       await UserService.onLogin();
     } catch (_) {}
-    if (mounted) setState(() => _loading = false);
-    if (mounted) context.go('/home');
+    final route = await _postAuthRoute();
+    if (!mounted) return;
+    setState(() => _loading = false);
+    context.go(route);
   }
 
   Future<void> _googleSignIn() async {
@@ -122,8 +139,10 @@ class _AuthScreenState extends State<AuthScreen> {
     try {
       await UserService.onLogin();
     } catch (_) {}
-    if (mounted) setState(() => _loading = false);
-    if (mounted) context.go('/home');
+    final route = await _postAuthRoute();
+    if (!mounted) return;
+    setState(() => _loading = false);
+    context.go(route);
   }
 
   /// Passe par le backend (Resend) plutôt que
