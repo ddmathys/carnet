@@ -171,12 +171,13 @@ class _PeopleStripState extends State<PeopleStrip> {
     );
   }
 
-  /// La sheet demande d'emblée "c'est un enfant ?" (David 22.09.26 :
-  /// "ça me met pas si c'est enfant" — avant cette date, seul un détour par
-  /// le parcours mesure de croissance, aujourd'hui retiré, permettait de
-  /// créer un enfant). Un enfant se crée directement avec sa date de
-  /// naissance (TagService.createChildTag, kind 'enfant') — c'est elle qui
-  /// débloque la courbe de croissance et le badge toise sur sa pastille.
+  /// La sheet propose d'emblée "Activer les mesures (taille/poids)" (David
+  /// 22.09.26 — d'abord formulé "c'est un enfant ?", David a préféré cadrer
+  /// sur la fonctionnalité plutôt que sur l'étiquette "enfant"). Techniquement
+  /// inchangé : activer le switch demande une date de naissance et crée un
+  /// tag 'enfant' (TagService.createChildTag) — c'est cette date qui débloque
+  /// la courbe de croissance et le badge toise sur sa pastille, aucun autre
+  /// mécanisme n'existe pour ça côté données.
   Future<void> _addPerson() async {
     final result = await showNewPersonSheet(context);
     if (result == null || !mounted) return;
@@ -225,11 +226,12 @@ typedef NewPersonResult = ({
   String? gender,
 });
 
-/// Sheet "Nouvelle personne", avec le choix "c'est un enfant ?" dès le
-/// départ (toggle) — si activé, demande date de naissance + genre (mêmes
-/// champs que _AddChildSheet dans memory_create_screen.dart, dupliqués ici
-/// plutôt que partagés : cette sheet-là est privée à cet écran, et
-/// factoriser à travers deux fichiers pour ~60 lignes n'apportait rien).
+/// Sheet "Nouvelle personne", avec le toggle "Activer les mesures
+/// (taille/poids)" dès le départ — si activé, demande date de naissance +
+/// genre (mêmes champs que _AddChildSheet dans memory_create_screen.dart,
+/// dupliqués ici plutôt que partagés : cette sheet-là est privée à cet
+/// écran, et factoriser à travers deux fichiers pour ~60 lignes n'apportait
+/// rien).
 Future<NewPersonResult?> showNewPersonSheet(BuildContext context) {
   return showModalBottomSheet<NewPersonResult>(
     context: context,
@@ -307,11 +309,12 @@ class _NewPersonSheetState extends State<_NewPersonSheet> {
           const SizedBox(height: 14),
           Row(
             children: [
-              const Icon(Icons.child_care, size: 18, color: AppColors.sage),
+              const Icon(Icons.monitor_weight_outlined,
+                  size: 18, color: AppColors.sage),
               const SizedBox(width: 8),
               const Expanded(
                 child: Text(
-                  'C\'est un enfant (courbe de croissance)',
+                  'Activer les mesures (taille/poids)',
                   style: TextStyle(color: AppColors.textDark, fontSize: 13),
                 ),
               ),
@@ -326,6 +329,11 @@ class _NewPersonSheetState extends State<_NewPersonSheet> {
             ],
           ),
           if (_isChild) ...[
+            const SizedBox(height: 4),
+            const Text(
+              'La date de naissance sert à calculer l\'âge sur la courbe.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 11.5),
+            ),
             const SizedBox(height: 4),
             DateMaskField(
               label: 'Date de naissance',
