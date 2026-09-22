@@ -57,6 +57,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     trustedPrice = price
     productName = `Puzzle ${o.puzzleSize} pièces`
+
+    // Puzzles groupés dans la même commande (voir OrderModel.additionalPuzzles
+    // / backend/api/prodigi/[action].ts) : un seul article Stripe, prix total
+    // du groupe.
+    const extraPuzzles = Array.isArray(o.additionalPuzzles) ? o.additionalPuzzles : []
+    for (const extra of extraPuzzles) {
+      if (!isPuzzleSize(extra?.puzzleSize)) {
+        return res.status(400).json({ error: 'puzzleSize invalide sur un puzzle supplémentaire' })
+      }
+      const extraPrice = computePuzzlePrice(extra.puzzleSize)
+      if (extraPrice == null) {
+        return res.status(400).json({ error: `Aucun tarif pour le puzzle ${extra.puzzleSize} pièces (supplémentaire)` })
+      }
+      trustedPrice += extraPrice
+    }
+    if (extraPuzzles.length > 0) {
+      productName = `${extraPuzzles.length + 1} puzzles`
+    }
   } else if (isPoster) {
     if (!isPosterSize(o.posterSize) || !isPosterOrientation(o.posterOrientation)) {
       return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur la commande' })

@@ -248,11 +248,11 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
     }
   } else if (isPuzzle) {
-    // Un seul item puzzle par commande pour l'instant (pas de groupage —
-    // voir OrderModel.additionalPosters/additionalBooks pour le mécanisme,
-    // pas encore étendu au puzzle). Deux zones d'impression (jigsaw + lid),
-    // la MÊME photo pour les deux — Prodigi cadre lui-même
-    // (`sizing: 'fillPrintArea'`), pas de PDF composé côté app.
+    // Deux zones d'impression par puzzle (jigsaw + lid), la MÊME photo pour
+    // les deux — Prodigi cadre lui-même (`sizing: 'fillPrintArea'`), pas de
+    // PDF composé côté app. Puzzles groupés dans la même commande (voir
+    // OrderModel.additionalPuzzles côté app) : un seul `items[]`, une seule
+    // livraison — même mécanique que additionalPosters/additionalBooks.
     if (!isPuzzleSize(o.puzzleSize)) {
       return res.status(400).json({ error: 'puzzleSize invalide sur la commande' })
     }
@@ -270,6 +270,31 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       ],
     }]
     trustedPrice = computePuzzlePrice(o.puzzleSize)
+
+    const extraPuzzles = Array.isArray(o.additionalPuzzles) ? o.additionalPuzzles : []
+    for (const extra of extraPuzzles) {
+      if (!isPuzzleSize(extra?.puzzleSize)) {
+        return res.status(400).json({ error: 'puzzleSize invalide sur un puzzle supplémentaire' })
+      }
+      const extraEntry = puzzleCatalogEntry(extra.puzzleSize)
+      if (!extraEntry) {
+        return res.status(400).json({ error: `Aucun SKU pour le puzzle ${extra.puzzleSize} pièces (supplémentaire)` })
+      }
+      if (typeof extra.pdfUrl !== 'string' || !extra.pdfUrl) {
+        return res.status(400).json({ error: 'pdfUrl manquant sur un puzzle supplémentaire' })
+      }
+      items.push({
+        sku: extraEntry.sku,
+        copies: 1,
+        sizing: 'fillPrintArea',
+        assets: [
+          { printArea: 'jigsaw', url: extra.pdfUrl },
+          { printArea: 'lid', url: extra.pdfUrl },
+        ],
+      })
+      const extraPrice = computePuzzlePrice(extra.puzzleSize)
+      if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
+    }
   } else {
     const orderCoverType = resolveCoverType(o.coverType)
     const { sku, envName } = skuFor(orderCoverType)

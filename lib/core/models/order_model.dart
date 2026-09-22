@@ -168,6 +168,13 @@ class OrderModel {
   final String? puzzleSize; // '30' | '110' | '252' | '500' | '1000' (pièces)
   final String? puzzlePhotoKey;
   final String? puzzlePhotoUrl;
+  // Même principe qu'`additionalPosters`/`additionalBooks`, pour des
+  // PUZZLES groupés dans la même commande (livraison unique, un seul appel
+  // Prodigi avec plusieurs `items`). Le puzzle "principal" reste porté par
+  // les champs `puzzle*` ci-dessus ; chaque entrée ici a la forme
+  // (puzzleSku, puzzleSize, price, pdfUrl, puzzlePhotoKey, puzzlePhotoUrl)
+  // — voir puzzle_generate_screen.dart::_QueuedPuzzle.toMap().
+  final List<Map<String, dynamic>>? additionalPuzzles;
 
   const OrderModel({
     required this.id,
@@ -215,6 +222,7 @@ class OrderModel {
     this.puzzleSize,
     this.puzzlePhotoKey,
     this.puzzlePhotoUrl,
+    this.additionalPuzzles,
   });
 
   bool get isPoster => productType == 'poster';
@@ -387,6 +395,9 @@ class OrderModel {
       puzzleSize: d['puzzleSize'],
       puzzlePhotoKey: d['puzzlePhotoKey'],
       puzzlePhotoUrl: d['puzzlePhotoUrl'],
+      additionalPuzzles: (d['additionalPuzzles'] as List<dynamic>?)
+          ?.whereType<Map<String, dynamic>>()
+          .toList(),
     );
   }
 
@@ -425,5 +436,6 @@ class OrderModel {
     'puzzleSize': puzzleSize,
     'puzzlePhotoKey': puzzlePhotoKey,
     'puzzlePhotoUrl': puzzlePhotoUrl,
+    'additionalPuzzles': additionalPuzzles,
   };
 }

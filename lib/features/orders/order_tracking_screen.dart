@@ -966,10 +966,16 @@ class _OrderDetailsCard extends StatelessWidget {
             _Row('+ tirages inclus',
                 '${order.additionalPosters!.length} autre${order.additionalPosters!.length > 1 ? 's' : ''} · même livraison'),
           if (!order.isPoster &&
+              !order.isPuzzle &&
               order.additionalBooks != null &&
               order.additionalBooks!.isNotEmpty)
             _Row('+ livres inclus',
                 '${order.additionalBooks!.length} autre${order.additionalBooks!.length > 1 ? 's' : ''} · même livraison'),
+          if (order.isPuzzle &&
+              order.additionalPuzzles != null &&
+              order.additionalPuzzles!.isNotEmpty)
+            _Row('+ puzzles inclus',
+                '${order.additionalPuzzles!.length} autre${order.additionalPuzzles!.length > 1 ? 's' : ''} · même livraison'),
           _Row('Couverture', order.coverType == 'hard' ? 'Rigide' : 'Souple'),
           _Row('Livraison', order.fullAddress),
           _Row('Montant', 'CHF ${order.price.toStringAsFixed(2)}'),

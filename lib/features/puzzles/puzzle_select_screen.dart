@@ -13,7 +13,13 @@ import '../../core/services/photo_service.dart';
 /// sélection unique. Un souvenir avec plusieurs photos ouvre une sheet pour
 /// choisir laquelle.
 class PuzzleSelectScreen extends StatefulWidget {
-  const PuzzleSelectScreen({super.key});
+  // true quand on choisit la photo d'un puzzle SUPPLÉMENTAIRE à ajouter à
+  // une commande déjà en cours (bouton "+ Ajouter un autre puzzle" dans
+  // PuzzleGenerateScreen) : relaie le résultat du PuzzleGenerateScreen
+  // poussé ensuite (voir _continue) au lieu de rester sur place — même
+  // principe que PosterSelectScreen.queueMode.
+  final bool queueMode;
+  const PuzzleSelectScreen({super.key, this.queueMode = false});
 
   @override
   State<PuzzleSelectScreen> createState() => _PuzzleSelectScreenState();
@@ -78,8 +84,19 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
     }
   }
 
-  void _continue() {
+  Future<void> _continue() async {
     if (_selectedMemoryId == null || _selectedPhotoIndex == null) return;
+    final queue = widget.queueMode ? '&queue=1' : '';
+    if (widget.queueMode) {
+      // Relais : le PuzzleGenerateScreen poussé ensuite (aussi en queueMode)
+      // renvoie un puzzle prêt via Navigator.pop — on le relaie tel quel au
+      // parent (celui qui a ouvert CET écran), sans rester affiché entre
+      // les deux.
+      final result = await context.push(
+          '/puzzle/new?memory=$_selectedMemoryId&photo=$_selectedPhotoIndex$queue');
+      if (mounted) Navigator.pop(context, result);
+      return;
+    }
     context.push(
         '/puzzle/new?memory=$_selectedMemoryId&photo=$_selectedPhotoIndex');
   }

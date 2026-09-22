@@ -182,13 +182,16 @@ final _router = GoRouter(
     // ── Puzzles ──
     GoRoute(
       path: '/puzzle/select',
-      builder: (_, __) => const PuzzleSelectScreen(),
+      builder: (_, state) => PuzzleSelectScreen(
+        queueMode: state.uri.queryParameters['queue'] == '1',
+      ),
     ),
     GoRoute(
       path: '/puzzle/new',
       builder: (_, state) => PuzzleGenerateScreen(
         memoryId: state.uri.queryParameters['memory'] ?? '',
         photoIndex: int.tryParse(state.uri.queryParameters['photo'] ?? '') ?? 0,
+        queueMode: state.uri.queryParameters['queue'] == '1',
       ),
     ),
 
