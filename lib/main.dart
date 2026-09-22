@@ -138,6 +138,7 @@ final _router = GoRouter(
           tagId: state.uri.queryParameters['tag'],
           startAtOrder: state.uri.queryParameters['order'] == '1',
           editOrderId: state.uri.queryParameters['editOrder'],
+          queueMode: state.uri.queryParameters['queue'] == '1',
         );
       },
     ),

@@ -152,6 +152,13 @@ class OrderModel {
   // posterMemoryIds, posterPhotoKey, posterPhotoUrl) — voir
   // poster_generate_screen.dart::_QueuedPoster.toMap().
   final List<Map<String, dynamic>>? additionalPosters;
+  // Même principe qu'`additionalPosters`, pour des LIVRES groupés dans la
+  // même commande (livraison unique, un seul appel Prodigi avec plusieurs
+  // `items`). Le livre "principal" reste porté par bookTitle/coverType/
+  // pageCount/pdfUrl ci-dessus ; chaque entrée ici a la forme (bookTitle,
+  // coverType, price, pageCount, pdfUrl) — voir
+  // book_generate_screen.dart::_QueuedBook.toMap().
+  final List<Map<String, dynamic>>? additionalBooks;
 
   const OrderModel({
     required this.id,
@@ -194,6 +201,7 @@ class OrderModel {
     this.posterPhotoKey,
     this.posterPhotoUrl,
     this.additionalPosters,
+    this.additionalBooks,
   });
 
   bool get isPoster => productType == 'poster';
@@ -358,6 +366,9 @@ class OrderModel {
       additionalPosters: (d['additionalPosters'] as List<dynamic>?)
           ?.whereType<Map<String, dynamic>>()
           .toList(),
+      additionalBooks: (d['additionalBooks'] as List<dynamic>?)
+          ?.whereType<Map<String, dynamic>>()
+          .toList(),
     );
   }
 
@@ -391,5 +402,6 @@ class OrderModel {
     'posterPhotoKey': posterPhotoKey,
     'posterPhotoUrl': posterPhotoUrl,
     'additionalPosters': additionalPosters,
+    'additionalBooks': additionalBooks,
   };
 }

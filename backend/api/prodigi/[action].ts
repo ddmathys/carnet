@@ -258,6 +258,33 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       assets: [{ printArea: 'default', url: pdfUrl, pageCount }],
     }]
     trustedPrice = pageCount ? computePrice(orderCoverType, pageCount) : null
+
+    // Livres groupés dans la même commande (voir OrderModel.additionalBooks
+    // côté app) — même raisonnement que les tirages groupés : un seul
+    // `items[]`, une seule livraison.
+    const extraBooks = Array.isArray(o.additionalBooks) ? o.additionalBooks : []
+    for (const extra of extraBooks) {
+      const extraCoverType = resolveCoverType(extra?.coverType)
+      const { sku: extraSku, envName: extraEnvName } = skuFor(extraCoverType)
+      if (!extraSku) {
+        return res.status(503).json({ error: `SKU Prodigi manquant (env ${extraEnvName}) pour un livre supplémentaire` })
+      }
+      if (typeof extra.pdfUrl !== 'string' || !extra.pdfUrl) {
+        return res.status(400).json({ error: 'pdfUrl manquant sur un livre supplémentaire' })
+      }
+      const extraPageCount = Number(extra.pageCount ?? 0)
+      if (!extraPageCount || extraPageCount <= 0) {
+        return res.status(400).json({ error: 'pageCount manquant sur un livre supplémentaire' })
+      }
+      items.push({
+        sku: extraSku,
+        copies: 1,
+        sizing: 'fillPrintArea',
+        assets: [{ printArea: 'default', url: extra.pdfUrl, pageCount: extraPageCount }],
+      })
+      const extraPrice = computePrice(extraCoverType, extraPageCount)
+      if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
+    }
   }
 
   const recipientCountryCode = countryToIso(String(o.country ?? 'Suisse'))

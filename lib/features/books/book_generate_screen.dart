@@ -46,16 +46,63 @@ class BookGenerateScreen extends StatefulWidget {
   /// _loadEditOrderDefaults.
   final String? editOrderId;
 
+  /// true pour un livre ajouté via "+ Ajouter un autre livre à cette
+  /// commande" depuis une commande déjà en cours (voir _buildOrderStep du
+  /// parent) : mêmes étapes couverture/format, mais l'étape finale génère
+  /// juste le PDF et renvoie le résultat au parent (`Navigator.pop`) au lieu
+  /// de demander une adresse et créer une commande. Jamais combiné avec
+  /// `editOrderId`.
+  final bool queueMode;
+
   const BookGenerateScreen({
     super.key,
     this.memoryIds = const [],
     this.tagId,
     this.startAtOrder = false,
     this.editOrderId,
+    this.queueMode = false,
   });
 
   @override
   State<BookGenerateScreen> createState() => _BookGenerateScreenState();
+}
+
+/// Un livre configuré et généré via `queueMode`, en attente d'être inclus
+/// dans la commande du parent — voir _BookGenerateScreenState._addAnotherBook.
+class _QueuedBook {
+  final String bookTitle;
+  final String coverType;
+  final double price;
+  final int pageCount;
+  final String pdfUrl;
+  // Pour BookHistoryService.recordBook (voir _placeOrder) — pas transmis à
+  // Prodigi/Stripe, seulement `toMap()` l'est.
+  final String storagePath;
+  final int memoryCount;
+  final String notebookId;
+  final String? coverPhotoKey;
+  final String? coverPhotoUrl;
+
+  const _QueuedBook({
+    required this.bookTitle,
+    required this.coverType,
+    required this.price,
+    required this.pageCount,
+    required this.pdfUrl,
+    required this.storagePath,
+    required this.memoryCount,
+    required this.notebookId,
+    this.coverPhotoKey,
+    this.coverPhotoUrl,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'bookTitle': bookTitle,
+        'coverType': coverType,
+        'price': price,
+        'pageCount': pageCount,
+        'pdfUrl': pdfUrl,
+      };
 }
 
 class _BookGenerateScreenState extends State<BookGenerateScreen>
@@ -120,6 +167,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   late final TextEditingController _countryCtrl;
   bool _ordering = false;
   String _orderMessage = '';
+
+  // Livres supplémentaires déjà configurés et générés (PDF prêt, uploadé),
+  // en attente d'être inclus dans la même commande que celui de cet écran —
+  // voir OrderModel.additionalBooks / _addAnotherBook. Toujours vide en
+  // queueMode (un livre en file ne porte pas lui-même d'autres livres).
+  final List<_QueuedBook> _extraBooks = [];
+  double get _totalPrice =>
+      _priceFor(_coverType) + _extraBooks.fold(0.0, (sum, b) => sum + b.price);
 
   late AnimationController _coverAnim;
   late Animation<double> _coverScale;
@@ -697,7 +752,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       return;
     }
     final isEdit = widget.editOrderId != null;
-    if (!isEdit && !(_addressKey.currentState?.validate() ?? false)) return;
+    // Pas d'adresse en queueMode : ce livre rejoint une commande dont
+    // l'adresse est saisie sur l'écran racine (voir _buildOrderStep).
+    if (!isEdit &&
+        !widget.queueMode &&
+        !(_addressKey.currentState?.validate() ?? false)) {
+      return;
+    }
     final user = FirebaseAuth.instance.currentUser;
     if (user == null || _notebook == null) return;
 
@@ -748,6 +809,29 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
       if (!mounted) return;
 
+      if (widget.queueMode) {
+        Navigator.pop(
+          context,
+          _QueuedBook(
+            bookTitle: bookTitle,
+            coverType: _coverType,
+            price: price,
+            pageCount: pageCount,
+            pdfUrl: pdfUrl,
+            storagePath: uploaded.key,
+            memoryCount: _selectedMemories.length,
+            notebookId: widget.tagId ?? '',
+            coverPhotoKey:
+                _coverPhotoUrl != null ? _keyByUrl[_coverPhotoUrl] : null,
+            coverPhotoUrl: _coverPhotoUrl != null &&
+                    !_keyByUrl.containsKey(_coverPhotoUrl!)
+                ? _coverPhotoUrl
+                : null,
+          ),
+        );
+        return;
+      }
+
       // Renvoi après erreur : on ne crée PAS de nouvelle commande — le PDF
       // régénéré est renvoyé pour LA MÊME commande. Le backend revérifie
       // lui-même le plafond de 3 tentatives ; ses messages d'erreur sont
@@ -773,7 +857,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         userEmail: user.email ?? '',
         bookTitle: bookTitle,
         coverType: _coverType,
-        price: price,
+        price: _totalPrice,
         firstName: _firstNameCtrl.text.trim(),
         lastName: _lastNameCtrl.text.trim(),
         street: _streetCtrl.text.trim(),
@@ -786,10 +870,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         memoryCount: _selectedMemories.length,
         pageCount: pageCount,
         pdfUrl: pdfUrl,
+        additionalBooks: _extraBooks.isEmpty
+            ? null
+            : _extraBooks.map((b) => b.toMap()).toList(),
       );
       final orderId = await OrderService.createOrder(order);
 
-      // 4. Historique des livres (imprimé)
+      // 4. Historique des livres (imprimé) — le principal, puis chaque livre
+      // groupé (même commande, même livraison, voir OrderModel.additionalBooks).
       await BookHistoryService.recordBook(
         notebookId: widget.tagId ?? '',
         title: bookTitle,
@@ -805,6 +893,20 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 ? _coverPhotoUrl
                 : null,
       );
+      for (final extra in _extraBooks) {
+        await BookHistoryService.recordBook(
+          notebookId: extra.notebookId,
+          title: extra.bookTitle,
+          format: 'printed',
+          coverType: extra.coverType,
+          pdfUrl: extra.pdfUrl,
+          storagePath: extra.storagePath,
+          memoriesCount: extra.memoryCount,
+          orderId: orderId,
+          coverPhotoKey: extra.coverPhotoKey,
+          coverPhotoUrl: extra.coverPhotoUrl,
+        );
+      }
 
       if (!mounted) return;
       context.go('/order-confirmation/$orderId');
@@ -820,7 +922,20 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   String get _orderButtonLabel => widget.editOrderId != null
       ? 'Renvoyer à l\'impression'
-      : 'Commander · ${_priceLabel(_coverType)}';
+      : 'Commander · ${BookPricing.format(_totalPrice)}';
+
+  /// Ouvre un aller-retour complet (choix des souvenirs, couverture, format)
+  /// qui renvoie un livre prêt (PDF déjà généré et uploadé) plutôt que de
+  /// créer une commande — voir BookGenerateScreen en `queueMode`. Ajouté au
+  /// panier local (`_extraBooks`), inclus dans la commande unique au moment
+  /// de "Commander" (voir _placeOrder).
+  Future<void> _addAnotherBook() async {
+    final ids = await context.push<List<String>>('/memories?select=1');
+    if (ids == null || ids.isEmpty || !mounted) return;
+    final book = await context
+        .push<_QueuedBook>('/book/new?memories=${ids.join(',')}&queue=1');
+    if (book != null && mounted) setState(() => _extraBooks.add(book));
+  }
 
   void _showSnack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -1611,6 +1726,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // ── Step 2: Commande ──────────────────────────────────────────────────────
 
   Widget _buildOrderStep() {
+    // Le panier (autres livres + bouton "en ajouter un") n'a de sens que pour
+    // la commande racine — ni en queueMode (un livre en file d'attente ne
+    // porte pas lui-même d'autres livres), ni en édition (renvoi d'un livre
+    // déjà commandé, un seul article).
+    final showCart = !widget.queueMode && widget.editOrderId == null;
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -1652,7 +1772,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 OrderRow(label: 'Pages', value: '$_printedPages pages'),
                 const Divider(height: 24, color: AppColors.border),
                 OrderRow(
-                  label: 'Total',
+                  label: 'Prix',
                   value: _priceLabel(_coverType),
                   bold: true,
                   valueColor: AppColors.amber,
@@ -1660,73 +1780,128 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ],
             ),
           ),
+          if (showCart) ...[
+            for (final book in _extraBooks)
+              Padding(
+                padding: const EdgeInsets.only(top: 10),
+                child: _bookSummaryTile(book),
+              ),
+            const SizedBox(height: 10),
+            Center(
+              child: TextButton.icon(
+                onPressed: _ordering ? null : _addAnotherBook,
+                icon: const Icon(Icons.add_circle_outline,
+                    size: 18, color: AppColors.sageDark),
+                label: const Text('Ajouter un autre livre à cette commande',
+                    style: TextStyle(color: AppColors.sageDark, fontSize: 13)),
+              ),
+            ),
+            if (_extraBooks.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Total · 1 seule livraison',
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: AppColors.textDark)),
+                    Text(BookPricing.format(_totalPrice),
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w700, color: AppColors.textDark)),
+                  ],
+                ),
+              ),
+            ],
+          ],
           const SizedBox(height: 28),
 
-          // Formulaire adresse
-          Form(
-              key: _addressKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text('Adresse de livraison',
-                      style: TextStyle(
-                          fontFamily: 'PlayfairDisplay',
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: AppColors.textDark)),
-                  const SizedBox(height: 12),
-                  Row(children: [
-                    Expanded(
-                        child: AddressField(_firstNameCtrl, 'Prénom',
-                            required: true)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child: AddressField(_lastNameCtrl, 'Nom',
-                            required: true)),
-                  ]),
-                  const SizedBox(height: 10),
-                  AddressField(_streetCtrl, 'Rue et numéro', required: true),
-                  const SizedBox(height: 10),
-                  Row(children: [
-                    SizedBox(
-                        width: 100,
-                        child: AddressField(_npaCtrl, 'NPA',
-                            required: true,
-                            keyboardType: TextInputType.number)),
-                    const SizedBox(width: 10),
-                    Expanded(
-                        child:
-                            AddressField(_cityCtrl, 'Ville', required: true)),
-                  ]),
-                  const SizedBox(height: 10),
-                  AddressField(_countryCtrl, 'Pays', required: true),
-                  const SizedBox(height: 20),
-                  if (_ordering) ...[
-                    const LinearProgressIndicator(
-                      backgroundColor: Color(0xFFEEEBE3),
-                      valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
-                    ),
+          if (widget.queueMode)
+            if (_ordering) ...[
+              const LinearProgressIndicator(
+                backgroundColor: Color(0xFFEEEBE3),
+                valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
+              ),
+              const SizedBox(height: 10),
+              Text(_orderMessage,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic)),
+            ] else
+              ElevatedButton(
+                onPressed: _placeOrder,
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                child: const Text('Ajouter à la commande'),
+              )
+          else
+            // Formulaire adresse
+            Form(
+                key: _addressKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Adresse de livraison',
+                        style: TextStyle(
+                            fontFamily: 'PlayfairDisplay',
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.textDark)),
+                    const SizedBox(height: 12),
+                    Row(children: [
+                      Expanded(
+                          child: AddressField(_firstNameCtrl, 'Prénom',
+                              required: true)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                          child: AddressField(_lastNameCtrl, 'Nom',
+                              required: true)),
+                    ]),
                     const SizedBox(height: 10),
-                    Text(
-                      _orderMessage,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: AppColors.textMedium,
-                        fontSize: 13,
-                        fontStyle: FontStyle.italic,
+                    AddressField(_streetCtrl, 'Rue et numéro', required: true),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      SizedBox(
+                          width: 100,
+                          child: AddressField(_npaCtrl, 'NPA',
+                              required: true,
+                              keyboardType: TextInputType.number)),
+                      const SizedBox(width: 10),
+                      Expanded(
+                          child:
+                              AddressField(_cityCtrl, 'Ville', required: true)),
+                    ]),
+                    const SizedBox(height: 10),
+                    AddressField(_countryCtrl, 'Pays', required: true),
+                    const SizedBox(height: 20),
+                    if (_ordering) ...[
+                      const LinearProgressIndicator(
+                        backgroundColor: Color(0xFFEEEBE3),
+                        valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
                       ),
-                    ),
-                  ] else
-                    ElevatedButton(
-                      onPressed: _placeOrder,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.amber,
-                        foregroundColor: Colors.white,
+                      const SizedBox(height: 10),
+                      Text(
+                        _orderMessage,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AppColors.textMedium,
+                          fontSize: 13,
+                          fontStyle: FontStyle.italic,
+                        ),
                       ),
-                      child: Text(_orderButtonLabel),
-                    ),
-                ],
-              )),
+                    ] else
+                      ElevatedButton(
+                        onPressed: _placeOrder,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.amber,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: Text(_orderButtonLabel),
+                      ),
+                  ],
+                )),
 
           const SizedBox(height: 16),
           Center(
@@ -1736,6 +1911,42 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 '← Changer le format',
                 style: TextStyle(color: AppColors.textMedium, fontSize: 13),
               ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _bookSummaryTile(_QueuedBook book) {
+    final coverLabel = book.coverType == 'hard'
+        ? 'Rigide'
+        : book.coverType == 'layflat'
+            ? 'Layflat'
+            : 'Souple';
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.sageTint,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.menu_book_outlined, color: AppColors.sageDark),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              '${book.bookTitle} · $coverLabel · ${book.pageCount} pages',
+              style: const TextStyle(fontSize: 13.5, color: AppColors.textDark),
+            ),
+          ),
+          Text(BookPricing.format(book.price),
+              style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.textDark)),
+          GestureDetector(
+            onTap: () => setState(() => _extraBooks.remove(book)),
+            child: const Padding(
+              padding: EdgeInsets.only(left: 6),
+              child: Icon(Icons.close, size: 18, color: AppColors.textMedium),
             ),
           ),
         ],

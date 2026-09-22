@@ -87,6 +87,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const cover =
       coverType === 'hard' ? 'rigide' : coverType === 'layflat' ? 'layflat' : 'souple'
     productName = `${bookTitle} — couverture ${cover}`
+
+    // Livres groupés dans la même commande (voir OrderModel.additionalBooks
+    // / backend/api/prodigi/[action].ts) : un seul article Stripe, prix total
+    // du groupe.
+    const extraBooks = Array.isArray(o.additionalBooks) ? o.additionalBooks : []
+    for (const extra of extraBooks) {
+      const extraPages = Number(extra?.pageCount ?? 0)
+      if (!extraPages || extraPages <= 0) {
+        return res.status(400).json({ error: 'pageCount manquant sur un livre supplémentaire' })
+      }
+      trustedPrice += computePrice(resolveCoverType(extra?.coverType), extraPages)
+    }
+    if (extraBooks.length > 0) {
+      productName = `${extraBooks.length + 1} livres`
+    }
   }
   const amount = Math.round(trustedPrice * 100) // centimes
 
