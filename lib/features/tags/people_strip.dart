@@ -194,6 +194,9 @@ class _PeopleStripState extends State<PeopleStrip> {
               photoKey: t.photoKey,
               colorHex: t.color,
               onTap: () => _onTapPerson(t),
+              onMeasureTap: t.isChild
+                  ? () => context.push('/growth/${t.id}?add=1')
+                  : null,
             ),
           _AddPastille(onTap: _addPerson),
         ],
@@ -252,11 +255,19 @@ class _PersonPastille extends StatelessWidget {
   final String? photoKey;
   final String colorHex;
   final VoidCallback onTap;
+  // Badge « toise » sur la pastille — seulement pour un tag enfant (voir
+  // categoryOfKind) : accès direct à l'ajout d'une mesure sans passer par
+  // « Ajouter un souvenir », demande de David le 22.09.26. Ouvre
+  // GrowthScreen avec `?add=1`, qui existait déjà (branché sur un ancien
+  // menu « + » du carnet, disparu depuis la refonte du dashboard) mais
+  // n'était plus appelé nulle part.
+  final VoidCallback? onMeasureTap;
   const _PersonPastille({
     required this.label,
     required this.photoKey,
     required this.colorHex,
     required this.onTap,
+    this.onMeasureTap,
   });
 
   @override
@@ -269,8 +280,37 @@ class _PersonPastille extends StatelessWidget {
           width: 64,
           child: Column(
             children: [
-              PersonAvatar(
-                  label: label, photoKey: photoKey, colorHex: colorHex, size: 60),
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  PersonAvatar(
+                      label: label,
+                      photoKey: photoKey,
+                      colorHex: colorHex,
+                      size: 60),
+                  if (onMeasureTap != null)
+                    Positioned(
+                      right: -2,
+                      bottom: -2,
+                      child: GestureDetector(
+                        onTap: onMeasureTap,
+                        behavior: HitTestBehavior.opaque,
+                        child: Container(
+                          width: 22,
+                          height: 22,
+                          decoration: BoxDecoration(
+                            color: AppColors.sageDark,
+                            shape: BoxShape.circle,
+                            border:
+                                Border.all(color: AppColors.background, width: 2),
+                          ),
+                          child: const Icon(Icons.straighten,
+                              size: 12, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
               const SizedBox(height: 6),
               Text(
                 label,

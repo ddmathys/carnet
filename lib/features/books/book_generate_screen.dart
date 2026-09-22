@@ -1439,44 +1439,33 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       );
     }
     if (_blankPagesAdded > 0) {
+      // Juste informatif : le bourrage en pages blanches résout déjà le
+      // minimum imprimeur tout seul, rien à décider ici. Le bouton "Ajouter
+      // des souvenirs à la place" qui vivait dans ce bloc forçait un choix
+      // sur un problème déjà réglé — retiré (retour de David le 22.09.26,
+      // "trop compliqué quand il manque des pages"). Ajouter des souvenirs
+      // reste possible via le bloc "Modifier" en haut de l'écran, pas besoin
+      // d'un second chemin ici.
       final plural = _blankPagesAdded > 1 ? 's' : '';
       return Container(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
           color: AppColors.amber.withOpacity(0.08),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(color: AppColors.amber.withOpacity(0.3)),
         ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Row(
           children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.info_outline,
-                    size: 16, color: AppColors.amber),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Ton livre fait $_pages pages. Notre imprimeur exige un '
-                    'minimum de ${BookPricing.printablePages(_coverType, 0)} '
-                    'pages (nombre pair) : $_blankPagesAdded '
-                    'page$plural blanche$plural seront ajoutées à la fin.',
-                    style: const TextStyle(
-                        fontSize: 12, color: AppColors.textMedium),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TextButton.icon(
-              onPressed: _openMemorySelection,
-              icon: const Icon(Icons.add_photo_alternate_outlined,
-                  size: 16, color: AppColors.amber),
-              label: const Text('Ajouter des souvenirs à la place',
-                  style: TextStyle(color: AppColors.amber, fontSize: 13)),
-              style: TextButton.styleFrom(
-                  padding: EdgeInsets.zero, minimumSize: Size.zero),
+            const Icon(Icons.info_outline, size: 16, color: AppColors.amber),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Ton livre fait $_pages pages. Notre imprimeur exige un '
+                'minimum de ${BookPricing.printablePages(_coverType, 0)} '
+                'pages (nombre pair) : $_blankPagesAdded '
+                'page$plural blanche$plural seront ajoutées à la fin.',
+                style: const TextStyle(fontSize: 12, color: AppColors.textMedium),
+              ),
             ),
           ],
         ),
