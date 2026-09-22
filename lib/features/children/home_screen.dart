@@ -1,9 +1,11 @@
 import 'dart:async';
+import 'dart:math' show Random;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
@@ -17,17 +19,18 @@ import '../books/pdf_viewer_screen.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/puzzle_pricing.dart';
 import '../../core/services/tag_service.dart';
 import '../memories/widgets/memory_polaroid.dart';
-import '../memories/widgets/import_media_cta.dart';
 import '../memories/widgets/delete_memory.dart';
 import '../shared/upload_status_banner.dart';
 import '../tags/people_strip.dart';
 import '../tags/shared_tags_sheet.dart';
 
-/// Dashboard : importer un média (le geste principal), les derniers souvenirs,
-/// les tags qui les organisent, les livres déjà faits — et, tout en bas, la
-/// création d'un nouveau livre.
+/// Dashboard : une photo « héro » tirée au sort en haut (voir
+/// _maybePickHero), les personnes, les derniers souvenirs, et le module
+/// « Souvenirs imprimés » (livres/tirages/puzzles). Importer un média (le
+/// geste principal) reste à portée via le bouton flottant du Scaffold.
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
   @override
@@ -41,6 +44,17 @@ class _HomeScreenState extends State<HomeScreen> {
 
   List<TagModel> _myTags = [];
   List<MemoryModel> _recentMemories = [];
+
+  // Photo « héro » en haut du dashboard : tirée au sort une seule fois par
+  // ouverture d'app (pas à chaque souvenir ajouté, ni à chaque rebuild —
+  // sinon elle changerait sous les yeux) parmi les derniers souvenirs
+  // photo — pour que le dashboard ne montre pas toujours la même image à
+  // chaque connexion (retour de David 22.09.26 : "une autre image en mode
+  // variable"). `_heroPicked` reste faux tant qu'aucun souvenir avec photo
+  // n'est encore arrivé (ex. juste après la connexion) : le prochain lot
+  // Firestore retentera automatiquement.
+  MemoryModel? _heroMemory;
+  bool _heroPicked = false;
 
   StreamSubscription? _myTagsSub;
   StreamSubscription? _mineSub;
@@ -96,12 +110,37 @@ class _HomeScreenState extends State<HomeScreen> {
     } else {
       _sharedById = lot;
     }
-    if (mounted) setState(_refreshRecentMemories);
+    if (mounted) {
+      setState(() {
+        _refreshRecentMemories();
+        _maybePickHero();
+      });
+    }
   }
 
-  /// Les 2 derniers souvenirs ajoutés — pas de filtre ici, c'est le raccourci
-  /// "vient d'arriver" du dashboard (le filtre par tag complet vit sur
-  /// `/memories`).
+  bool _hasDisplayPhoto(MemoryModel m) =>
+      m.mediaKeys.isNotEmpty ||
+      m.mediaUrls.isNotEmpty ||
+      (m.photoUrl?.isNotEmpty ?? false);
+
+  /// Tire une photo au hasard parmi les 12 souvenirs-photo les plus récents
+  /// — une seule fois par ouverture d'écran (voir _heroPicked).
+  void _maybePickHero() {
+    if (_heroPicked) return;
+    final pool = _memoriesById.values
+        .where((m) => m.type != 'taille_poids')
+        .where(_hasDisplayPhoto)
+        .toList()
+      ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    if (pool.isEmpty) return;
+    final candidates = pool.take(12).toList();
+    _heroMemory = candidates[Random().nextInt(candidates.length)];
+    _heroPicked = true;
+  }
+
+  /// Les 3 derniers souvenirs ajoutés, en rangée horizontale — pas de filtre
+  /// ici, c'est le raccourci "vient d'arriver" du dashboard (le filtre par
+  /// tag complet vit sur `/memories`).
   ///
   /// Triés par DATE D'AJOUT (createdAt), pas par la date du souvenir : un
   /// souvenir tout juste importé (ex. une vieille photo d'enfance) doit
@@ -110,7 +149,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void _refreshRecentMemories() {
     final all = _memoriesById.values.toList()
       ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    _recentMemories = all.take(2).toList();
+    _recentMemories = all.take(3).toList();
   }
 
   Future<void> _loadQuota() async {
@@ -142,6 +181,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return Scaffold(
       backgroundColor: AppColors.background,
       body: _buildBody(context),
+      // Remplace l'ancien bandeau "Ajoute un souvenir" (ImportMediaCta),
+      // toujours à portée de main sans occuper une section entière — refonte
+      // dashboard du 22.09.26 (David : maquette "D", bouton flottant).
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/memory/new?import=1'),
+        backgroundColor: AppColors.sageDark,
+        foregroundColor: Colors.white,
+        icon: const Icon(Icons.add_a_photo_outlined),
+        label: const Text('Souvenir',
+            style: TextStyle(fontWeight: FontWeight.w600)),
+      ),
     );
   }
 
@@ -150,69 +200,223 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return CustomScrollView(
       slivers: [
-        SliverToBoxAdapter(
-          child: _TopBar(
-            initial: _initial,
-            onProfile: () => context.push('/profile'),
-            onSpace: () => _showMonEspace(context),
-            onShared: () => _showSharedTagsSheet(context),
-            onChronology: () => context.push('/chronology'),
-          ),
-        ),
-        const SliverToBoxAdapter(child: PeopleStrip()),
+        SliverToBoxAdapter(child: _heroSection(context)),
+        // La bande des personnes chevauche le bas de la photo héro (voir
+        // Positioned bottom négatif dans _heroSection) : cet espace
+        // compense pour que la section suivante ne remonte pas dessous.
+        const SliverToBoxAdapter(child: SizedBox(height: 34)),
+
         const SliverToBoxAdapter(child: UploadStatusBanner()),
         const SliverToBoxAdapter(child: _ActivityBanner()),
 
-        SliverToBoxAdapter(child: _HeroGreeting(greeting: _greeting)),
-
-        if (!hasMemories) ...[
-          // Pas encore de souvenir : le geste principal reste visible tout de
-          // suite, avant l'état vide qui explique quoi faire.
-          SliverToBoxAdapter(
-            child: ImportMediaCta(
-                onTap: () => context.push('/memory/new?import=1')),
-          ),
-          const SliverToBoxAdapter(child: _EmptyState()),
-        ] else ...[
-          // 1) Le geste principal (importer) au-dessus du titre de la
-          // section, puis les 2 derniers souvenirs ajoutés (pas de filtre
-          // ici — le filtre complet par tag vit sur /memories).
-          SliverToBoxAdapter(
-            child: ImportMediaCta(
-                onTap: () => context.push('/memory/new?import=1')),
-          ),
+        if (!hasMemories)
+          const SliverToBoxAdapter(child: _EmptyState())
+        else ...[
           _sectionHeader(
-            'Mes derniers souvenirs',
+            'Souvenirs récents',
             'Tout voir',
             onAction: () => context.push('/memories'),
           ),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
         ],
 
-        // 4) Les livres déjà faits (PDF générés et livres commandés) — la
-        // section entière (titre compris) ne s'affiche que s'il y en a.
-        SliverToBoxAdapter(child: _booksSection(context)),
+        // Livres + tirages + puzzles, groupés sous UN seul module au lieu de
+        // deux sections + un gros bandeau empilés — refonte dashboard du
+        // 22.09.26 ("je trouve les sections mal réparties").
+        SliverToBoxAdapter(child: _printedSection(context)),
 
-        // 4b) Les tirages commandés (posters) — même principe, section à part
-        // puisque ce sont deux produits distincts (voir OrderModel.isPoster).
-        SliverToBoxAdapter(child: _postersSection(context)),
-
-        // 5) Créer un souvenir imprimé — tout en bas, l'aboutissement. Un
-        // seul bouton vers la liste des produits (livre, poster, etc.) —
-        // les deux CTA séparées "Créer un livre" / "Créer un tirage" ont
-        // fusionné ici (retour David 22.09.26 : "je veux qu'un bouton").
-        SliverToBoxAdapter(
-          child: _CreateBookCta(onTap: () => context.push('/product/new')),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: 40)),
+        // Espace pour que le bouton flottant ne recouvre pas le bas du
+        // contenu au scroll.
+        const SliverToBoxAdapter(child: SizedBox(height: 96)),
       ],
     );
   }
 
-  /// Les 2 derniers souvenirs ajoutés, en polaroïdes carrés côte à côte
-  /// (gauche = le plus récent). Remplace l'ancien duo "grande carte + grille"
-  /// — demande explicite de David (18.09.26) : juste les 2 derniers, pas de
-  /// hiérarchie visuelle entre eux.
+  /// Photo « héro » plein cadre en haut du dashboard (voir _maybePickHero) :
+  /// logo + accès rapides en surimpression, légende (salutation + le
+  /// souvenir mis en avant) en bas, personnes en chevauchement sur le bord
+  /// inférieur. Sans souvenir-photo disponible (nouveau compte, ou premiers
+  /// souvenirs encore sans image) : dégradé de marque à la place, salutation
+  /// seule — jamais d'espace vide ni d'erreur.
+  Widget _heroSection(BuildContext context) {
+    const fallbackGradient = BoxDecoration(
+      gradient: LinearGradient(
+        colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+      ),
+    );
+    final hero = _heroMemory;
+
+    return SizedBox(
+      height: 300,
+      child: Stack(
+        clipBehavior: Clip.none,
+        fit: StackFit.expand,
+        children: [
+          if (hero != null)
+            FutureBuilder<List<String>>(
+              future: PhotoService.resolvePhotoUrls(hero),
+              builder: (context, snap) {
+                final urls = snap.data ?? const [];
+                if (urls.isEmpty) return const DecoratedBox(decoration: fallbackGradient);
+                return CachedNetworkImage(
+                  imageUrl: urls.first,
+                  fit: BoxFit.cover,
+                  placeholder: (_, __) => const DecoratedBox(decoration: fallbackGradient),
+                  errorWidget: (_, __, ___) => const DecoratedBox(decoration: fallbackGradient),
+                );
+              },
+            )
+          else
+            const DecoratedBox(decoration: fallbackGradient),
+
+          // Voile : lisible en haut (icônes) et en bas (légende), quelle que
+          // soit la photo.
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withOpacity(0.55),
+                  Colors.black.withOpacity(0.0),
+                  Colors.black.withOpacity(0.0),
+                  Colors.black.withOpacity(0.85),
+                ],
+                stops: const [0, 0.22, 0.58, 1],
+              ),
+            ),
+          ),
+
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: SafeArea(
+              bottom: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 10, 18, 0),
+                child: Row(
+                  children: [
+                    const Text('carnet',
+                        style: TextStyle(
+                          fontFamily: 'Fraunces',
+                          fontStyle: FontStyle.italic,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                          height: 1,
+                        )),
+                    const Text('.',
+                        style: TextStyle(
+                          fontFamily: 'Fraunces',
+                          fontStyle: FontStyle.italic,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.sageDark,
+                          height: 1,
+                        )),
+                    const Spacer(),
+                    _heroIconButton(Icons.map_outlined, 'Chronologie',
+                        () => context.push('/chronology')),
+                    const SizedBox(width: 8),
+                    _heroIconButton(Icons.people_alt_outlined, 'Partagé avec moi',
+                        () => _showSharedTagsSheet(context)),
+                    const SizedBox(width: 8),
+                    _heroIconButton(Icons.folder_outlined, 'Mon espace',
+                        () => _showMonEspace(context)),
+                    const SizedBox(width: 10),
+                    GestureDetector(
+                      onTap: () => context.push('/profile'),
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: const BoxDecoration(
+                            color: AppColors.sageDark, shape: BoxShape.circle),
+                        child: Center(
+                          child: Text(_initial,
+                              style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 40,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(_greeting,
+                    style: const TextStyle(
+                        fontSize: 11.5,
+                        color: Colors.white70,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 0.3)),
+                if (hero != null) ...[
+                  const SizedBox(height: 3),
+                  Text(_heroTitle(hero),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white)),
+                  Text(DateFormat('d MMMM', 'fr').format(hero.date),
+                      style: const TextStyle(fontSize: 11.5, color: Colors.white70)),
+                ],
+              ],
+            ),
+          ),
+
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: -30,
+            child: const PeopleStrip(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _heroIconButton(IconData icon, String label, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Semantics(
+        label: label,
+        button: true,
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.16), shape: BoxShape.circle),
+          child: Icon(icon, size: 15, color: Colors.white),
+        ),
+      ),
+    );
+  }
+
+  String _heroTitle(MemoryModel m) {
+    if ((m.title?.trim().isNotEmpty ?? false)) return m.title!.trim();
+    final words = m.rawContent.trim().split(RegExp(r'\s+')).take(6).join(' ');
+    return words.isNotEmpty ? words : 'Souvenir';
+  }
+
+  /// Les 3 derniers souvenirs ajoutés, en polaroïdes carrés côte à côte
+  /// (gauche = le plus récent) — max 3 en rangée horizontale (David
+  /// 22.09.26), pas de hiérarchie visuelle entre eux.
   Widget _recentMemoriesGrid(BuildContext context) {
     if (_recentMemories.isEmpty) {
       return const Padding(
@@ -264,15 +468,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  /// Section « Mes livres » (titre + étagère) : PDF générés et livres
-  /// commandés, du plus récent au plus ancien. Regroupe aussi juste sous le
-  /// titre le bandeau « commande(s) en cours » — avant, il flottait tout en
-  /// haut du dashboard, sans lien visuel avec les livres/tirages qu'il
-  /// concerne (demande explicite : consolider au même endroit, 03.09.26).
-  /// N'affiche RIEN (pas même le titre) s'il n'y a ni livre ni commande en
-  /// cours — mais le titre reste affiché pour une commande en cours même
-  /// sans livre encore listé (ex. tirage seul, ou livre pas encore généré).
-  Widget _booksSection(BuildContext context) {
+  /// « Souvenirs imprimés » : livres ET tirages/puzzles commandés, groupés
+  /// sous UN seul titre + un bouton "+ Créer" (remplace les anciennes
+  /// sections "Mes livres" / "Mes tirages" empilées + le gros bandeau
+  /// "Créer un souvenir imprimé" tout en bas — refonte dashboard du
+  /// 22.09.26, "les sections sont mal réparties"). Deux étagères
+  /// horizontales distinctes sous ce même titre (livres, puis tirages —
+  /// posters ET puzzles désormais réunis, `o.isPoster || o.isPuzzle` :
+  /// avant cette refonte les puzzles n'apparaissaient nulle part sur le
+  /// dashboard, oubliés lors de l'ajout du produit puzzle). Le bandeau
+  /// « commande(s) en cours » couvre les trois types (déjà générique, basé
+  /// sur le statut, pas le type de produit). N'affiche RIEN (pas même le
+  /// titre) s'il n'y a ni livre, ni tirage/puzzle, ni commande en cours.
+  Widget _printedSection(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     return StreamBuilder<List<GeneratedBookModel>>(
       stream: BookHistoryService.streamForUser(),
@@ -283,17 +491,48 @@ class _HomeScreenState extends State<HomeScreen> {
               ? const Stream<List<OrderModel>>.empty()
               : OrderService.userOrdersStream(uid),
           builder: (context, orderSnap) {
-            final activeOrders = (orderSnap.data ?? const <OrderModel>[])
+            final orders = orderSnap.data ?? const <OrderModel>[];
+            final activeOrders = orders
                 .where((o) => !_activeOrderDoneStatuses.contains(o.status))
                 .toList();
-            if (books.isEmpty && activeOrders.isEmpty) {
+            final prints = orders.where((o) => o.isPoster || o.isPuzzle).toList()
+              ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+
+            if (books.isEmpty && prints.isEmpty && activeOrders.isEmpty) {
               return const SizedBox.shrink();
             }
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _sectionHeaderInline('Mes livres', 'Tout voir',
-                    onAction: () => context.push('/books')),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 16, 22, 8),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Souvenirs imprimés',
+                          style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textMedium,
+                              letterSpacing: 1.2)),
+                      GestureDetector(
+                        onTap: () => context.push('/product/new'),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 5),
+                          decoration: BoxDecoration(
+                              color: AppColors.sageDark,
+                              borderRadius: BorderRadius.circular(20)),
+                          child: const Text('+ Créer',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 if (activeOrders.isNotEmpty)
                   _ActiveOrdersCard(orders: activeOrders),
                 if (books.isNotEmpty)
@@ -307,7 +546,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       itemBuilder: (_, i) => _BookCard(
                         book: books[i],
                         // Avant : renvoyait toujours vers la LISTE (/books) au
-                        // lieu du livre tapé — incohérent avec _PosterCard,
+                        // lieu du livre tapé — incohérent avec _PrintOrderCard,
                         // qui lui ouvre bien SA commande. Même geste que
                         // book_history_screen.dart::_open (trouvé à l'audit
                         // UX du 03.09.26).
@@ -319,6 +558,20 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                   ),
+                if (prints.isNotEmpty)
+                  SizedBox(
+                    height: 176,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
+                      itemCount: prints.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 14),
+                      itemBuilder: (_, i) => _PrintOrderCard(
+                        order: prints[i],
+                        onTap: () => context.push('/orders/${prints[i].id}'),
+                      ),
+                    ),
+                  ),
               ],
             );
           },
@@ -326,75 +579,6 @@ class _HomeScreenState extends State<HomeScreen> {
       },
     );
   }
-
-  /// Section « Mes tirages » (titre + étagère) : posters commandés, du plus
-  /// récent au plus ancien. N'affiche RIEN tant qu'il n'y a aucun tirage.
-  Widget _postersSection(BuildContext context) {
-    final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (uid == null) return const SizedBox.shrink();
-    return StreamBuilder<List<OrderModel>>(
-      stream: OrderService.userOrdersStream(uid),
-      builder: (context, snap) {
-        final posters = (snap.data ?? const <OrderModel>[])
-            .where((o) => o.isPoster)
-            .toList()
-          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-        if (posters.isEmpty) return const SizedBox.shrink();
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _sectionHeaderInline('Mes tirages', 'Tout voir',
-                onAction: () => context.push('/orders')),
-            SizedBox(
-              height: 176,
-              child: ListView.separated(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.fromLTRB(22, 6, 22, 8),
-                itemCount: posters.length,
-                separatorBuilder: (_, __) => const SizedBox(width: 14),
-                itemBuilder: (_, i) => _PosterCard(
-                  order: posters[i],
-                  onTap: () => context.push('/orders/${posters[i].id}'),
-                ),
-              ),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  /// Même habillage que `_sectionHeader`, mais en widget simple (pas un
-  /// sliver) : ces deux sections vivent DANS un SliverToBoxAdapter, pour
-  /// pouvoir s'effacer entièrement (titre compris) le temps que le flux
-  /// Firestore réponde ou si la liste est vide.
-  Widget _sectionHeaderInline(String title, String trailing,
-          {VoidCallback? onAction}) =>
-      Padding(
-        padding: const EdgeInsets.fromLTRB(22, 16, 22, 8),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(title,
-                style: const TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: AppColors.textMedium,
-                    letterSpacing: 1.2)),
-            GestureDetector(
-              onTap: onAction,
-              child: Text(trailing,
-                  style: TextStyle(
-                      fontSize: 12,
-                      fontWeight:
-                          onAction != null ? FontWeight.w600 : FontWeight.w400,
-                      color: onAction != null
-                          ? AppColors.sageDark
-                          : AppColors.textMedium)),
-            ),
-          ],
-        ),
-      );
 
   MilestoneCategory? _safeCat(String type) {
     try {
@@ -476,142 +660,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// ── Barre du haut : logo + jauge d'espace + avatar ───────────────────────────
-
-class _TopBar extends StatelessWidget {
-  final String initial;
-  final VoidCallback onProfile;
-  final VoidCallback onSpace;
-  final VoidCallback onShared;
-  final VoidCallback onChronology;
-  const _TopBar({
-    required this.initial,
-    required this.onProfile,
-    required this.onSpace,
-    required this.onShared,
-    required this.onChronology,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      bottom: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 10, 18, 2),
-        child: Row(
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: const [
-                Text('carnet',
-                    style: TextStyle(
-                      fontFamily: 'Fraunces',
-                      fontStyle: FontStyle.italic,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w600,
-                      color: AppColors.textDark,
-                      height: 1,
-                    )),
-                SizedBox(width: 1),
-                Text('.',
-                    style: TextStyle(
-                      fontFamily: 'Fraunces',
-                      fontStyle: FontStyle.italic,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.sageDark,
-                      height: 1,
-                    )),
-              ],
-            ),
-            const Spacer(),
-            GestureDetector(
-              onTap: onChronology,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                    color: AppColors.sageTint, shape: BoxShape.circle),
-                child: const Icon(Icons.map_outlined,
-                    size: 17, color: AppColors.sageDark),
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: onShared,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                    color: AppColors.sageTint, shape: BoxShape.circle),
-                child: const Icon(Icons.people_alt_outlined,
-                    size: 17, color: AppColors.sageDark),
-              ),
-            ),
-            const SizedBox(width: 10),
-            GestureDetector(
-              onTap: onSpace,
-              behavior: HitTestBehavior.opaque,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                    color: AppColors.sageTint, shape: BoxShape.circle),
-                child: const Icon(Icons.folder_outlined,
-                    size: 18, color: AppColors.sageDark),
-              ),
-            ),
-            const SizedBox(width: 12),
-            GestureDetector(
-              onTap: onProfile,
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: const BoxDecoration(
-                    color: AppColors.sageDark, shape: BoxShape.circle),
-                child: Center(
-                  child: Text(initial,
-                      style: const TextStyle(
-                          color: Colors.white, fontWeight: FontWeight.w600)),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _HeroGreeting extends StatelessWidget {
-  final String greeting;
-  const _HeroGreeting({required this.greeting});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 12, 22, 2),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(greeting,
-              style: const TextStyle(
-                fontFamily: 'Fraunces',
-                fontSize: 28,
-                fontWeight: FontWeight.w500,
-                color: AppColors.textDark,
-                height: 1.1,
-              )),
-          const SizedBox(height: 4),
-          const Text('Chaque souvenir mérite d\'être conservé.',
-              style: TextStyle(fontSize: 14, color: AppColors.textMedium)),
-        ],
-      ),
-    );
-  }
-}
+// _TopBar et _HeroGreeting ont fusionné dans _HomeScreenState._heroSection
+// (refonte dashboard 22.09.26 : logo, accès rapides et salutation en
+// surimpression de la photo héro plutôt qu'en bandeaux séparés).
 
 // ── Livre (carte de l'étagère « Mes livres ») ────────────────────────────────
 
@@ -763,15 +814,24 @@ class _CoverThumb extends StatelessWidget {
       );
 }
 
-// ── Tirage (carte de l'étagère « Mes tirages ») ──────────────────────────────
+// ── Tirage ou puzzle (carte de l'étagère du module « Souvenirs imprimés »,
+// posters ET puzzles désormais réunis — voir _printedSection) ──────────────
 
-class _PosterCard extends StatelessWidget {
+class _PrintOrderCard extends StatelessWidget {
   final OrderModel order;
   final VoidCallback onTap;
-  const _PosterCard({required this.order, required this.onTap});
+  const _PrintOrderCard({required this.order, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final isPuzzle = order.isPuzzle;
+    final photoKey = isPuzzle ? order.puzzlePhotoKey : order.posterPhotoKey;
+    final photoUrl = isPuzzle ? order.puzzlePhotoUrl : order.posterPhotoUrl;
+    final label = isPuzzle
+        ? (order.puzzleSize != null
+            ? 'Puzzle ${PuzzlePricing.label(order.puzzleSize!)}'
+            : 'Puzzle')
+        : (order.posterSize ?? 'Tirage');
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(
@@ -794,8 +854,8 @@ class _PosterCard extends StatelessWidget {
                 ],
               ),
               child: _PosterThumb(
-                photoKey: order.posterPhotoKey,
-                photoUrl: order.posterPhotoUrl,
+                photoKey: photoKey,
+                photoUrl: photoUrl,
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(
@@ -803,7 +863,7 @@ class _PosterCard extends StatelessWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        order.posterSize ?? 'Tirage',
+                        label,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
@@ -908,117 +968,9 @@ class _PosterThumb extends StatelessWidget {
       );
 }
 
-// « Créer un livre » : le bandeau d'aboutissement, en bas du dashboard.
-class _CreateBookCta extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CreateBookCta({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 16, 22, 4),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF6B4A32), Color(0xFF8A6242)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF3C2814).withOpacity(0.28),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              const _StackedPagesMark(),
-              const SizedBox(width: 18),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Créer un souvenir imprimé',
-                        style: TextStyle(
-                          fontFamily: 'Fraunces',
-                          fontSize: 19,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        )),
-                    SizedBox(height: 3),
-                    Text('Livre, poster, puzzle et plus.',
-                        style: TextStyle(fontSize: 12.5, color: Colors.white70)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.white70),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// Petite pile de pages en éventail — remplace l'icône livre générique par un
-/// motif dessiné à la main (silhouettes superposées, légèrement pivotées).
-class _StackedPagesMark extends StatelessWidget {
-  const _StackedPagesMark();
-
-  @override
-  Widget build(BuildContext context) {
-    Widget page(double angle, double opacity, double size) => Transform.rotate(
-          angle: angle,
-          child: Container(
-            width: size,
-            height: size * 0.78,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(opacity),
-              borderRadius: BorderRadius.circular(6),
-            ),
-          ),
-        );
-    return SizedBox(
-      width: 54,
-      height: 54,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          page(-0.22, 0.16, 40),
-          page(0.14, 0.22, 40),
-          Container(
-            width: 40,
-            height: 31,
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.95),
-              borderRadius: BorderRadius.circular(6),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                    width: 24, height: 2.4,
-                    color: const Color(0xFF6B4A32).withOpacity(0.35)),
-                const SizedBox(height: 4),
-                Container(
-                    width: 17, height: 2.4,
-                    color: const Color(0xFF6B4A32).withOpacity(0.35)),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+// _CreateBookCta (bandeau plein largeur) et _StackedPagesMark ont disparu
+// avec la refonte du 22.09.26 : "Créer un souvenir imprimé" est maintenant
+// le bouton "+ Créer" du module _printedSection.
 
 // ── Feuille « Mon espace » ───────────────────────────────────────────────────
 
@@ -1313,9 +1265,10 @@ class _ActivityCard extends StatelessWidget {
 // une commande 'shipped' restait "en cours" indéfiniment, même reçue.
 const _activeOrderDoneStatuses = {'paid', 'archived'};
 
-/// Carte « N commande(s) en cours », affichée sous le titre « Mes livres »
-/// (voir `_booksSection`) — regroupée là plutôt qu'en bandeau flottant tout
-/// en haut du dashboard, pour rester au même endroit que ce qu'elle concerne.
+/// Carte « N commande(s) en cours », affichée sous le titre « Souvenirs
+/// imprimés » (voir `_printedSection`) — regroupée là plutôt qu'en bandeau
+/// flottant tout en haut du dashboard, pour rester au même endroit que ce
+/// qu'elle concerne.
 class _ActiveOrdersCard extends StatelessWidget {
   final List<OrderModel> orders;
   const _ActiveOrdersCard({required this.orders});
