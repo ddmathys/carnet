@@ -32,10 +32,17 @@ class PosterGenerateScreen extends StatefulWidget {
   /// fournir plusieurs, voir poster_select_screen.dart).
   final List<({String memoryId, int photoIndex})> photoRefs;
   final String? editOrderId;
+  /// true pour un tirage ajouté via "+ Ajouter un autre tirage" depuis une
+  /// commande déjà en cours (voir _buildOrderStep du parent) : mêmes étapes
+  /// collage/taille, mais l'étape finale génère juste le PDF et renvoie le
+  /// résultat au parent (`Navigator.pop`) au lieu de demander une adresse et
+  /// créer une commande. Jamais combiné avec `editOrderId`.
+  final bool queueMode;
   const PosterGenerateScreen({
     super.key,
     this.photoRefs = const [],
     this.editOrderId,
+    this.queueMode = false,
   });
 
   @override
@@ -82,6 +89,15 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   String? _loadError;
   bool _ordering = false;
   String _orderMessage = '';
+
+  // Tirages supplémentaires déjà configurés et générés (PDF prêt, uploadé),
+  // en attente d'être inclus dans la même commande que celui de cet écran —
+  // voir _addAnotherPoster / OrderModel.additionalPosters. Toujours vide en
+  // queueMode (un tirage en file ne porte pas lui-même d'autres tirages).
+  final List<_QueuedPoster> _extraPosters = [];
+  double get _totalPrice =>
+      (PosterPricing.price(_size, _orientation) ?? 0) +
+      _extraPosters.fold(0.0, (sum, p) => sum + p.price);
 
   final _addressKey = GlobalKey<FormState>();
   final _firstNameCtrl = TextEditingController();
@@ -338,7 +354,13 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       return;
     }
     final isEdit = widget.editOrderId != null;
-    if (!isEdit && !(_addressKey.currentState?.validate() ?? false)) return;
+    // Pas d'adresse en queueMode : ce tirage rejoint une commande dont
+    // l'adresse est saisie sur l'écran racine (voir _buildOrderStep).
+    if (!isEdit &&
+        !widget.queueMode &&
+        !(_addressKey.currentState?.validate() ?? false)) {
+      return;
+    }
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
 
@@ -395,6 +417,38 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
       if (!mounted) return;
 
+      // Le photoKey/Url du tirage courant — même règle des deux côtés
+      // (queueMode et commande racine) : la clé R2 prime, l'URL Firebase
+      // héritée ne sert que si aucune clé n'existe.
+      final photoKey =
+          _featuredPhotoUrl != null ? _keyByUrl[_featuredPhotoUrl] : null;
+      final photoUrl = _featuredPhotoUrl != null &&
+              !_keyByUrl.containsKey(_featuredPhotoUrl!)
+          ? _featuredPhotoUrl
+          : null;
+      final entry = PosterPricing.entryFor(_size, _orientation);
+
+      if (widget.queueMode) {
+        Navigator.pop(
+          context,
+          _QueuedPoster(
+            sku: entry?.sku,
+            size: _size,
+            orientation: _orientation,
+            color: _color,
+            caption: _captionCtrl.text.trim().isNotEmpty
+                ? _captionCtrl.text.trim()
+                : null,
+            pdfUrl: uploaded.url,
+            price: PosterPricing.price(_size, _orientation) ?? 0,
+            memoryIds: _uniqueMemories.map((m) => m.id).toList(),
+            photoKey: photoKey,
+            photoUrl: photoUrl,
+          ),
+        );
+        return;
+      }
+
       if (isEdit) {
         setState(() => _orderMessage = 'Renvoi à l\'impression…');
         await OrderService.sendToPrint(widget.editOrderId!, pdfUrl: uploaded.url);
@@ -405,15 +459,13 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
       setState(() => _orderMessage = 'Création de la commande…');
 
-      final price = PosterPricing.price(_size, _orientation) ?? 0;
-      final entry = PosterPricing.entryFor(_size, _orientation);
       final order = OrderModel(
         id: '',
         userId: user.uid,
         userEmail: user.email ?? '',
         bookTitle: 'Tirage $_size',
         coverType: '',
-        price: price,
+        price: _totalPrice,
         firstName: _firstNameCtrl.text.trim(),
         lastName: _lastNameCtrl.text.trim(),
         street: _streetCtrl.text.trim(),
@@ -432,13 +484,11 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         posterHangerColor: _color,
         posterCaption: _captionCtrl.text.trim().isNotEmpty ? _captionCtrl.text.trim() : null,
         posterMemoryIds: _uniqueMemories.map((m) => m.id).toList(),
-        posterPhotoKey: _featuredPhotoUrl != null
-            ? _keyByUrl[_featuredPhotoUrl]
-            : null,
-        posterPhotoUrl: _featuredPhotoUrl != null &&
-                !_keyByUrl.containsKey(_featuredPhotoUrl!)
-            ? _featuredPhotoUrl
-            : null,
+        posterPhotoKey: photoKey,
+        posterPhotoUrl: photoUrl,
+        additionalPosters: _extraPosters.isEmpty
+            ? null
+            : _extraPosters.map((e) => e.toMap()).toList(),
       );
       final orderId = await OrderService.createOrder(order);
 
@@ -850,82 +900,129 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   Widget _buildOrderStep() {
     final price = PosterPricing.price(_size, _orientation);
+    // Le panier (autres tirages + bouton "en ajouter un") n'a de sens que
+    // pour la commande racine — ni en queueMode (un tirage en file d'attente
+    // ne porte pas lui-même d'autres tirages), ni en édition (renvoi d'un
+    // tirage déjà commandé, un seul article).
+    final showCart = !widget.queueMode && widget.editOrderId == null;
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.sageTint,
-            borderRadius: BorderRadius.circular(14),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.image_outlined, color: AppColors.sageDark),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  'Tirage $_size · ${_orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(_color)}',
-                  style: const TextStyle(fontSize: 13.5, color: AppColors.textDark),
-                ),
+        _posterSummaryTile(
+          label: 'Tirage $_size · ${_orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(_color)}',
+          price: price,
+        ),
+        if (showCart) ...[
+          for (final item in _extraPosters)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: _posterSummaryTile(
+                label: 'Tirage ${item.size} · ${item.orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(item.color)}',
+                price: item.price,
+                onRemove: () => setState(() => _extraPosters.remove(item)),
               ),
-              Text(price != null ? PosterPricing.format(price) : '—',
-                  style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.textDark)),
-            ],
+            ),
+          const SizedBox(height: 10),
+          Center(
+            child: TextButton.icon(
+              onPressed: _ordering ? null : _addAnotherPoster,
+              icon: const Icon(Icons.add_circle_outline,
+                  size: 18, color: AppColors.sageDark),
+              label: const Text('Ajouter un autre tirage à cette commande',
+                  style: TextStyle(color: AppColors.sageDark, fontSize: 13)),
+            ),
           ),
-        ),
+          if (_extraPosters.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text('Total · 1 seule livraison',
+                      style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.textDark)),
+                  Text(PosterPricing.format(_totalPrice),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w700, color: AppColors.textDark)),
+                ],
+              ),
+            ),
+          ],
+        ],
         const SizedBox(height: 24),
-        Form(
-          key: _addressKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text('Adresse de livraison',
-                  style: TextStyle(
-                      fontFamily: 'PlayfairDisplay',
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.textDark)),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(child: _AddressField(_firstNameCtrl, 'Prénom', required: true)),
-                const SizedBox(width: 10),
-                Expanded(child: _AddressField(_lastNameCtrl, 'Nom', required: true)),
-              ]),
-              const SizedBox(height: 10),
-              _AddressField(_streetCtrl, 'Rue et numéro', required: true),
-              const SizedBox(height: 10),
-              Row(children: [
-                SizedBox(
-                    width: 100,
-                    child: _AddressField(_npaCtrl, 'NPA',
-                        required: true, keyboardType: TextInputType.number)),
-                const SizedBox(width: 10),
-                Expanded(child: _AddressField(_cityCtrl, 'Ville', required: true)),
-              ]),
-              const SizedBox(height: 10),
-              _AddressField(_countryCtrl, 'Pays', required: true),
-              const SizedBox(height: 20),
-              if (_ordering) ...[
-                const LinearProgressIndicator(
-                  backgroundColor: Color(0xFFEEEBE3),
-                  valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
-                ),
+        if (widget.queueMode)
+          if (_ordering) ...[
+            const LinearProgressIndicator(
+              backgroundColor: Color(0xFFEEEBE3),
+              valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
+            ),
+            const SizedBox(height: 10),
+            Text(_orderMessage,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic)),
+          ] else
+            ElevatedButton(
+              onPressed: _placeOrder,
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+              child: const Text('Ajouter à la commande'),
+            )
+        else
+          Form(
+            key: _addressKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Adresse de livraison',
+                    style: TextStyle(
+                        fontFamily: 'PlayfairDisplay',
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textDark)),
+                const SizedBox(height: 12),
+                Row(children: [
+                  Expanded(child: _AddressField(_firstNameCtrl, 'Prénom', required: true)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _AddressField(_lastNameCtrl, 'Nom', required: true)),
+                ]),
                 const SizedBox(height: 10),
-                Text(_orderMessage,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                        color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic)),
-              ] else
-                ElevatedButton(
-                  onPressed: _placeOrder,
-                  style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.amber, foregroundColor: Colors.white),
-                  child: Text(widget.editOrderId != null ? 'Renvoyer' : 'Commander'),
-                ),
-            ],
+                _AddressField(_streetCtrl, 'Rue et numéro', required: true),
+                const SizedBox(height: 10),
+                Row(children: [
+                  SizedBox(
+                      width: 100,
+                      child: _AddressField(_npaCtrl, 'NPA',
+                          required: true, keyboardType: TextInputType.number)),
+                  const SizedBox(width: 10),
+                  Expanded(child: _AddressField(_cityCtrl, 'Ville', required: true)),
+                ]),
+                const SizedBox(height: 10),
+                _AddressField(_countryCtrl, 'Pays', required: true),
+                const SizedBox(height: 20),
+                if (_ordering) ...[
+                  const LinearProgressIndicator(
+                    backgroundColor: Color(0xFFEEEBE3),
+                    valueColor: AlwaysStoppedAnimation<Color>(AppColors.sage),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(_orderMessage,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                          color: AppColors.textMedium, fontSize: 13, fontStyle: FontStyle.italic)),
+                ] else
+                  ElevatedButton(
+                    onPressed: _placeOrder,
+                    style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                    child: Text(widget.editOrderId != null ? 'Renvoyer' : 'Commander'),
+                  ),
+              ],
+            ),
           ),
-        ),
         const SizedBox(height: 16),
         Center(
           child: TextButton(
@@ -937,6 +1034,92 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       ],
     );
   }
+
+  Widget _posterSummaryTile({
+    required String label,
+    required double? price,
+    VoidCallback? onRemove,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.sageTint,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.image_outlined, color: AppColors.sageDark),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(fontSize: 13.5, color: AppColors.textDark)),
+          ),
+          Text(price != null ? PosterPricing.format(price) : '—',
+              style: const TextStyle(fontWeight: FontWeight.w700, color: AppColors.textDark)),
+          if (onRemove != null)
+            GestureDetector(
+              onTap: onRemove,
+              child: const Padding(
+                padding: EdgeInsets.only(left: 6),
+                child: Icon(Icons.close, size: 18, color: AppColors.textMedium),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// Ouvre un aller-retour complet (choix des photos, collage, taille) qui
+  /// renvoie un tirage prêt (PDF déjà généré et uploadé) plutôt que de créer
+  /// une commande — voir PosterSelectScreen/PosterGenerateScreen en
+  /// `queueMode`. Ajouté au panier local (`_extraPosters`), inclus dans la
+  /// commande unique au moment de "Commander" (voir _placeOrder).
+  Future<void> _addAnotherPoster() async {
+    final item =
+        await context.push<_QueuedPoster>('/poster/select?queue=1');
+    if (item != null && mounted) setState(() => _extraPosters.add(item));
+  }
+}
+
+/// Un tirage configuré et généré via `queueMode`, en attente d'être inclus
+/// dans la commande du parent — voir PosterGenerateScreen._addAnotherPoster.
+class _QueuedPoster {
+  final String? sku;
+  final String size;
+  final String orientation;
+  final String color;
+  final String? caption;
+  final String pdfUrl;
+  final double price;
+  final List<String> memoryIds;
+  final String? photoKey;
+  final String? photoUrl;
+
+  const _QueuedPoster({
+    required this.sku,
+    required this.size,
+    required this.orientation,
+    required this.color,
+    this.caption,
+    required this.pdfUrl,
+    required this.price,
+    required this.memoryIds,
+    this.photoKey,
+    this.photoUrl,
+  });
+
+  Map<String, dynamic> toMap() => {
+        'posterSku': sku,
+        'posterSize': size,
+        'posterOrientation': orientation,
+        'posterHangerColor': color,
+        'posterCaption': caption,
+        'pdfUrl': pdfUrl,
+        'price': price,
+        'posterMemoryIds': memoryIds,
+        'posterPhotoKey': photoKey,
+        'posterPhotoUrl': photoUrl,
+      };
 }
 
 /// Une ligne à cocher pour une vidéo ou un mémo vocal précis du reel derrière

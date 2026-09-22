@@ -142,6 +142,16 @@ class OrderModel {
   // photos Firebase héritées (URL permanente).
   final String? posterPhotoKey;
   final String? posterPhotoUrl;
+  // Tirages SUPPLÉMENTAIRES groupés dans la même commande (même livraison,
+  // un seul appel Prodigi avec plusieurs `items` — Prodigi facture le port
+  // par COMMANDE, pas par article, voir backend/api/prodigi/[action].ts).
+  // Le tirage "principal" reste porté par les champs `poster*` ci-dessus
+  // (rétrocompatible : une commande à un seul tirage n'a jamais cette
+  // liste) ; chaque entrée ici a la même forme (posterSku, posterSize,
+  // posterOrientation, posterHangerColor, posterCaption, pdfUrl, price,
+  // posterMemoryIds, posterPhotoKey, posterPhotoUrl) — voir
+  // poster_generate_screen.dart::_QueuedPoster.toMap().
+  final List<Map<String, dynamic>>? additionalPosters;
 
   const OrderModel({
     required this.id,
@@ -183,6 +193,7 @@ class OrderModel {
     this.posterMemoryIds,
     this.posterPhotoKey,
     this.posterPhotoUrl,
+    this.additionalPosters,
   });
 
   bool get isPoster => productType == 'poster';
@@ -344,6 +355,9 @@ class OrderModel {
           .toList(),
       posterPhotoKey: d['posterPhotoKey'],
       posterPhotoUrl: d['posterPhotoUrl'],
+      additionalPosters: (d['additionalPosters'] as List<dynamic>?)
+          ?.whereType<Map<String, dynamic>>()
+          .toList(),
     );
   }
 
@@ -376,5 +390,6 @@ class OrderModel {
     'posterMemoryIds': posterMemoryIds,
     'posterPhotoKey': posterPhotoKey,
     'posterPhotoUrl': posterPhotoUrl,
+    'additionalPosters': additionalPosters,
   };
 }

@@ -56,6 +56,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     trustedPrice = price
     const orientationLabel = o.posterOrientation === 'landscape' ? 'paysage' : 'portrait'
     productName = `Tirage ${o.posterSize} ${orientationLabel}`
+
+    // Tirages groupés dans la même commande (voir OrderModel.additionalPosters
+    // / backend/api/prodigi/[action].ts) : un seul article Stripe, prix total
+    // du groupe — Prodigi les livre ensemble en une seule commande/livraison.
+    const extras = Array.isArray(o.additionalPosters) ? o.additionalPosters : []
+    for (const extra of extras) {
+      if (!isPosterSize(extra?.posterSize) || !isPosterOrientation(extra?.posterOrientation)) {
+        return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur un tirage supplémentaire' })
+      }
+      const extraPrice = computePosterPrice(extra.posterSize, extra.posterOrientation)
+      if (extraPrice == null) {
+        return res.status(400).json({ error: `Aucun tarif poster pour ${extra.posterSize}/${extra.posterOrientation} (tirage supplémentaire)` })
+      }
+      trustedPrice += extraPrice
+    }
+    if (extras.length > 0) {
+      productName = `${extras.length + 1} tirages`
+    }
   } else {
     const rawPages = Number(o.pageCount ?? 0)
     if (!rawPages || rawPages <= 0) {

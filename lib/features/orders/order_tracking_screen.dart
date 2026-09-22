@@ -954,6 +954,11 @@ class _OrderDetailsCard extends StatelessWidget {
                   color: AppColors.textDark)),
           const SizedBox(height: 12),
           _Row('Livre', order.bookTitle),
+          if (order.isPoster &&
+              order.additionalPosters != null &&
+              order.additionalPosters!.isNotEmpty)
+            _Row('+ tirages inclus',
+                '${order.additionalPosters!.length} autre${order.additionalPosters!.length > 1 ? 's' : ''} · même livraison'),
           _Row('Couverture', order.coverType == 'hard' ? 'Rigide' : 'Souple'),
           _Row('Livraison', order.fullAddress),
           _Row('Montant', 'CHF ${order.price.toStringAsFixed(2)}'),

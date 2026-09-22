@@ -148,6 +148,7 @@ final _router = GoRouter(
       path: '/poster/select',
       builder: (_, state) => PosterSelectScreen(
         editOrderId: state.uri.queryParameters['editOrder'],
+        queueMode: state.uri.queryParameters['queue'] == '1',
       ),
     ),
     GoRoute(
@@ -170,6 +171,7 @@ final _router = GoRouter(
         return PosterGenerateScreen(
           photoRefs: refs,
           editOrderId: state.uri.queryParameters['editOrder'],
+          queueMode: state.uri.queryParameters['queue'] == '1',
         );
       },
     ),

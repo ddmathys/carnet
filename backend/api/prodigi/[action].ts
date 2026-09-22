@@ -199,7 +199,11 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
   // reste invisible dans la console admin/les emails.
   let trustedPrice: number | null = null
 
-  let item: Record<string, any>
+  // Un ou plusieurs items poster (voir OrderModel.additionalPosters côté
+  // app) : Prodigi facture la livraison par COMMANDE, pas par article — les
+  // grouper ici dans un seul `items[]` fait fabriquer et livrer tous les
+  // tirages ensemble, en un seul port, au lieu d'une commande par tirage.
+  let items: Record<string, any>[]
   if (isPoster) {
     if (!isPosterSize(o.posterSize) || !isPosterOrientation(o.posterOrientation)) {
       return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur la commande' })
@@ -209,26 +213,50 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: `Aucun SKU poster pour ${o.posterSize}/${o.posterOrientation}` })
     }
     const color = isPosterHangerColor(o.posterHangerColor) ? o.posterHangerColor : 'natural'
-    item = {
+    items = [{
       sku: entry.sku,
       copies: 1,
       sizing: 'fillPrintArea',
       attributes: { color },
       assets: [{ printArea: 'default', url: pdfUrl }],
-    }
+    }]
     trustedPrice = computePosterPrice(o.posterSize, o.posterOrientation)
+
+    const extras = Array.isArray(o.additionalPosters) ? o.additionalPosters : []
+    for (const extra of extras) {
+      if (!isPosterSize(extra?.posterSize) || !isPosterOrientation(extra?.posterOrientation)) {
+        return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur un tirage supplémentaire' })
+      }
+      if (typeof extra.pdfUrl !== 'string' || !extra.pdfUrl) {
+        return res.status(400).json({ error: 'pdfUrl manquant sur un tirage supplémentaire' })
+      }
+      const extraEntry = posterCatalogEntry(extra.posterSize, extra.posterOrientation)
+      if (!extraEntry) {
+        return res.status(400).json({ error: `Aucun SKU poster pour ${extra.posterSize}/${extra.posterOrientation} (tirage supplémentaire)` })
+      }
+      const extraColor = isPosterHangerColor(extra.posterHangerColor) ? extra.posterHangerColor : 'natural'
+      items.push({
+        sku: extraEntry.sku,
+        copies: 1,
+        sizing: 'fillPrintArea',
+        attributes: { color: extraColor },
+        assets: [{ printArea: 'default', url: extra.pdfUrl }],
+      })
+      const extraPrice = computePosterPrice(extra.posterSize, extra.posterOrientation)
+      if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
+    }
   } else {
     const orderCoverType = resolveCoverType(o.coverType)
     const { sku, envName } = skuFor(orderCoverType)
     if (!sku) {
       return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
     }
-    item = {
+    items = [{
       sku,
       copies: 1,
       sizing: 'fillPrintArea',
       assets: [{ printArea: 'default', url: pdfUrl, pageCount }],
-    }
+    }]
     trustedPrice = pageCount ? computePrice(orderCoverType, pageCount) : null
   }
 
@@ -251,7 +279,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
         townOrCity: String(o.city ?? ''),
       },
     },
-    items: [item],
+    items,
   }
 
   // Champs communs mis à jour dans Firestore quel que soit le résultat de

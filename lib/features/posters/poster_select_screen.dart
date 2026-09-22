@@ -26,7 +26,16 @@ import '../tags/tag_picker_sheet.dart';
 /// (ou lesquelles) inclure — pas de choix automatique de "la première photo".
 class PosterSelectScreen extends StatefulWidget {
   final String? editOrderId;
-  const PosterSelectScreen({super.key, this.editOrderId});
+  // true quand on choisit les photos d'un tirage SUPPLÉMENTAIRE à ajouter à
+  // une commande déjà en cours (bouton "+ Ajouter un autre tirage" dans
+  // PosterGenerateScreen) : relaie le résultat du PosterGenerateScreen
+  // poussé ensuite (voir _continue) au lieu de rester sur place.
+  final bool queueMode;
+  const PosterSelectScreen({
+    super.key,
+    this.editOrderId,
+    this.queueMode = false,
+  });
 
   @override
   State<PosterSelectScreen> createState() => _PosterSelectScreenState();
@@ -165,8 +174,17 @@ class _PosterSelectScreenState extends State<PosterSelectScreen> {
     );
   }
 
-  void _continue() {
+  Future<void> _continue() async {
     final photos = _selected.map((e) => '${e.memoryId}:${e.photoIndex}').join(',');
+    if (widget.queueMode) {
+      // Relais : le PosterGenerateScreen poussé ensuite (aussi en queueMode)
+      // renvoie un tirage prêt via Navigator.pop — on le relaie tel quel au
+      // parent (celui qui a ouvert CET écran), sans rester affiché entre les
+      // deux.
+      final result = await context.push('/poster/new?photos=$photos&queue=1');
+      if (mounted) Navigator.pop(context, result);
+      return;
+    }
     final editOrder =
         widget.editOrderId != null ? '&editOrder=${widget.editOrderId}' : '';
     context.push('/poster/new?photos=$photos$editOrder');
