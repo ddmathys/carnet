@@ -33,12 +33,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const ref = `#${orderId.slice(0, 8).toUpperCase()}`
   const isPoster = o.productType === 'poster'
+  const isPuzzle = o.productType === 'puzzle'
   const posterColorLabel: Record<string, string> = { black: 'Noir', natural: 'Chêne', white: 'Blanc' }
-  // Titre de l'article : le titre du livre, ou un libellé généré pour un poster
-  // (pas de titre saisi par l'utilisateur pour ce produit).
+  // Titre de l'article : le titre du livre, ou un libellé généré pour un
+  // poster/puzzle (pas de titre saisi par l'utilisateur pour ces produits).
   const itemTitle = isPoster
     ? `Tirage ${escapeHtml(String(o.posterSize ?? ''))}`
-    : escapeHtml(String(o.bookTitle ?? ''))
+    : isPuzzle
+      ? `Puzzle ${escapeHtml(String(o.puzzleSize ?? ''))} pièces`
+      : escapeHtml(String(o.bookTitle ?? ''))
   const bookTitle = itemTitle // conservé pour les emplacements ci-dessous, nom historique
   const fullName = escapeHtml(`${o.firstName ?? ''} ${o.lastName ?? ''}`.trim())
   const firstName = escapeHtml(String(o.firstName ?? ''))
@@ -47,12 +50,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ? `${o.posterOrientation === 'landscape' ? 'Paysage' : 'Portrait'} · ${
         posterColorLabel[String(o.posterHangerColor ?? '')] ?? String(o.posterHangerColor ?? '')
       }`
-    : o.coverType === 'hard'
-      ? 'Rigide'
-      : 'Souple'
-  const itemEmoji = isPoster ? '🖼️' : '📖'
-  const itemLabel = isPoster ? 'Tirage' : 'Livre'
-  const detailLabel = isPoster ? 'Finition' : 'Couverture'
+    : isPuzzle
+      ? 'Boîte métal'
+      : o.coverType === 'hard'
+        ? 'Rigide'
+        : 'Souple'
+  const itemEmoji = isPoster ? '🖼️' : isPuzzle ? '🧩' : '📖'
+  const itemLabel = isPoster ? 'Tirage' : isPuzzle ? 'Puzzle' : 'Livre'
+  const detailLabel = isPoster || isPuzzle ? 'Finition' : 'Couverture'
+  // Utilisé dans les phrases génériques ("reçu votre ___") plus bas.
+  const itemWord = isPoster ? 'tirage' : isPuzzle ? 'puzzle' : 'livre'
   const address = escapeHtml(
     [o.street, `${o.npa ?? ''} ${o.city ?? ''}`.trim(), o.country]
       .filter(Boolean)
@@ -92,7 +99,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const userHtml = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">Bonjour ${firstName},</p>
     <p style="margin:0 0 24px;font-size:15px;color:#2d2d2d;line-height:1.6;">
-      Merci pour votre commande ! Nous avons bien reçu votre ${isPoster ? 'tirage' : 'livre'} <strong>« ${bookTitle} »</strong>.
+      Merci pour votre commande ! Nous avons bien reçu votre ${itemWord} <strong>« ${bookTitle} »</strong>.
     </p>
     <table width="100%" style="background:#f5ece0;border-radius:12px;margin-bottom:24px;">
       <tr><td style="padding:20px 24px;">
@@ -107,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       <tr><td style="padding:20px 24px;">
         <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
         <p style="margin:0 0 14px;font-size:14px;color:#2d2d2d;line-height:1.6;">
-          Le paiement déclenche la fabrication de votre ${isPoster ? 'tirage' : 'livre'}. Merci de régler <strong>${price}</strong> :
+          Le paiement déclenche la fabrication de votre ${itemWord}. Merci de régler <strong>${price}</strong> :
         </p>
         ${paymentRows}
         <p style="margin:14px 0 0;font-size:14px;color:#2d2d2d;">🔖 Référence à indiquer : <strong>${ref}</strong></p>

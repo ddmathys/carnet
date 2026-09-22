@@ -7,6 +7,7 @@ import {
   isPosterOrientation,
   isPosterSize,
 } from '../../lib/poster_pricing'
+import { computePuzzlePrice, isPuzzleSize } from '../../lib/puzzle_pricing'
 
 // Crée une session Stripe Checkout pour payer une commande (TWINT + carte).
 // Le montant est RECALCULÉ ici depuis coverType + pageCount (lib/pricing.ts) —
@@ -42,10 +43,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const isPoster = o.productType === 'poster'
+  const isPuzzle = o.productType === 'puzzle'
 
   let trustedPrice: number
   let productName: string
-  if (isPoster) {
+  if (isPuzzle) {
+    if (!isPuzzleSize(o.puzzleSize)) {
+      return res.status(400).json({ error: 'puzzleSize invalide sur la commande' })
+    }
+    const price = computePuzzlePrice(o.puzzleSize)
+    if (price == null) {
+      return res.status(400).json({ error: `Aucun tarif pour le puzzle ${o.puzzleSize} pièces` })
+    }
+    trustedPrice = price
+    productName = `Puzzle ${o.puzzleSize} pièces`
+  } else if (isPoster) {
     if (!isPosterSize(o.posterSize) || !isPosterOrientation(o.posterOrientation)) {
       return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur la commande' })
     }

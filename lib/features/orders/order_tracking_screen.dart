@@ -268,10 +268,16 @@ class _OrderThumb extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final photoKey =
-        order.isPoster ? order.posterPhotoKey : coverBook?.coverPhotoKey;
-    final photoUrl =
-        order.isPoster ? order.posterPhotoUrl : coverBook?.coverPhotoUrl;
+    final photoKey = order.isPoster
+        ? order.posterPhotoKey
+        : order.isPuzzle
+            ? order.puzzlePhotoKey
+            : coverBook?.coverPhotoKey;
+    final photoUrl = order.isPoster
+        ? order.posterPhotoUrl
+        : order.isPuzzle
+            ? order.puzzlePhotoUrl
+            : coverBook?.coverPhotoUrl;
 
     return Container(
       width: 52,

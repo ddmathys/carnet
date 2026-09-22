@@ -27,6 +27,14 @@ class PdfService {
   static Future<PdfUploadResult?> uploadPosterPdf(Uint8List bytes) =>
       _uploadPdf(bytes, action: 'poster-upload-url');
 
+  /// Photo d'un puzzle (préfixe R2 `puzzles/`, JPG pas PDF — même infra
+  /// d'URL stable, `_uploadPdf` reste générique : le content-type vient de
+  /// la réponse backend, pas d'un paramètre ici). Prodigi cadre lui-même la
+  /// photo dans la zone d'impression (`sizing: 'fillPrintArea'`), donc aucun
+  /// traitement d'image côté app avant l'envoi.
+  static Future<PdfUploadResult?> uploadPuzzlePhoto(Uint8List bytes) =>
+      _uploadPdf(bytes, action: 'puzzle-upload-url');
+
   static Future<PdfUploadResult?> _uploadPdf(Uint8List bytes,
       {required String action}) async {
     try {
@@ -75,7 +83,10 @@ class PdfService {
     if (url == null || url.isEmpty) return null;
     try {
       final key = Uri.parse(url).queryParameters['key'];
-      return (key != null && (key.startsWith('books/') || key.startsWith('posters/')))
+      return (key != null &&
+              (key.startsWith('books/') ||
+                  key.startsWith('posters/') ||
+                  key.startsWith('puzzles/')))
           ? key
           : null;
     } catch (_) {

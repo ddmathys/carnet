@@ -160,6 +160,15 @@ class OrderModel {
   // book_generate_screen.dart::_QueuedBook.toMap().
   final List<Map<String, dynamic>>? additionalBooks;
 
+  // 'puzzle' (productType) : puzzle photo (tin + jigsaw), un seul SKU par
+  // taille (pas d'orientation, Prodigi cadre lui-même la photo, voir
+  // puzzle_generate_screen.dart). `pdfUrl` ci-dessus porte l'URL stable de LA
+  // photo (même image utilisée pour le puzzle et le couvercle de la boîte).
+  final String? puzzleSku;
+  final String? puzzleSize; // '30' | '110' | '252' | '500' | '1000' (pièces)
+  final String? puzzlePhotoKey;
+  final String? puzzlePhotoUrl;
+
   const OrderModel({
     required this.id,
     required this.userId,
@@ -202,9 +211,14 @@ class OrderModel {
     this.posterPhotoUrl,
     this.additionalPosters,
     this.additionalBooks,
+    this.puzzleSku,
+    this.puzzleSize,
+    this.puzzlePhotoKey,
+    this.puzzlePhotoUrl,
   });
 
   bool get isPoster => productType == 'poster';
+  bool get isPuzzle => productType == 'puzzle';
 
   String get fullName => '$firstName $lastName';
 
@@ -369,6 +383,10 @@ class OrderModel {
       additionalBooks: (d['additionalBooks'] as List<dynamic>?)
           ?.whereType<Map<String, dynamic>>()
           .toList(),
+      puzzleSku: d['puzzleSku'],
+      puzzleSize: d['puzzleSize'],
+      puzzlePhotoKey: d['puzzlePhotoKey'],
+      puzzlePhotoUrl: d['puzzlePhotoUrl'],
     );
   }
 
@@ -403,5 +421,9 @@ class OrderModel {
     'posterPhotoUrl': posterPhotoUrl,
     'additionalPosters': additionalPosters,
     'additionalBooks': additionalBooks,
+    'puzzleSku': puzzleSku,
+    'puzzleSize': puzzleSize,
+    'puzzlePhotoKey': puzzlePhotoKey,
+    'puzzlePhotoUrl': puzzlePhotoUrl,
   };
 }

@@ -29,6 +29,8 @@ import 'features/books/book_history_screen.dart';
 import 'features/books/memory_select_screen.dart';
 import 'features/posters/poster_select_screen.dart';
 import 'features/posters/poster_generate_screen.dart';
+import 'features/puzzles/puzzle_select_screen.dart';
+import 'features/puzzles/puzzle_generate_screen.dart';
 import 'features/products/product_format_screen.dart';
 import 'features/retro/retro_view_screen.dart';
 import 'features/retro/retro_data.dart';
@@ -175,6 +177,19 @@ final _router = GoRouter(
           queueMode: state.uri.queryParameters['queue'] == '1',
         );
       },
+    ),
+
+    // ── Puzzles ──
+    GoRoute(
+      path: '/puzzle/select',
+      builder: (_, __) => const PuzzleSelectScreen(),
+    ),
+    GoRoute(
+      path: '/puzzle/new',
+      builder: (_, state) => PuzzleGenerateScreen(
+        memoryId: state.uri.queryParameters['memory'] ?? '',
+        photoIndex: int.tryParse(state.uri.queryParameters['photo'] ?? '') ?? 0,
+      ),
     ),
 
     // ── Rétrospective ── L'entrée se fait depuis une personne (pastille du

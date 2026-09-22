@@ -952,7 +952,7 @@ class _CreateBookCta extends StatelessWidget {
                           color: Colors.white,
                         )),
                     SizedBox(height: 3),
-                    Text('Livre, poster, calendrier et plus.',
+                    Text('Livre, poster, puzzle et plus.',
                         style: TextStyle(fontSize: 12.5, color: Colors.white70)),
                   ],
                 ),

@@ -7,11 +7,13 @@ import '../../core/theme/app_theme.dart';
 /// séparés du dashboard, deux boutons pour un seul geste — retour de David
 /// le 22.09.26 : "je veux qu'un bouton et après voir la liste des produits").
 ///
-/// « Livre » et « Poster » sont fonctionnels aujourd'hui. Calendrier/Puzzle/
-/// Mural n'ont pas encore de SKU Prodigi configuré (aucun produit créé côté
-/// dashboard Prodigi), donc affichés en aperçu « Bientôt disponible », non
-/// cliquables — pour ne jamais laisser quelqu'un payer une commande qu'on ne
-/// peut pas encore envoyer à l'impression.
+/// « Livre », « Poster » et « Puzzle » sont fonctionnels aujourd'hui
+/// (catalogue puzzle confirmé le 22.09.26 via l'API Prodigi réelle, voir
+/// backend/lib/puzzle_pricing.ts). Calendrier/Mural n'ont pas encore de SKU
+/// Prodigi configuré (aucun produit créé côté dashboard Prodigi), donc
+/// affichés en aperçu « Bientôt disponible », non cliquables — pour ne
+/// jamais laisser quelqu'un payer une commande qu'on ne peut pas encore
+/// envoyer à l'impression.
 class ProductFormatScreen extends StatelessWidget {
   const ProductFormatScreen({super.key});
 
@@ -81,21 +83,21 @@ class ProductFormatScreen extends StatelessWidget {
           ),
           const SizedBox(height: 12),
           _FormatCard(
+            icon: Icons.extension_outlined,
+            iconColor: AppColors.coverPink,
+            title: 'Puzzle',
+            subtitle: 'Ton souvenir préféré, à reconstituer en famille.',
+            priceLabel: 'dès 34 CHF',
+            onTap: () => context.push('/puzzle/select'),
+          ),
+          const SizedBox(height: 12),
+          _FormatCard(
             icon: Icons.calendar_month_outlined,
             iconColor: AppColors.earth,
             title: 'Calendrier',
             subtitle: 'Une photo par mois, à accrocher toute l\'année.',
             comingSoon: true,
             onTap: () => _comingSoon(context, 'Le calendrier'),
-          ),
-          const SizedBox(height: 12),
-          _FormatCard(
-            icon: Icons.extension_outlined,
-            iconColor: AppColors.success,
-            title: 'Puzzle',
-            subtitle: 'Ton souvenir préféré, à reconstituer en famille.',
-            comingSoon: true,
-            onTap: () => _comingSoon(context, 'Le puzzle'),
           ),
           const SizedBox(height: 12),
           _FormatCard(

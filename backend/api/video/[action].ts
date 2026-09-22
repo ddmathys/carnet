@@ -75,7 +75,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // clé signée ne permet pas d'en deviner une autre.
     const key = (req.query.key ?? '') as string
     const sig = (req.query.sig ?? '') as string
-    const allowedPrefix = key.startsWith('books/') || key.startsWith('posters/')
+    const allowedPrefix =
+      key.startsWith('books/') || key.startsWith('posters/') || key.startsWith('puzzles/')
     if (!allowedPrefix || !verifyKeySignature(key, sig)) {
       return res.status(403).send('Lien invalide')
     }
@@ -523,6 +524,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'poster-delete') {
     const key = (body.key ?? '') as string
     if (!key || !key.startsWith(`posters/${user.uid}/`)) {
+      return res.status(403).json({ error: 'Clé invalide' })
+    }
+    try {
+      await deleteObject(key)
+      return res.status(200).json({ ok: true })
+    } catch {
+      return res.status(500).json({ error: 'Suppression impossible' })
+    }
+  }
+
+  // ── Photo des puzzles (même infra que livres/posters, mais JPG — Prodigi
+  // cadre lui-même la photo dans la zone d'impression, pas de PDF composé
+  // côté app comme pour le poster) ────────────────────────────────────────
+  if (action === 'puzzle-upload-url') {
+    const key = `puzzles/${user.uid}/${randomUUID()}.jpg`
+    try {
+      const uploadUrl = await presignPut(key, 'image/jpeg')
+      return res.status(200).json({
+        uploadUrl,
+        key,
+        contentType: 'image/jpeg',
+        url: stablePdfUrl(req, key),
+      })
+    } catch {
+      return res.status(500).json({ error: 'Signature impossible' })
+    }
+  }
+
+  if (action === 'puzzle-delete') {
+    const key = (body.key ?? '') as string
+    if (!key || !key.startsWith(`puzzles/${user.uid}/`)) {
       return res.status(403).json({ error: 'Clé invalide' })
     }
     try {

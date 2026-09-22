@@ -20,6 +20,7 @@ import {
   type PosterSize,
   type PosterOrientation,
 } from '../../lib/poster_pricing'
+import { puzzleCatalogEntry, computePuzzlePrice, isPuzzleSize } from '../../lib/puzzle_pricing'
 
 // Route dynamique regroupant les endpoints Prodigi en UNE seule fonction
 // serverless (le plan Hobby de Vercel plafonne à 12 fonctions). URLs :
@@ -187,6 +188,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
   }
 
   const isPoster = o.productType === 'poster'
+  const isPuzzle = o.productType === 'puzzle'
 
   // Prix de référence recalculé côté serveur — order.price vient du client à
   // la création (écrit direct dans Firestore, jamais passé par un backend qui
@@ -245,6 +247,29 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       const extraPrice = computePosterPrice(extra.posterSize, extra.posterOrientation)
       if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
     }
+  } else if (isPuzzle) {
+    // Un seul item puzzle par commande pour l'instant (pas de groupage —
+    // voir OrderModel.additionalPosters/additionalBooks pour le mécanisme,
+    // pas encore étendu au puzzle). Deux zones d'impression (jigsaw + lid),
+    // la MÊME photo pour les deux — Prodigi cadre lui-même
+    // (`sizing: 'fillPrintArea'`), pas de PDF composé côté app.
+    if (!isPuzzleSize(o.puzzleSize)) {
+      return res.status(400).json({ error: 'puzzleSize invalide sur la commande' })
+    }
+    const entry = puzzleCatalogEntry(o.puzzleSize)
+    if (!entry) {
+      return res.status(400).json({ error: `Aucun SKU pour le puzzle ${o.puzzleSize} pièces` })
+    }
+    items = [{
+      sku: entry.sku,
+      copies: 1,
+      sizing: 'fillPrintArea',
+      assets: [
+        { printArea: 'jigsaw', url: pdfUrl },
+        { printArea: 'lid', url: pdfUrl },
+      ],
+    }]
+    trustedPrice = computePuzzlePrice(o.puzzleSize)
   } else {
     const orderCoverType = resolveCoverType(o.coverType)
     const { sku, envName } = skuFor(orderCoverType)
