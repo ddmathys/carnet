@@ -2,18 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 
-/// Choix du format avant de composer un souvenir imprimé — nouveau point
-/// d'entrée unique (remplace l'ancien CTA "Créer un livre" qui menait
-/// directement au sélecteur de souvenirs, demande de David le 18.09.26).
+/// Choix du format avant de composer un souvenir imprimé — point d'entrée
+/// unique (remplace les anciens CTA "Créer un livre" / "Créer un tirage"
+/// séparés du dashboard, deux boutons pour un seul geste — retour de David
+/// le 22.09.26 : "je veux qu'un bouton et après voir la liste des produits").
 ///
-/// Seul « Livre » est fonctionnel aujourd'hui : Calendrier/Puzzle/Mural n'ont
-/// pas encore de SKU Prodigi configuré (aucun produit créé côté dashboard
-/// Prodigi), donc affichés en aperçu « Bientôt disponible », non cliquables —
-/// pour ne jamais laisser quelqu'un payer une commande qu'on ne peut pas
-/// encore envoyer à l'impression. Le poster existant (tirage à accrocher,
-/// papier + rail) reste sur son propre chemin (`/poster/select`, CTA séparée
-/// du dashboard) : il fonctionne déjà et n'est pas concerné par ce nouvel
-/// écran, même s'il recouvre en partie l'idée de « Mural ».
+/// « Livre » et « Poster » sont fonctionnels aujourd'hui. Calendrier/Puzzle/
+/// Mural n'ont pas encore de SKU Prodigi configuré (aucun produit créé côté
+/// dashboard Prodigi), donc affichés en aperçu « Bientôt disponible », non
+/// cliquables — pour ne jamais laisser quelqu'un payer une commande qu'on ne
+/// peut pas encore envoyer à l'impression.
 class ProductFormatScreen extends StatelessWidget {
   const ProductFormatScreen({super.key});
 
@@ -71,6 +69,15 @@ class ProductFormatScreen extends StatelessWidget {
             subtitle: 'Ton carnet en version papier, page après page.',
             priceLabel: 'dès 29 CHF',
             onTap: () => _startLivre(context),
+          ),
+          const SizedBox(height: 12),
+          _FormatCard(
+            icon: Icons.crop_original,
+            iconColor: AppColors.success,
+            title: 'Poster',
+            subtitle: 'Une ou plusieurs photos, prêtes à accrocher.',
+            priceLabel: 'dès 31 CHF',
+            onTap: () => context.push('/poster/select'),
           ),
           const SizedBox(height: 12),
           _FormatCard(

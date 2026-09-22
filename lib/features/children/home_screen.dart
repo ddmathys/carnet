@@ -197,13 +197,12 @@ class _HomeScreenState extends State<HomeScreen> {
         // puisque ce sont deux produits distincts (voir OrderModel.isPoster).
         SliverToBoxAdapter(child: _postersSection(context)),
 
-        // 5) Créer un livre — tout en bas, l'aboutissement.
+        // 5) Créer un souvenir imprimé — tout en bas, l'aboutissement. Un
+        // seul bouton vers la liste des produits (livre, poster, etc.) —
+        // les deux CTA séparées "Créer un livre" / "Créer un tirage" ont
+        // fusionné ici (retour David 22.09.26 : "je veux qu'un bouton").
         SliverToBoxAdapter(
           child: _CreateBookCta(onTap: () => context.push('/product/new')),
-        ),
-        // 6) Créer un poster — juste en dessous, même geste d'aboutissement.
-        SliverToBoxAdapter(
-          child: _CreatePosterCta(onTap: () => context.push('/poster/select')),
         ),
         const SliverToBoxAdapter(child: SizedBox(height: 40)),
       ],
@@ -851,7 +850,7 @@ class _PosterCard extends StatelessWidget {
 }
 
 /// Même principe que `_CoverThumb`, dégradé vert sauge (couleur du produit
-/// tirage, cf. `_CreatePosterCta`) plutôt que brun (livre) quand pas de photo.
+/// tirage) plutôt que brun (livre) quand pas de photo.
 /// Même remarque sur [photoKey] (résolu à l'affichage, jamais stocké en URL
 /// signée) vs [photoUrl] (photo Firebase héritée, permanente).
 class _PosterThumb extends StatelessWidget {
@@ -953,70 +952,7 @@ class _CreateBookCta extends StatelessWidget {
                           color: Colors.white,
                         )),
                     SizedBox(height: 3),
-                    Text('Livre, calendrier, puzzle et plus.',
-                        style: TextStyle(fontSize: 12.5, color: Colors.white70)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_right, color: Colors.white70),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// « Créer un poster » : même bandeau que _CreateBookCta, couleurs distinctes
-// (vert sauge plutôt que brun) pour bien différencier les deux produits.
-class _CreatePosterCta extends StatelessWidget {
-  final VoidCallback onTap;
-  const _CreatePosterCta({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(22, 4, 22, 4),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF3A6648), Color(0xFF5C8A6E)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(22),
-            boxShadow: [
-              BoxShadow(
-                color: const Color(0xFF1F3D2B).withOpacity(0.28),
-                blurRadius: 16,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            children: [
-              const SizedBox(
-                width: 54,
-                height: 54,
-                child: Icon(Icons.image_outlined, color: Colors.white, size: 30),
-              ),
-              const SizedBox(width: 18),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Créer un tirage',
-                        style: TextStyle(
-                          fontFamily: 'Fraunces',
-                          fontSize: 19,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        )),
-                    SizedBox(height: 3),
-                    Text('Une ou plusieurs photos, prêtes à accrocher.',
+                    Text('Livre, poster, calendrier et plus.',
                         style: TextStyle(fontSize: 12.5, color: Colors.white70)),
                   ],
                 ),
