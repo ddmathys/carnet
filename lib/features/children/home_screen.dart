@@ -389,6 +389,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Même traitement que la pastille profil (fond plein AppColors.sageDark,
+  // pas juste un voile blanc translucide) — David 22.09.26 : "les autres je
+  // les vois pas bien" — le voile translucide se fondait dans les photos
+  // claires, contrairement à la pastille profil déjà pleine couleur.
   Widget _heroIconButton(IconData icon, String label, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
@@ -397,11 +401,11 @@ class _HomeScreenState extends State<HomeScreen> {
         label: label,
         button: true,
         child: Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.16), shape: BoxShape.circle),
-          child: Icon(icon, size: 15, color: Colors.white),
+          width: 34,
+          height: 34,
+          decoration: const BoxDecoration(
+              color: AppColors.sageDark, shape: BoxShape.circle),
+          child: Icon(icon, size: 16, color: Colors.white),
         ),
       ),
     );
