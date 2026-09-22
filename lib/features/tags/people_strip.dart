@@ -6,6 +6,7 @@ import '../../core/models/tag_model.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/tag_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/widgets/date_mask_field.dart';
 import '../retro/retro_data.dart';
 import 'person_avatar.dart';
 import 'tag_picker_sheet.dart' show categoryOfKind, TagCategory;
@@ -170,10 +171,22 @@ class _PeopleStripState extends State<PeopleStrip> {
     );
   }
 
+  /// La sheet demande d'emblée "c'est un enfant ?" (David 22.09.26 :
+  /// "ça me met pas si c'est enfant" — avant cette date, seul un détour par
+  /// le parcours mesure de croissance, aujourd'hui retiré, permettait de
+  /// créer un enfant). Un enfant se crée directement avec sa date de
+  /// naissance (TagService.createChildTag, kind 'enfant') — c'est elle qui
+  /// débloque la courbe de croissance et le badge toise sur sa pastille.
   Future<void> _addPerson() async {
-    final name = await _promptNewPersonName(context);
-    if (name == null || name.isEmpty || !mounted) return;
-    final tag = await TagService.ensureTag(name, kind: 'personne');
+    final result = await showNewPersonSheet(context);
+    if (result == null || !mounted) return;
+    final tag = result.isChild
+        ? await TagService.createChildTag(
+            label: result.name,
+            birthdate: result.birthdate!,
+            gender: result.gender!,
+          )
+        : await TagService.ensureTag(result.name, kind: 'personne');
     if (tag == null || !mounted) return;
     // Enchaîne directement sur le choix de la photo — c'est le geste qu'on
     // est venu faire ici, pas juste créer un nom.
@@ -205,18 +218,70 @@ class _PeopleStripState extends State<PeopleStrip> {
   }
 }
 
-Future<String?> _promptNewPersonName(BuildContext context) {
-  final ctrl = TextEditingController();
-  return showModalBottomSheet<String>(
+typedef NewPersonResult = ({
+  String name,
+  bool isChild,
+  DateTime? birthdate,
+  String? gender,
+});
+
+/// Sheet "Nouvelle personne", avec le choix "c'est un enfant ?" dès le
+/// départ (toggle) — si activé, demande date de naissance + genre (mêmes
+/// champs que _AddChildSheet dans memory_create_screen.dart, dupliqués ici
+/// plutôt que partagés : cette sheet-là est privée à cet écran, et
+/// factoriser à travers deux fichiers pour ~60 lignes n'apportait rien).
+Future<NewPersonResult?> showNewPersonSheet(BuildContext context) {
+  return showModalBottomSheet<NewPersonResult>(
     context: context,
     isScrollControlled: true,
     backgroundColor: AppColors.background,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (ctx) => Padding(
+    builder: (_) => const _NewPersonSheet(),
+  );
+}
+
+class _NewPersonSheet extends StatefulWidget {
+  const _NewPersonSheet();
+
+  @override
+  State<_NewPersonSheet> createState() => _NewPersonSheetState();
+}
+
+class _NewPersonSheetState extends State<_NewPersonSheet> {
+  final _nameCtrl = TextEditingController();
+  bool _isChild = false;
+  DateTime? _birthdate;
+  String _gender = 'boy';
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    super.dispose();
+  }
+
+  bool get _valid =>
+      _nameCtrl.text.trim().isNotEmpty && (!_isChild || _birthdate != null);
+
+  void _submit() {
+    if (!_valid) return;
+    Navigator.pop(
+      context,
+      (
+        name: _nameCtrl.text.trim(),
+        isChild: _isChild,
+        birthdate: _isChild ? _birthdate : null,
+        gender: _isChild ? _gender : null,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
       padding: EdgeInsets.fromLTRB(
-          20, 20, 20, MediaQuery.of(ctx).viewInsets.bottom + 20),
+          20, 20, 20, MediaQuery.of(context).viewInsets.bottom + 20),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -232,22 +297,106 @@ Future<String?> _promptNewPersonName(BuildContext context) {
           ),
           const SizedBox(height: 14),
           TextField(
-            controller: ctrl,
+            controller: _nameCtrl,
             autofocus: true,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(hintText: 'Prénom'),
-            onSubmitted: (v) => Navigator.pop(ctx, v.trim()),
+            onChanged: (_) => setState(() {}),
+            onSubmitted: (_) => _submit(),
           ),
+          const SizedBox(height: 14),
+          Row(
+            children: [
+              const Icon(Icons.child_care, size: 18, color: AppColors.sage),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text(
+                  'C\'est un enfant (courbe de croissance)',
+                  style: TextStyle(color: AppColors.textDark, fontSize: 13),
+                ),
+              ),
+              Switch(
+                value: _isChild,
+                activeTrackColor: AppColors.sage,
+                onChanged: (v) => setState(() {
+                  _isChild = v;
+                  if (!v) _birthdate = null;
+                }),
+              ),
+            ],
+          ),
+          if (_isChild) ...[
+            const SizedBox(height: 4),
+            DateMaskField(
+              label: 'Date de naissance',
+              firstDate: DateTime(1900),
+              lastDate: DateTime.now(),
+              onChanged: (d) => setState(() => _birthdate = d),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                Expanded(
+                  child: _GenderChip(
+                    label: '👦 Garçon',
+                    selected: _gender == 'boy',
+                    onTap: () => setState(() => _gender = 'boy'),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: _GenderChip(
+                    label: '👧 Fille',
+                    selected: _gender == 'girl',
+                    onTap: () => setState(() => _gender = 'girl'),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 16),
           ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            onPressed: _valid ? _submit : null,
             style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
             child: const Text('Continuer'),
           ),
         ],
       ),
-    ),
-  );
+    );
+  }
+}
+
+class _GenderChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+  const _GenderChip(
+      {required this.label, required this.selected, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: selected ? AppColors.sage : AppColors.background,
+          borderRadius: BorderRadius.circular(10),
+          border:
+              Border.all(color: selected ? AppColors.sage : AppColors.border),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: selected ? Colors.white : AppColors.textDark,
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _PersonPastille extends StatelessWidget {
