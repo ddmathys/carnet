@@ -1409,7 +1409,18 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   void _stepNext() {
     if (!_stepValid) return;
     if (_step < _steps.length - 1) {
-      setState(() => _step++);
+      setState(() {
+        _step++;
+        // Arrivée sur l'étape lieu sans lieu (ni EXIF/GPS, ni saisi) :
+        // pré-remplit avec le lieu le plus utilisé — reste modifiable, et
+        // les autres lieux fréquents sont proposés en pastilles juste dessous.
+        if (_currentStepId == 'lieu' &&
+            _locationController.text.trim().isEmpty &&
+            _knownLocations.isNotEmpty) {
+          _locationController.text = _knownLocations.first;
+          _syncAutoTags();
+        }
+      });
     } else {
       _save();
     }
@@ -2095,7 +2106,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     );
   }
 
-  Widget _editMediaSection() {
+  /// [creation] : étape médias du parcours de création — zone d'ajout haute
+  /// quand c'est vide, tuile d'import en cours, rappel des limites vidéo.
+  Widget _editMediaSection({bool creation = false}) {
     final specs = <_MediaSpec>[];
     for (var i = 0; i < _existingPhotoUrls.length; i++) {
       final url = _existingPhotoUrls[i];
@@ -2166,11 +2179,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         const Text('Touche ＋ pour ajouter, ✕ pour retirer.',
             style: TextStyle(fontSize: 11.5, color: AppColors.textMedium)),
         const SizedBox(height: 14),
-        if (specs.isEmpty)
+        if (specs.isEmpty && !(creation && _preparingVideo))
           GestureDetector(
             onTap: _showMediaSourceSheet,
             child: Container(
               width: double.infinity,
+              height: creation
+                  ? MediaQuery.of(context).size.height * 0.45
+                  : null,
+              alignment: Alignment.center,
               padding: const EdgeInsets.symmetric(vertical: 22),
               decoration: BoxDecoration(
                 color: AppColors.surface,
@@ -2193,11 +2210,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             ),
           )
         else ...[
-          AspectRatio(
-            aspectRatio: 4 / 3,
-            child: _editTile(specs.first, radius: 20),
-          ),
-          const SizedBox(height: 10),
+          if (specs.isNotEmpty) ...[
+            AspectRatio(
+              aspectRatio: 4 / 3,
+              child: _editTile(specs.first, radius: 20),
+            ),
+            const SizedBox(height: 10),
+          ],
           GridView.count(
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
@@ -2208,7 +2227,31 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             children: [
               _editAddTile(),
               for (final s in specs.skip(1)) _editTile(s, radius: 16),
+              if (creation && _preparingVideo)
+                Container(
+                  decoration: BoxDecoration(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: AppColors.border, width: 0.5),
+                  ),
+                  child: const Center(
+                    child: SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: AppColors.sage),
+                    ),
+                  ),
+                ),
             ],
+          ),
+        ],
+        if (creation) ...[
+          const SizedBox(height: 10),
+          Text(
+            "Jusqu'à $_maxVideosPerMemory vidéos de $_videoDurationLabel. "
+            'Un QR code dans le livre mène à toutes les vidéos du souvenir.',
+            style: const TextStyle(color: AppColors.softGray, fontSize: 12),
           ),
         ],
       ],
@@ -2623,12 +2666,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // Même mise en page que l'édition (grande 1re photo + grille 2
+        // colonnes) : les médias occupent toute la largeur de l'écran au lieu
+        // d'une rangée de petites vignettes dans une carte.
         if (!isGrowth)
-          _FormCard(children: [
-            _buildPhotoSection(),
-            const SizedBox(height: 16),
-            _buildVideoSection(),
-          ])
+          _editMediaSection(creation: true)
         else
           _FormCard(children: const [
             Text(
@@ -3328,6 +3370,29 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             focusedBorder: _locationRequiredEmpty ? _errorBorder : null,
           ),
         ),
+        if (_knownLocations.isNotEmpty) ...[
+          const SizedBox(height: 12),
+          const Text('Lieux fréquents',
+              style: TextStyle(fontSize: 11.5, color: AppColors.textMedium)),
+          const SizedBox(height: 6),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final loc in _knownLocations.take(5))
+                GestureDetector(
+                  onTap: () => setState(() {
+                    _locationController.text = loc;
+                    _syncAutoTags();
+                  }),
+                  child: _Pill(
+                    label: loc,
+                    selected: _locationController.text.trim() == loc,
+                  ),
+                ),
+            ],
+          ),
+        ],
       ],
     );
   }

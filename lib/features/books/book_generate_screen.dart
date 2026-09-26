@@ -20,6 +20,7 @@ import '../../core/services/pdf_service.dart';
 import 'pdf_viewer_screen.dart';
 import 'pdf_preview_viewer.dart';
 import 'memory_selection_sheet.dart';
+import 'featured_photos.dart';
 import 'book_generate_widgets.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
@@ -1130,6 +1131,44 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ),
             ),
           ),
+          const SizedBox(height: 8),
+          // Photos en grand, choisies sur TOUT le livre d'un coup (avant :
+          // uniquement souvenir par souvenir, via la mise en page de chacun).
+          GestureDetector(
+            onTap: _selectedMemories.isEmpty ? null : _openFeaturedPhotos,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.surface,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: AppColors.border, width: 0.5),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.star_border,
+                      size: 18, color: AppColors.sage),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      _featuredCount == 0
+                          ? 'Photos en grand (pleine page)'
+                          : '$_featuredCount photo${_featuredCount > 1 ? 's' : ''} en grand (pleine page)',
+                      style: const TextStyle(
+                          color: AppColors.textDark, fontSize: 13),
+                    ),
+                  ),
+                  const Text('Choisir',
+                      style: TextStyle(
+                          color: AppColors.sage,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500)),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.chevron_right,
+                      color: AppColors.sage, size: 18),
+                ],
+              ),
+            ),
+          ),
           if (_milestoneSuggestions.isNotEmpty) ...[
             const SizedBox(height: 10),
             for (final s in _milestoneSuggestions)
@@ -1994,6 +2033,23 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _memoriesChangedInSheet = false;
       await _generate();
     }
+  }
+
+  int get _featuredCount => _selectedMemories
+      .where((m) => m.type != 'taille_poids')
+      .fold(0, (sum, m) => sum + m.bookFeaturedMedia.length);
+
+  Future<void> _openFeaturedPhotos() async {
+    final updated =
+        await FeaturedPhotosScreen.open(context, _selectedMemories);
+    if (updated == null || updated.isEmpty || !mounted) return;
+    for (final m in updated) {
+      _applyMemoryLayoutUpdate(m);
+    }
+    // Même règle qu'à la fermeture de la sheet de sélection : l'aperçu est
+    // régénéré tout de suite avec la nouvelle mise en page.
+    _memoriesChangedInSheet = false;
+    await _generate();
   }
 
   // Patche l'état local après un réglage de mise en page (densité / photos en

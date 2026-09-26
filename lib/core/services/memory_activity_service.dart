@@ -79,4 +79,17 @@ class MemoryActivityService {
       'seenBy': FieldValue.arrayUnion([uid]),
     });
   }
+
+  /// Valide d'un coup plusieurs activités (bouton « Tout marquer comme vu »).
+  static Future<void> markAllSeen(Iterable<String> activityIds) async {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (uid == null) return;
+    final batch = FirebaseFirestore.instance.batch();
+    for (final id in activityIds) {
+      batch.update(_col.doc(id), {
+        'seenBy': FieldValue.arrayUnion([uid]),
+      });
+    }
+    await batch.commit();
+  }
 }

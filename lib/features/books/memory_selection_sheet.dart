@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:image_picker/image_picker.dart';
@@ -10,6 +9,7 @@ import '../../core/models/tag_model.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/quota_service.dart';
 import '../milestones/widgets/growth_multi_chart.dart';
+import 'featured_photos.dart';
 
 // ── Memory selection bottom sheet ─────────────────────────────────────────────
 
@@ -667,23 +667,21 @@ class _MemoryLayoutSheetState extends State<MemoryLayoutSheet> {
     _loadThumbs();
   }
 
-  // Miroir de PhotoService.resolvePhotoUrls (R2 signées d'abord, puis legacy)
-  // mais en conservant l'identifiant STABLE (clé ou URL) comme clé de map —
-  // c'est cet identifiant qui est stocké dans bookFeaturedMedia et comparé
-  // côté génération PDF (book_pdf_service.dart::rawMediaIdsOf).
   Future<void> _loadThumbs() async {
-    final m = widget.memory;
-    final map = <String, String>{};
-    if (m.mediaKeys.isNotEmpty) {
-      map.addAll(await PhotoService.signedUrlsForMemory(m.id));
-    }
-    for (final u in m.mediaUrls) {
-      map[u] = u;
-    }
-    if (map.isEmpty && m.photoUrl != null && m.photoUrl!.isNotEmpty) {
-      map[m.photoUrl!] = m.photoUrl!;
-    }
+    final map = await loadFeaturablePhotos(widget.memory);
     if (mounted) setState(() => _thumbs = map);
+  }
+
+  void _openViewer(String rawId) {
+    final ids = _thumbs!.keys.toList();
+    openFeaturedViewer(
+      context,
+      ids: ids,
+      urls: _thumbs!.values.toList(),
+      initialIndex: ids.indexOf(rawId),
+      isFeatured: _featured.contains,
+      onToggle: _toggleFeatured,
+    );
   }
 
   void _toggleFeatured(String rawId) {
@@ -818,7 +816,7 @@ class _MemoryLayoutSheetState extends State<MemoryLayoutSheet> {
                   ),
                   const SizedBox(height: 4),
                   const Text(
-                    'Touche une photo pour qu\'elle occupe une page entière dans le livre.',
+                    'Touche une photo pour la voir en grand, et ☆ pour qu\'elle occupe une page entière dans le livre.',
                     style:
                         TextStyle(fontSize: 12, color: AppColors.textMedium),
                   ),
@@ -844,38 +842,11 @@ class _MemoryLayoutSheetState extends State<MemoryLayoutSheet> {
                       childAspectRatio: 1,
                       children: [
                         for (final entry in _thumbs!.entries)
-                          GestureDetector(
-                            onTap: () => _toggleFeatured(entry.key),
-                            child: Stack(
-                              fit: StackFit.expand,
-                              children: [
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: CachedNetworkImage(
-                                    imageUrl: entry.value,
-                                    fit: BoxFit.cover,
-                                  ),
-                                ),
-                                if (_featured.contains(entry.key))
-                                  Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(
-                                          color: AppColors.sage, width: 3),
-                                      color:
-                                          AppColors.sage.withOpacity(0.15),
-                                    ),
-                                    child: const Align(
-                                      alignment: Alignment.topRight,
-                                      child: Padding(
-                                        padding: EdgeInsets.all(4),
-                                        child: Icon(Icons.star,
-                                            color: AppColors.sage, size: 18),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
+                          FeaturedPhotoTile(
+                            url: entry.value,
+                            featured: _featured.contains(entry.key),
+                            onOpen: () => _openViewer(entry.key),
+                            onToggle: () => _toggleFeatured(entry.key),
                           ),
                       ],
                     ),

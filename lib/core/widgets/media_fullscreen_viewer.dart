@@ -35,10 +35,17 @@ class FullscreenMedia {
 class MediaFullscreenViewer extends StatefulWidget {
   final List<FullscreenMedia> items;
   final int initialIndex;
+
+  /// Action optionnelle affichée en bas de l'écran pour le média courant
+  /// (ex. « En grand dans le livre »). `refresh` redessine la galerie après
+  /// un changement d'état fait par l'appelant.
+  final Widget Function(int index, VoidCallback refresh)? bottomAction;
+
   const MediaFullscreenViewer({
     super.key,
     required this.items,
     this.initialIndex = 0,
+    this.bottomAction,
   });
 
   /// Ouvre la galerie en plein écran (route modale).
@@ -46,13 +53,16 @@ class MediaFullscreenViewer extends StatefulWidget {
     BuildContext context, {
     required List<FullscreenMedia> items,
     int initialIndex = 0,
+    Widget Function(int index, VoidCallback refresh)? bottomAction,
   }) {
     if (items.isEmpty) return Future.value();
     return Navigator.of(context).push(
       MaterialPageRoute(
         fullscreenDialog: true,
-        builder: (_) =>
-            MediaFullscreenViewer(items: items, initialIndex: initialIndex),
+        builder: (_) => MediaFullscreenViewer(
+            items: items,
+            initialIndex: initialIndex,
+            bottomAction: bottomAction),
       ),
     );
   }
@@ -150,7 +160,33 @@ class _MediaFullscreenViewerState extends State<MediaFullscreenViewer> {
               ),
             ),
           ),
-          if (widget.items.length > 1)
+          if (widget.bottomAction != null)
+            Positioned(
+              bottom: widget.items.length > 1 ? 52 : 28,
+              left: 16,
+              right: 16,
+              child: SafeArea(
+                top: false,
+                child: Center(
+                  child: widget.bottomAction!(
+                      _current, () => setState(() {})),
+                ),
+              ),
+            ),
+          // Au-delà d'une douzaine de médias, les points débordent : compteur.
+          if (widget.items.length > 12)
+            Positioned(
+              bottom: 28,
+              left: 0,
+              right: 0,
+              child: Text('${_current + 1} / ${widget.items.length}',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                      color: Colors.white70,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600)),
+            )
+          else if (widget.items.length > 1)
             Positioned(
               bottom: 28,
               left: 0,

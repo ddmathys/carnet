@@ -1108,11 +1108,20 @@ class _EmptyState extends StatelessWidget {
 // ── Fil d'activité (souvenirs partagés) ──────────────────────────────────────
 
 /// "Karin a ajouté 3 photos à « Vacances »" (ou "a supprimé 2 photos de",
-/// ajout et suppression pouvant se combiner) — une carte par activité non
-/// encore validée, tout en haut du dashboard. Chaque destinataire (l'auteur
+/// ajout et suppression pouvant se combiner), tout en haut du dashboard.
+/// Seule la plus récente est affichée : les autres restent repliées derrière
+/// « Voir les N autres » — sans ça, les activités non validées s'empilaient
+/// et poussaient tout le dashboard vers le bas. Chaque destinataire (l'auteur
 /// du geste compris) valide de son côté ; ça n'affecte personne d'autre.
-class _ActivityBanner extends StatelessWidget {
+class _ActivityBanner extends StatefulWidget {
   const _ActivityBanner();
+
+  @override
+  State<_ActivityBanner> createState() => _ActivityBannerState();
+}
+
+class _ActivityBannerState extends State<_ActivityBanner> {
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1121,14 +1130,59 @@ class _ActivityBanner extends StatelessWidget {
       builder: (context, snap) {
         final activities = snap.data ?? const <MemoryActivityModel>[];
         if (activities.isEmpty) return const SizedBox.shrink();
+        final others = activities.length - 1;
+        final visible = _expanded ? activities : activities.take(1);
         return Padding(
           padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
           child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              for (final a in activities)
+              Padding(
+                padding: const EdgeInsets.only(left: 2, bottom: 6),
+                child: Text(
+                  activities.length == 1
+                      ? 'NOUVEAUTÉ SUR VOS SOUVENIRS PARTAGÉS'
+                      : '${activities.length} NOUVEAUTÉS SUR VOS SOUVENIRS PARTAGÉS',
+                  style: const TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 10.5,
+                      letterSpacing: 1.1,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textMedium),
+                ),
+              ),
+              for (final a in visible)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
                   child: _ActivityCard(activity: a),
+                ),
+              if (others > 0)
+                Row(
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => setState(() => _expanded = !_expanded),
+                      icon: Icon(
+                          _expanded ? Icons.expand_less : Icons.expand_more,
+                          size: 18),
+                      label: Text(_expanded
+                          ? 'Réduire'
+                          : 'Voir ${others == 1 ? "l'autre nouveauté" : 'les $others autres'}'),
+                      style: TextButton.styleFrom(
+                          foregroundColor: AppColors.sageDark,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          visualDensity: VisualDensity.compact),
+                    ),
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () => MemoryActivityService.markAllSeen(
+                          activities.map((a) => a.id)),
+                      style: TextButton.styleFrom(
+                          foregroundColor: AppColors.textMedium,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          visualDensity: VisualDensity.compact),
+                      child: const Text('Tout marquer comme vu'),
+                    ),
+                  ],
                 ),
             ],
           ),
@@ -1236,20 +1290,27 @@ class _ActivityCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 3),
-                  Text(_relativeTime,
+                  Text('$_relativeTime · touche pour voir le souvenir',
                       style: const TextStyle(
                           fontSize: 11.5, color: AppColors.textMedium)),
                 ],
               ),
             ),
             const SizedBox(width: 8),
-            GestureDetector(
-              onTap: () => MemoryActivityService.markSeen(activity.id),
-              behavior: HitTestBehavior.opaque,
-              child: const Padding(
-                padding: EdgeInsets.all(4),
-                child: Icon(Icons.check_circle_outline,
-                    color: AppColors.sageDark, size: 20),
+            // Bouton texte explicite : l'ancienne icône ✓ seule n'était pas
+            // comprise comme « valider », donc rien n'était jamais validé.
+            TextButton.icon(
+              onPressed: () => MemoryActivityService.markSeen(activity.id),
+              icon: const Icon(Icons.check, size: 16),
+              label: const Text('Vu'),
+              style: TextButton.styleFrom(
+                foregroundColor: Colors.white,
+                backgroundColor: AppColors.sageDark,
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                minimumSize: const Size(0, 34),
+                visualDensity: VisualDensity.compact,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
