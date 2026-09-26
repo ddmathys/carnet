@@ -21,6 +21,7 @@ import 'pdf_viewer_screen.dart';
 import 'pdf_preview_viewer.dart';
 import 'memory_selection_sheet.dart';
 import 'featured_photos.dart';
+import '../memories/widgets/growth_chart_card.dart';
 import 'book_generate_widgets.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
@@ -446,11 +447,56 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // ici prive juste le livre du chapitre croissance, rien de bloquant.
       final tags = await TagService.visibleTags().timeout(t, onTimeout: () => const []);
       if (!mounted) return;
-      final wanted = widget.memoryIds.toSet();
+      // Cartes « Courbe de croissance » cochées dans /memories (ids
+      // `growth:<tagId enfant>`, voir growth_chart_card.dart) : pas des
+      // documents — on les remplace par les mesures de l'enfant.
+      final growthChildIds = {
+        for (final id in widget.memoryIds)
+          if (id.startsWith(growthSelectionPrefix))
+            id.substring(growthSelectionPrefix.length),
+      };
+      final wanted = widget.memoryIds
+          .where((id) => !id.startsWith(growthSelectionPrefix))
+          .toSet();
       final allMemories = visible
-          .where((m) => wanted.isEmpty || wanted.contains(m.id))
-          .toList()
-        ..sort((a, b) => a.date.compareTo(b.date));
+          .where((m) =>
+              (wanted.isEmpty && growthChildIds.isEmpty) ||
+              wanted.contains(m.id))
+          .toList();
+      if (growthChildIds.isNotEmpty) {
+        // Courbe limitée à la période du livre (1er → dernier souvenir
+        // choisi) : un livre « 2 premières années » montre 0-2 ans, pas les
+        // mesures prises après. Sans souvenir (courbe seule) ou avec moins de
+        // 2 mesures dans la période, on garde toutes les mesures de l'enfant
+        // plutôt que de faire disparaître la courbe.
+        final dated = allMemories.where((m) => m.type != 'taille_poids');
+        DateTime? from, to;
+        for (final m in dated) {
+          if (from == null || m.date.isBefore(from)) from = m.date;
+          if (to == null || m.date.isAfter(to)) to = m.date;
+        }
+        final already = allMemories.map((m) => m.id).toSet();
+        for (final childId in growthChildIds) {
+          final measures = visible
+              .where((m) =>
+                  m.type == 'taille_poids' &&
+                  (m.heightCm != null || m.weightKg != null) &&
+                  m.tagIds.contains(childId) &&
+                  !already.contains(m.id))
+              .toList();
+          var inPeriod = measures;
+          if (from != null && to != null) {
+            final start = DateTime(from.year, from.month, from.day);
+            final end = DateTime(to.year, to.month, to.day + 1);
+            inPeriod = measures
+                .where((m) =>
+                    !m.date.isBefore(start) && m.date.isBefore(end))
+                .toList();
+          }
+          allMemories.addAll(inPeriod.length >= 2 ? inPeriod : measures);
+        }
+      }
+      allMemories.sort((a, b) => a.date.compareTo(b.date));
 
       if (allMemories.isEmpty) {
         setState(() => _loadError = 'Aucun souvenir à mettre dans ce livre.');

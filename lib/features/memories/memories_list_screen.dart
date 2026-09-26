@@ -12,6 +12,7 @@ import '../shared/upload_status_banner.dart';
 import '../tags/share_tag_sheet.dart';
 import '../tags/tag_picker_sheet.dart';
 import 'widgets/memory_polaroid.dart';
+import 'widgets/growth_chart_card.dart';
 import 'widgets/delete_memory.dart';
 
 /// Tous les souvenirs visibles, filtrables par tag. Remplace le « journal »
@@ -253,6 +254,11 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
           final tagFiltered =
               all.where((m) => memoryMatchesTags(m, selected)).toList();
           final filtered = _applySearch(tagFiltered);
+          // …mais chaque enfant ayant ≥2 mesures a sa carte « Courbe de
+          // croissance », rangée à la date de sa dernière mesure et
+          // sélectionnable comme un souvenir (→ page courbe dans le livre).
+          final growth = _visibleGrowthEntries(snap.data!, selected);
+          final items = _mergeGrowth(filtered, growth);
 
           return Column(
             children: [
@@ -268,7 +274,7 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                         ? _selectedRealTags.first.id
                         : null),
               Expanded(
-                child: filtered.isEmpty
+                child: items.isEmpty
                     ? _EmptyState(
                         hasSearch: _searchQuery.trim().isNotEmpty,
                         onClear: () {
@@ -288,9 +294,31 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                           crossAxisSpacing: 16,
                           childAspectRatio: 0.66,
                         ),
-                        itemCount: filtered.length,
+                        itemCount: items.length,
                         itemBuilder: (_, i) {
-                          final m = filtered[i];
+                          final item = items[i];
+                          if (item is! MemoryModel) {
+                            final g = item as ({
+                              TagModel child,
+                              List<MemoryModel> measures
+                            });
+                            final id = growthSelectionId(g.child.id);
+                            return GrowthChartCard(
+                              child: g.child,
+                              measures: g.measures,
+                              selected: widget.selectionMode
+                                  ? _selectedIds.contains(id)
+                                  : null,
+                              onTap: widget.selectionMode
+                                  ? () => setState(() {
+                                        if (!_selectedIds.remove(id)) {
+                                          _selectedIds.add(id);
+                                        }
+                                      })
+                                  : () => context.push('/growth/${g.child.id}'),
+                            );
+                          }
+                          final m = item;
                           return MemoryPolaroid(
                             memory: m,
                             cat: _safeCat(m.type),
@@ -424,6 +452,46 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
       .replaceAll('ñ', 'n')
       .replaceAll('æ', 'ae')
       .replaceAll('œ', 'oe');
+
+  /// Cartes courbe visibles avec le filtre courant : sans filtre, toutes ;
+  /// avec filtre, seulement si l'enfant fait partie des tags cochés. Une
+  /// recherche texte les montre si elle vise « courbe »/« croissance » ou le
+  /// prénom.
+  List<({TagModel child, List<MemoryModel> measures})> _visibleGrowthEntries(
+      List<MemoryModel> memories, List<TagModel> selected) {
+    final entries = growthEntriesFor(memories, _tags);
+    final q = _norm(_searchQuery.trim());
+    return entries.where((g) {
+      if (selected.isNotEmpty &&
+          !selected.any((t) =>
+              t.id == g.child.id ||
+              t.label.trim().toLowerCase() ==
+                  g.child.label.trim().toLowerCase())) {
+        return false;
+      }
+      if (q.isEmpty) return true;
+      return 'courbe de croissance'.contains(q) ||
+          _norm(g.child.label).contains(q);
+    }).toList();
+  }
+
+  /// Insère chaque carte courbe avant le premier souvenir plus ancien que sa
+  /// dernière mesure (la liste suit l'ordre de MemoryQueryService.visible).
+  List<Object> _mergeGrowth(List<MemoryModel> memories,
+      List<({TagModel child, List<MemoryModel> measures})> growth) {
+    final items = <Object>[...memories];
+    final descending = memories.length < 2 ||
+        !memories.first.date.isBefore(memories.last.date);
+    for (final g in growth) {
+      final d = g.measures.last.date;
+      var at = items.indexWhere((it) =>
+          it is MemoryModel &&
+          (descending ? it.date.isBefore(d) : it.date.isAfter(d)));
+      if (at == -1) at = items.length;
+      items.insert(at, g);
+    }
+    return items;
+  }
 
   List<MemoryModel> _applySearch(List<MemoryModel> memories) {
     final q = _norm(_searchQuery.trim());
