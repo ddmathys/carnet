@@ -4,7 +4,9 @@ import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/models/book_draft.dart';
 import '../../core/models/generated_book_model.dart';
+import '../../core/services/book_draft_service.dart';
 import '../../core/services/book_history_service.dart';
 import 'pdf_viewer_screen.dart';
 
@@ -105,7 +107,56 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
           ),
         ),
       ),
-      body: StreamBuilder<List<GeneratedBookModel>>(
+      body: Column(
+        children: [
+          // Brouillons (éditeur d'aperçu, sauvegarde auto) — à reprendre.
+          _DraftsSection(onDelete: _confirmDeleteDraft),
+          Expanded(child: _booksList()),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton.extended(
+        onPressed: () => context.push('/book/select'),
+        backgroundColor: AppColors.sage,
+        foregroundColor: AppColors.white,
+        icon: const Icon(Icons.add),
+        label: const Text('Créer un livre'),
+        shape: const StadiumBorder(),
+      ),
+    );
+  }
+
+  Future<void> _confirmDeleteDraft(BookDraft draft) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Supprimer ce brouillon ?'),
+        content: const Text(
+            'Les textes et retouches de ce livre seront perdus. Les souvenirs '
+            'et leurs photos ne sont pas touchés.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await BookDraftService.delete(draft.id);
+    } catch (e) {
+      _snack('Suppression impossible : $e');
+    }
+  }
+
+  Widget _booksList() {
+    return StreamBuilder<List<GeneratedBookModel>>(
         stream: BookHistoryService.streamForUser(),
         builder: (context, snap) {
           if (snap.hasError) return _errorState();
@@ -129,15 +180,6 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
             ),
           );
         },
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/book/select'),
-        backgroundColor: AppColors.sage,
-        foregroundColor: AppColors.white,
-        icon: const Icon(Icons.add),
-        label: const Text('Créer un livre'),
-        shape: const StadiumBorder(),
-      ),
     );
   }
 
@@ -385,6 +427,74 @@ class _Chip extends StatelessWidget {
         style: TextStyle(
             fontSize: 10, fontWeight: FontWeight.w600, color: color),
       ),
+    );
+  }
+}
+
+/// Brouillons de livres en cours : reprendre l'éditeur là où on l'a laissé.
+class _DraftsSection extends StatelessWidget {
+  final ValueChanged<BookDraft> onDelete;
+  const _DraftsSection({required this.onDelete});
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<BookDraft>>(
+      stream: BookDraftService.streamMine(),
+      builder: (context, snap) {
+        final drafts = snap.data ?? const <BookDraft>[];
+        if (drafts.isEmpty) return const SizedBox.shrink();
+        final fmt = DateFormat('d MMM, HH:mm', 'fr');
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '✏️ Brouillons',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textMedium,
+                ),
+              ),
+              const SizedBox(height: 8),
+              for (final d in drafts.take(5))
+                Card(
+                  color: AppColors.surface,
+                  margin: const EdgeInsets.only(bottom: 8),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  child: ListTile(
+                    onTap: () => context.push('/book/new?draft=${d.id}'),
+                    leading: const Icon(Icons.auto_stories_outlined,
+                        color: AppColors.sage),
+                    title: Text(
+                      d.title.isNotEmpty ? d.title : 'Livre sans titre',
+                      style: const TextStyle(
+                          color: AppColors.textDark,
+                          fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      [
+                        if (d.pageCount > 0) '${d.pageCount} pages',
+                        if (d.photoTexts.isNotEmpty)
+                          '${d.photoTexts.length} texte${d.photoTexts.length > 1 ? 's' : ''}',
+                        'modifié le ${fmt.format(d.updatedAt)}',
+                      ].join(' · '),
+                      style: const TextStyle(
+                          color: AppColors.textMedium, fontSize: 12),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.delete_outline,
+                          color: AppColors.softGray),
+                      onPressed: () => onDelete(d),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

@@ -4,12 +4,19 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
+import '../../core/services/book_pdf_service.dart';
 import '../../core/services/order_service.dart';
 
 // ── PDF preview viewer — affiche les pages du VRAI PDF (rastérisées) ──────────
 // L'aperçu est strictement identique au fichier téléchargé / envoyé à
 // l'impression : on génère les mêmes octets PDF puis on rastérise chaque
 // page à la demande.
+//
+// C'est aussi l'ÉDITEUR du livre : toucher une photo (repérée grâce au plan
+// `slots` fourni par BookPdfService) ouvre ses réglages chez le parent
+// (`onPhotoTap`) — texte sur la photo, retrait, mise en grand. Le parent
+// régénère alors le PDF ; pendant ce temps, les pages déjà affichées restent
+// visibles (pas d'écran vide à chaque retouche).
 
 class PdfPreviewViewer extends StatefulWidget {
   final Uint8List pdfBytes;
@@ -28,6 +35,17 @@ class PdfPreviewViewer extends StatefulWidget {
   final VoidCallback onDownload;
   final VoidCallback onChooseFormat;
 
+  /// Plan des photos (page, case) du PDF affiché.
+  final List<BookPhotoSlot> slots;
+  final ValueChanged<BookPhotoSlot>? onPhotoTap;
+
+  /// Vrai pendant qu'une retouche est en train d'être appliquée au PDF.
+  final bool updating;
+
+  /// Photos retirées du livre depuis l'éditeur, et de quoi les remettre.
+  final int removedCount;
+  final VoidCallback? onRestoreRemoved;
+
   const PdfPreviewViewer({
     super.key,
     required this.pdfBytes,
@@ -40,6 +58,11 @@ class PdfPreviewViewer extends StatefulWidget {
     required this.exceedsLimit,
     required this.onDownload,
     required this.onChooseFormat,
+    this.slots = const [],
+    this.onPhotoTap,
+    this.updating = false,
+    this.removedCount = 0,
+    this.onRestoreRemoved,
   });
 
   @override
@@ -47,8 +70,10 @@ class PdfPreviewViewer extends StatefulWidget {
 }
 
 class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
-  late final PageController _ctrl;
+  late PageController _ctrl;
   int _current = 0;
+  // Vue d'ensemble (grille de toutes les pages) plutôt que page par page.
+  bool _grid = false;
 
   bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
@@ -93,6 +118,9 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
   // Cache des pages déjà rastérisées (index → PNG).
   final Map<int, Uint8List> _cache = {};
   final Map<int, Future<Uint8List>> _inflight = {};
+  // Pages du PDF PRÉCÉDENT, affichées le temps que les nouvelles se
+  // rastérisent après une retouche.
+  Map<int, Uint8List> _stale = {};
 
   // Format du document d'impression (A4 210 × 297 mm, cf. BookPdfService) →
   // ratio des cartes de page.
@@ -101,20 +129,50 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
   @override
   void initState() {
     super.initState();
-    _ctrl = PageController();
-    _ctrl.addListener(() {
-      final p = _ctrl.page?.round() ?? 0;
+    _ctrl = _newController(0);
+  }
+
+  PageController _newController(int page) {
+    final c = PageController(initialPage: page);
+    c.addListener(() {
+      final p = c.page?.round() ?? 0;
       if (p != _current && mounted) setState(() => _current = p);
     });
+    return c;
   }
 
   @override
   void didUpdateWidget(covariant PdfPreviewViewer old) {
     super.didUpdateWidget(old);
-    // Nouveau PDF (sélection/titre modifiés) → on jette le cache.
+    // Nouveau PDF (retouche, sélection, titre) → nouveau rendu, en gardant
+    // l'ancien à l'écran en attendant.
     if (!identical(old.pdfBytes, widget.pdfBytes)) {
+      _stale = {..._stale, ..._cache};
       _cache.clear();
       _inflight.clear();
+      if (_current >= widget.pageCount && widget.pageCount > 0) {
+        _current = widget.pageCount - 1;
+      }
+    }
+  }
+
+  void _openPage(int index) {
+    _ctrl.dispose();
+    setState(() {
+      _current = index;
+      _ctrl = _newController(index);
+      _grid = false;
+    });
+  }
+
+  // Touché sur la page `index` à la position relative (fx, fy) ∈ [0, 1].
+  void _onPageTap(int index, double fx, double fy) {
+    if (widget.onPhotoTap == null) return;
+    for (final s in widget.slots) {
+      if (s.pageIndex == index && s.contains(fx, fy)) {
+        widget.onPhotoTap!(s);
+        return;
+      }
     }
   }
 
@@ -142,54 +200,105 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
     }();
   }
 
+  Widget _pageCard(int i, {bool interactive = true}) => _PdfPageCard(
+        key: ValueKey('page-$i-${identityHashCode(widget.pdfBytes)}'),
+        aspect: _pageAspect,
+        future: _rasterPage(i),
+        placeholder: _stale[i],
+        onTapAt: interactive ? (fx, fy) => _onPageTap(i, fx, fy) : null,
+      );
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Page counter
+        // Barre : compteur de pages / état de mise à jour / vue d'ensemble
         Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10),
-          child: Text(
-            '${_current + 1} / ${widget.pageCount}',
-            style: const TextStyle(color: AppColors.textMedium, fontSize: 13),
-          ),
-        ),
-        // PageView
-        Expanded(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: PageView.builder(
-              controller: _ctrl,
-              itemCount: widget.pageCount,
-              itemBuilder: (_, i) => _PdfPageCard(
-                aspect: _pageAspect,
-                future: _rasterPage(i),
-              ),
-            ),
-          ),
-        ),
-        // Dot indicators
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.fromLTRB(20, 6, 8, 0),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(
-              widget.pageCount.clamp(0, 20),
-              (i) => AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.symmetric(horizontal: 3),
-                width: i == _current ? 18 : 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: i == _current
-                      ? AppColors.sage
-                      : AppColors.softGray.withOpacity(0.4),
-                  borderRadius: BorderRadius.circular(3),
+            children: [
+              if (widget.updating) ...[
+                const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2)),
+                const SizedBox(width: 8),
+                const Text('Mise à jour…',
+                    style:
+                        TextStyle(color: AppColors.textMedium, fontSize: 13)),
+              ] else
+                Text(
+                  _grid
+                      ? '${widget.pageCount} pages'
+                      : 'Page ${_current + 1} / ${widget.pageCount}',
+                  style: const TextStyle(
+                      color: AppColors.textMedium, fontSize: 13),
                 ),
+              const Spacer(),
+              TextButton.icon(
+                onPressed: () =>
+                    _grid ? _openPage(_current) : setState(() => _grid = true),
+                icon: Icon(
+                    _grid ? Icons.crop_portrait : Icons.grid_view_rounded,
+                    size: 18),
+                label: Text(_grid ? 'Page par page' : 'Vue d\'ensemble',
+                    style: const TextStyle(fontSize: 13)),
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textMedium),
               ),
-            ),
+            ],
           ),
         ),
+        if (widget.onPhotoTap != null && !_grid)
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
+            child: Text(
+              'Touche une photo pour y écrire un texte, la mettre en grand '
+              'ou la retirer du livre.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.softGray, fontSize: 12),
+            ),
+          ),
+        Expanded(
+          child: _grid
+              ? GridView.builder(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  gridDelegate:
+                      const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 3,
+                    childAspectRatio: _pageAspect,
+                    mainAxisSpacing: 6,
+                    crossAxisSpacing: 6,
+                  ),
+                  itemCount: widget.pageCount,
+                  itemBuilder: (_, i) => GestureDetector(
+                    onTap: () => _openPage(i),
+                    child: _pageCard(i, interactive: false),
+                  ),
+                )
+              : Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: PageView.builder(
+                    controller: _ctrl,
+                    itemCount: widget.pageCount,
+                    itemBuilder: (_, i) => _pageCard(i),
+                  ),
+                ),
+        ),
+        if (widget.removedCount > 0 && widget.onRestoreRemoved != null)
+          TextButton.icon(
+            onPressed: widget.updating ? null : widget.onRestoreRemoved,
+            icon: const Icon(Icons.restore, size: 16),
+            label: Text(
+              widget.removedCount == 1
+                  ? '1 photo retirée — la remettre'
+                  : '${widget.removedCount} photos retirées — les remettre',
+              style: const TextStyle(fontSize: 12.5),
+            ),
+            style: TextButton.styleFrom(foregroundColor: AppColors.textMedium),
+          )
+        else
+          const SizedBox(height: 8),
         // Photos / pages / prix — mêmes valeurs qu'à l'étape format, visibles
         // ici sans avoir à y aller. Pages et prix affichés séparément par
         // format (souple/rigide n'ont pas le même minimum de pages, donc pas
@@ -261,7 +370,7 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
           child: Column(
             children: [
               OutlinedButton.icon(
-                onPressed: widget.onDownload,
+                onPressed: widget.updating ? null : widget.onDownload,
                 icon: const Icon(Icons.download_outlined, size: 18),
                 label: const Text('Télécharger le PDF'),
                 style: OutlinedButton.styleFrom(
@@ -270,11 +379,11 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
               ),
               const SizedBox(height: 10),
               ElevatedButton(
-                onPressed: widget.onChooseFormat,
+                onPressed: widget.updating ? null : widget.onChooseFormat,
                 style: ElevatedButton.styleFrom(
                   minimumSize: const Size.fromHeight(50),
                 ),
-                child: const Text('Choisir le format →'),
+                child: const Text('Valider le livre →'),
               ),
             ],
           ),
@@ -285,11 +394,21 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
 }
 
 // Une page du PDF rastérisée, dans une carte blanche au ratio du document.
+// `placeholder` : rendu précédent de la page, affiché en attendant le nouveau.
+// `onTapAt` : position relative (0..1) du toucher sur la page.
 class _PdfPageCard extends StatelessWidget {
   final double aspect;
   final Future<Uint8List> future;
+  final Uint8List? placeholder;
+  final void Function(double fx, double fy)? onTapAt;
 
-  const _PdfPageCard({required this.aspect, required this.future});
+  const _PdfPageCard({
+    super.key,
+    required this.aspect,
+    required this.future,
+    this.placeholder,
+    this.onTapAt,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -298,7 +417,7 @@ class _PdfPageCard extends StatelessWidget {
         margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
         decoration: BoxDecoration(
           color: AppColors.white,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(8),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withOpacity(0.08),
@@ -310,22 +429,36 @@ class _PdfPageCard extends StatelessWidget {
         clipBehavior: Clip.hardEdge,
         child: AspectRatio(
           aspectRatio: aspect,
-          child: FutureBuilder<Uint8List>(
-            future: future,
-            builder: (_, snap) {
-              if (snap.hasData) {
-                return Image.memory(snap.data!, fit: BoxFit.cover);
-              }
-              if (snap.hasError) {
-                return const Center(
-                  child: Icon(Icons.broken_image_outlined,
-                      color: AppColors.softGray, size: 28),
-                );
-              }
-              return const Center(
-                child: CircularProgressIndicator(strokeWidth: 2),
-              );
-            },
+          child: LayoutBuilder(
+            builder: (_, box) => GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTapUp: onTapAt == null
+                  ? null
+                  : (d) => onTapAt!(d.localPosition.dx / box.maxWidth,
+                      d.localPosition.dy / box.maxHeight),
+              child: FutureBuilder<Uint8List>(
+                future: future,
+                builder: (_, snap) {
+                  if (snap.hasData) {
+                    return Image.memory(snap.data!,
+                        fit: BoxFit.cover, gaplessPlayback: true);
+                  }
+                  if (snap.hasError) {
+                    return const Center(
+                      child: Icon(Icons.broken_image_outlined,
+                          color: AppColors.softGray, size: 28),
+                    );
+                  }
+                  if (placeholder != null) {
+                    return Image.memory(placeholder!,
+                        fit: BoxFit.cover, gaplessPlayback: true);
+                  }
+                  return const Center(
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  );
+                },
+              ),
+            ),
           ),
         ),
       ),

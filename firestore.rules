@@ -129,6 +129,16 @@ service cloud.firestore {
         && resource.data.userId == request.auth.uid;
     }
 
+    // ── Brouillons de livres (éditeur d'aperçu, sauvegarde auto) ────────────
+    // Propriétaire uniquement ; un brouillon ne peut pas changer de main.
+    match /bookDrafts/{draftId} {
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow update: if isAuth()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+    }
+
     // ── Users (profil + abonnement) ─────────────────────────────────────────
     match /users/{userId} {
       // Resserré (28.08.26) : avant, tout utilisateur connecté pouvait lire

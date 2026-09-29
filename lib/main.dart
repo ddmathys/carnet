@@ -141,6 +141,7 @@ final _router = GoRouter(
           startAtOrder: state.uri.queryParameters['order'] == '1',
           editOrderId: state.uri.queryParameters['editOrder'],
           queueMode: state.uri.queryParameters['queue'] == '1',
+          draftId: state.uri.queryParameters['draft'],
         );
       },
     ),

@@ -7,11 +7,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
+import '../../core/models/book_draft.dart';
 import '../../core/models/notebook_model.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/backend_client.dart';
+import '../../core/services/book_draft_service.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
@@ -21,6 +23,7 @@ import 'pdf_viewer_screen.dart';
 import 'pdf_preview_viewer.dart';
 import 'memory_selection_sheet.dart';
 import 'featured_photos.dart';
+import 'photo_edit_sheet.dart';
 import '../memories/widgets/growth_chart_card.dart';
 import 'book_generate_widgets.dart';
 import '../../core/services/memory_query_service.dart';
@@ -56,6 +59,11 @@ class BookGenerateScreen extends StatefulWidget {
   /// `editOrderId`.
   final bool queueMode;
 
+  /// Reprise d'un brouillon (BookDraft) : souvenirs, titre, couverture,
+  /// photos retirées et textes posés sur les photos sont restaurés, puis
+  /// l'aperçu (éditeur) s'ouvre directement. `memoryIds`/`tagId` ignorés.
+  final String? draftId;
+
   const BookGenerateScreen({
     super.key,
     this.memoryIds = const [],
@@ -63,6 +71,7 @@ class BookGenerateScreen extends StatefulWidget {
     this.startAtOrder = false,
     this.editOrderId,
     this.queueMode = false,
+    this.draftId,
   });
 
   @override
@@ -132,7 +141,25 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   double _progress = 0.0;
   int _msgIndex = 0;
   Timer? _progressTimer;
-  Map<String, String> _locationComments = {};
+  // ── Éditeur d'aperçu + brouillon (sauvegarde auto) ────────────────────────
+  // Propres à CE livre : photos retirées et textes posés sur les photos, par
+  // identifiant stable (rawMediaIdsOf). Le brouillon est créé à la 1ʳᵉ
+  // génération de l'aperçu, puis réécrit à chaque retouche.
+  String? _draftId;
+  BookDraft? _pendingDraft; // brouillon à réappliquer une fois chargé
+  String? _tagId; // widget.tagId, ou celui du brouillon repris
+  List<String> _requestedIds = const [];
+  final Set<String> _excludedPhotoIds = {};
+  final Map<String, BookPhotoText> _photoTexts = {};
+  // Octets des photos déjà téléchargées (URL → octets) : une retouche ne
+  // retélécharge pas tout le livre (cf. BookPdfService.generateForNotebook).
+  final Map<String, Uint8List> _photoCache = {};
+  List<BookPhotoSlot> _slots = const [];
+  bool _updatingPreview = false;
+  int _previewSeq = 0;
+  Timer? _draftSaveTimer;
+
+  bool get _draftsEnabled => !widget.queueMode && widget.editOrderId == null;
   Set<String> _selectedMemoryIds = {};
   String? _coverPhotoUrl;
   // Photo du DOS (4ᵉ de couverture, optionnelle) — même sélecteur que la
@@ -403,6 +430,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   void initState() {
     super.initState();
     _titleCtrl = TextEditingController();
+    _tagId = widget.tagId;
+    _requestedIds = widget.memoryIds;
     _firstNameCtrl = TextEditingController();
     _lastNameCtrl = TextEditingController();
     _streetCtrl = TextEditingController();
@@ -431,6 +460,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     _countryCtrl.dispose();
     _coverAnim.dispose();
     _progressTimer?.cancel();
+    // Retouche encore en attente d'écriture : on la sauve tout de suite.
+    if (_draftSaveTimer?.isActive ?? false) _saveDraftNow();
+    _draftSaveTimer?.cancel();
     super.dispose();
   }
 
@@ -440,6 +472,20 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     if (mounted) setState(() => _loadError = null);
     const t = Duration(seconds: 20);
     try {
+      // Reprise d'un brouillon : il fournit la sélection d'origine.
+      if (widget.draftId != null && _draftId == null) {
+        final draft =
+            await BookDraftService.get(widget.draftId!).timeout(t);
+        if (!mounted) return;
+        if (draft == null) {
+          setState(() => _loadError = 'Ce brouillon n\'existe plus.');
+          return;
+        }
+        _draftId = draft.id;
+        _tagId = draft.tagId;
+        _requestedIds = draft.requestedIds;
+        _pendingDraft = draft;
+      }
       // Les souvenirs retenus à l'écran de sélection, dans l'ordre chronologique.
       final visible = await MemoryQueryService.visible().first.timeout(t);
       // Tags enfant, pour grouper les mesures taille/poids par enfant
@@ -451,11 +497,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // `growth:<tagId enfant>`, voir growth_chart_card.dart) : pas des
       // documents — on les remplace par les mesures de l'enfant.
       final growthChildIds = {
-        for (final id in widget.memoryIds)
+        for (final id in _requestedIds)
           if (id.startsWith(growthSelectionPrefix))
             id.substring(growthSelectionPrefix.length),
       };
-      final wanted = widget.memoryIds
+      final wanted = _requestedIds
           .where((id) => !id.startsWith(growthSelectionPrefix))
           .toSet();
       final allMemories = visible
@@ -506,8 +552,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Le PDF est écrit pour un « carnet » : sans carnet, on lui en fabrique un
       // à partir du tag d'origine (titre, couleur, date de naissance) ou, à
       // défaut, un carnet générique.
-      final tag = widget.tagId != null
-          ? await TagService.byId(widget.tagId!).timeout(t)
+      final tag = _tagId != null
+          ? await TagService.byId(_tagId!).timeout(t)
           : null;
       if (!mounted) return;
       final nb = tag?.asNotebook() ??
@@ -554,7 +600,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _titleCtrl.text = _defaultCoverTitle(nb);
       // Résout les URLs de photos (R2 signé + Firebase) pour peupler le
       // sélecteur de couverture, y compris pour les souvenirs sur R2.
-      _resolvePhotos(allMemories);
+      final resolving = _resolvePhotos(allMemories);
       // Photos "1 an"/"2 ans" : suggestion auto (silencieuse, non bloquante).
       _applyMilestoneSuggestions();
       // Admin : pré-remplit l'adresse de livraison (étape 2) avec celle de la
@@ -563,6 +609,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Renvoi après erreur : pré-remplit adresse/titre/couverture avec ceux
       // de la commande à corriger (inchangés, seul le PDF est régénéré).
       if (widget.editOrderId != null) _loadEditOrderDefaults();
+      final draft = _pendingDraft;
+      if (draft != null) {
+        _pendingDraft = null;
+        await _applyDraft(draft, allMemories, resolving);
+      }
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
       // infini, sans message — la cause des « le spinner tourne ».
@@ -624,8 +675,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // Génère le PDF d'aperçu — mêmes octets que le téléchargement (sans bourrage
   // de pages blanches), pour un aperçu strictement identique au rendu final.
-  Future<({Uint8List bytes, int pageCount, int photoCount, List<String> qualityWarnings})>
-      _buildPreviewPdf() async {
+  Future<BookPdfResult> _buildPreviewPdf() async {
     final coverColor = _notebook!.coverColor.isNotEmpty
         ? Color(int.parse('FF${_notebook!.coverColor.replaceAll('#', '')}',
             radix: 16))
@@ -637,7 +687,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       notebook: _notebook!,
       coverColor: coverColor,
       memories: _selectedMemories,
-      locationComments: _locationComments,
+      excludedPhotoIds: _excludedPhotoIds,
+      photoTexts: _photoTexts,
+      photoCache: _photoCache,
       coverPhotoUrl: _coverPhotoUrl,
       excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
       backCoverPhotoUrl: _backCoverPhotoUrl,
@@ -676,7 +728,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // Combien de photos on s'attend à voir dans le livre, calculé AVANT
       // toute tentative de téléchargement — sert de référence pour détecter
       // un échec de téléchargement massif (voir garde-fou ci-dessous).
-      final expectedPhotos = _allPhotoUrls.length;
+      final expectedPhotos = _allPhotoUrls.length - _excludedPhotoIds.length;
       final gen = await _buildPreviewPdf();
       if (!mounted) return;
       _progressTimer?.cancel();
@@ -696,10 +748,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _previewPdfBytes = gen.bytes;
         _previewPageCount = gen.pageCount;
         _previewPhotoCount = gen.photoCount;
+        _slots = gen.slots;
         _progress = 1.0;
         _generating = false;
         _showPreview = true;
       });
+      // Brouillon : créé à la 1ʳᵉ génération, mis à jour ensuite.
+      if (_draftsEnabled) {
+        _draftId ??= BookDraftService.newId();
+        _saveDraftNow();
+      }
       // Prévient AVANT l'achat plutôt que de laisser découvrir une photo
       // floue à réception — jamais bloquant, l'utilisateur reste libre de
       // continuer (cf. book_pdf_service.dart::_photoPageQualityWarnings).
@@ -739,7 +797,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       pdfBytes: pdfBytes,
       bookTitle: bookTitle,
       coverType: _coverType,
-      notebookId: widget.tagId ?? '',
+      notebookId: _tagId ?? '',
       memoriesCount: _selectedMemories.length,
     );
 
@@ -829,7 +887,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         notebook: _notebook!,
         coverColor: coverColor,
         memories: _selectedMemories,
-        locationComments: _locationComments,
+        excludedPhotoIds: _excludedPhotoIds,
+        photoTexts: _photoTexts,
+        photoCache: _photoCache,
         coverPhotoUrl: _coverPhotoUrl,
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         backCoverPhotoUrl: _backCoverPhotoUrl,
@@ -867,7 +927,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             pdfUrl: pdfUrl,
             storagePath: uploaded.key,
             memoryCount: _selectedMemories.length,
-            notebookId: widget.tagId ?? '',
+            notebookId: _tagId ?? '',
             coverPhotoKey:
                 _coverPhotoUrl != null ? _keyByUrl[_coverPhotoUrl] : null,
             coverPhotoUrl: _coverPhotoUrl != null &&
@@ -913,7 +973,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         country: _countryCtrl.text.trim(),
         status: 'received',
         createdAt: DateTime.now(),
-        notebookId: widget.tagId ?? '',
+        notebookId: _tagId ?? '',
         memoryCount: _selectedMemories.length,
         pageCount: pageCount,
         pdfUrl: pdfUrl,
@@ -926,7 +986,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // 4. Historique des livres (imprimé) — le principal, puis chaque livre
       // groupé (même commande, même livraison, voir OrderModel.additionalBooks).
       await BookHistoryService.recordBook(
-        notebookId: widget.tagId ?? '',
+        notebookId: _tagId ?? '',
         title: bookTitle,
         format: 'printed',
         coverType: _coverType,
@@ -953,6 +1013,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           coverPhotoKey: extra.coverPhotoKey,
           coverPhotoUrl: extra.coverPhotoUrl,
         );
+      }
+
+      if (_draftId != null) {
+        BookDraftService.markOrdered(_draftId!).catchError((_) {});
       }
 
       if (!mounted) return;
@@ -1405,7 +1469,163 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _showPreview = false;
         _step = 1;
       }),
+      slots: _slots,
+      onPhotoTap: _onPhotoTap,
+      updating: _updatingPreview,
+      removedCount: _excludedPhotoIds.length,
+      onRestoreRemoved: () {
+        setState(() => _excludedPhotoIds.clear());
+        _refreshPreview();
+      },
     );
+  }
+
+  // ── Éditeur d'aperçu ──────────────────────────────────────────────────────
+
+  /// Photo touchée dans l'aperçu : texte, retrait ou mise en grand, puis
+  /// régénération du PDF (en arrière-plan, l'ancien reste affiché).
+  Future<void> _onPhotoTap(BookPhotoSlot slot) async {
+    final id = slot.rawId;
+    if (id == null) {
+      _showSnack('Cette photo ne peut pas être modifiée depuis l\'aperçu.');
+      return;
+    }
+    final i = _memories.indexWhere((m) => m.id == slot.memoryId);
+    final memory = i == -1 ? null : _memories[i];
+    final featured = memory?.bookFeaturedMedia.contains(id) ?? false;
+    final res = await PhotoEditSheet.open(context,
+        initial: _photoTexts[id], featured: featured);
+    if (res == null || !mounted) return;
+    switch (res) {
+      case PhotoTextSaved(:final text):
+        setState(() {
+          if (text == null) {
+            _photoTexts.remove(id);
+          } else {
+            _photoTexts[id] = text;
+          }
+        });
+      case PhotoRemoved():
+        setState(() => _excludedPhotoIds.add(id));
+      case PhotoFeaturedToggled():
+        // « En grand » reste un réglage du SOUVENIR (bookFeaturedMedia),
+        // comme dans l'écran « Photos en grand » — pas propre à ce livre.
+        if (memory == null) return;
+        final list = [...memory.bookFeaturedMedia];
+        featured ? list.remove(id) : list.add(id);
+        try {
+          await FirebaseFirestore.instance
+              .collection('memories')
+              .doc(memory.id)
+              .update({'bookFeaturedMedia': list});
+        } catch (_) {
+          _showSnack('Impossible de modifier cette photo pour l\'instant.');
+          return;
+        }
+        if (!mounted) return;
+        _applyMemoryLayoutUpdate(memory.copyWith(bookFeaturedMedia: list));
+        _memoriesChangedInSheet = false;
+    }
+    await _refreshPreview();
+  }
+
+  /// Régénère l'aperçu après une retouche, sans l'écran de progression : le
+  /// PDF précédent reste affiché jusqu'au nouveau. Seule la DERNIÈRE retouche
+  /// demandée s'affiche si plusieurs se chevauchent.
+  Future<void> _refreshPreview() async {
+    final seq = ++_previewSeq;
+    setState(() => _updatingPreview = true);
+    try {
+      final gen = await _buildPreviewPdf();
+      if (!mounted || seq != _previewSeq) return;
+      setState(() {
+        _previewPdfBytes = gen.bytes;
+        _previewPageCount = gen.pageCount;
+        _previewPhotoCount = gen.photoCount;
+        _slots = gen.slots;
+        _updatingPreview = false;
+      });
+    } catch (e) {
+      if (!mounted || seq != _previewSeq) return;
+      setState(() => _updatingPreview = false);
+      _showSnack('Mise à jour de l\'aperçu impossible : $e');
+    }
+    _scheduleDraftSave();
+  }
+
+  // ── Brouillon ─────────────────────────────────────────────────────────────
+
+  void _scheduleDraftSave() {
+    if (_draftId == null) return;
+    _draftSaveTimer?.cancel();
+    _draftSaveTimer = Timer(const Duration(milliseconds: 800), _saveDraftNow);
+  }
+
+  /// Écrit le brouillon (silencieux : un échec ne gêne jamais l'édition, la
+  /// prochaine retouche réessaiera). Les photos de couverture sont stockées
+  /// par CLÉ R2 quand on la connaît — une URL signée expire après 1 h.
+  Future<void> _saveDraftNow() async {
+    _draftSaveTimer?.cancel();
+    final id = _draftId;
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    if (id == null || uid == null || !_draftsEnabled) return;
+    String? idOf(String? url) => url == null ? null : (_keyByUrl[url] ?? url);
+    try {
+      await BookDraftService.save(BookDraft(
+        id: id,
+        userId: uid,
+        tagId: _tagId,
+        requestedIds: _requestedIds,
+        selectedMemoryIds: _selectedMemoryIds.toList(),
+        title: _titleCtrl.text.trim(),
+        coverPhotoId: idOf(_coverPhotoUrl),
+        backCoverPhotoId: idOf(_backCoverPhotoUrl),
+        excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
+        excludedGrowthChildIds: _excludedGrowthChildIds.toList(),
+        excludedPhotoIds: _excludedPhotoIds.toList(),
+        photoTexts: Map.of(_photoTexts),
+        pageCount: _previewPageCount,
+        updatedAt: DateTime.now(),
+      ));
+    } catch (_) {}
+  }
+
+  /// Réapplique un brouillon repris, puis ouvre directement l'aperçu.
+  Future<void> _applyDraft(BookDraft draft, List<MemoryModel> loaded,
+      Future<void> resolving) async {
+    final loadedIds = loaded.map((m) => m.id).toSet();
+    final selected =
+        draft.selectedMemoryIds.where(loadedIds.contains).toSet();
+    setState(() {
+      if (selected.isNotEmpty) _selectedMemoryIds = selected;
+      _excludeCoverPhotoFromBook = draft.excludeCoverPhotoFromBook;
+      _excludedGrowthChildIds
+        ..clear()
+        ..addAll(draft.excludedGrowthChildIds);
+      _excludedPhotoIds
+        ..clear()
+        ..addAll(draft.excludedPhotoIds);
+      _photoTexts
+        ..clear()
+        ..addAll(draft.photoTexts);
+    });
+    if (draft.title.isNotEmpty) _titleCtrl.text = draft.title;
+    // Couverture : clé R2 → URL signée, connue une fois les photos résolues.
+    await resolving;
+    if (!mounted) return;
+    String? urlOf(String? photoId) {
+      if (photoId == null) return null;
+      for (final e in _keyByUrl.entries) {
+        if (e.value == photoId) return e.key;
+      }
+      return _allPhotoUrls.contains(photoId) ? photoId : null;
+    }
+    setState(() {
+      final cover = urlOf(draft.coverPhotoId);
+      if (cover != null) _coverPhotoUrl = cover;
+      _backCoverPhotoUrl = urlOf(draft.backCoverPhotoId);
+    });
+    await _generate();
   }
 
   Widget _buildPhotoPreview() {

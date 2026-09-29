@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
+import '../models/book_draft.dart';
 import '../models/child_model.dart';
 import '../models/notebook_model.dart';
 import '../models/book_chapter.dart';
@@ -142,11 +143,18 @@ class BookPdfService {
 
   // ── Notebook version (multi-template) ─────────────────────────────────────
 
-  static Future<({Uint8List bytes, int pageCount, int photoCount, List<String> qualityWarnings})> generateForNotebook({
+  static Future<BookPdfResult> generateForNotebook({
     required NotebookModel notebook,
     required Color coverColor,
     required List<MemoryModel> memories,
-    Map<String, String> locationComments = const {},
+    // Éditeur d'aperçu (propre à CE livre, cf. BookDraft) : photos retirées
+    // et textes posés sur les photos, par identifiant stable (rawMediaIdsOf).
+    Set<String> excludedPhotoIds = const {},
+    Map<String, BookPhotoText> photoTexts = const {},
+    // Octets déjà téléchargés (URL → octets), partagés entre régénérations
+    // successives du même livre : chaque retouche dans l'éditeur ne
+    // retélécharge pas toutes les photos. Complété au passage.
+    Map<String, Uint8List>? photoCache,
     String? coverPhotoUrl,
     // Photo du DOS (4ᵉ de couverture) — optionnelle, même sélecteur que la
     // couverture. Sans elle, le dos reste un aplat de couleur (jamais blanc).
@@ -219,6 +227,7 @@ class BookPdfService {
       final rawIds = rawMediaIdsOf(sorted[i]);
       final aligned = rawIds.length == resolved[i].length;
       for (var j = 0; j < resolved[i].length; j++) {
+        if (aligned && excludedPhotoIds.contains(rawIds[j])) continue;
         photoEntries.add(_PhotoEntry(
           memory: sorted[i],
           url: resolved[i][j],
@@ -231,13 +240,15 @@ class BookPdfService {
     // tout lancer d'un coup (ex. 105 photos = 105 requêtes simultanées)
     // sature le réseau/R2 et fait timeouter une partie des requêtes au
     // hasard — cause du nombre de photos incohérent d'un essai à l'autre.
-    final Map<String, Uint8List> bytesByUrl = {};
+    final Map<String, Uint8List> bytesByUrl = photoCache ?? {};
     final urlsToFetch = {
       ...photoEntries.map((e) => e.url),
       if (coverPhotoUrl != null) coverPhotoUrl,
       if (backCoverPhotoUrl != null) backCoverPhotoUrl,
     }.toList();
-    Future<void> fetchAll(Iterable<String> urls) async {
+    Future<void> fetchAll(Iterable<String> all) async {
+      final urls = all.where((u) => !bytesByUrl.containsKey(u)).toList();
+      if (urls.isEmpty) return;
       final results = await _runBounded(urls.toList(), (url) async {
         try {
           final response = await http
@@ -295,6 +306,10 @@ class BookPdfService {
           m.mediaUrls.isNotEmpty ||
           (m.photoUrl != null && m.photoUrl!.isNotEmpty);
       if (!hasPhoto) return true;
+      // Toutes ses photos retirées dans l'éditeur : le souvenir quitte le
+      // livre (pas de page texte de repli qu'on n'a pas demandée).
+      final ids = rawMediaIdsOf(m);
+      if (ids.isNotEmpty && ids.every(excludedPhotoIds.contains)) return false;
       return !shownPhotoMemoIds.contains(m.id);
     }).toList();
 
@@ -334,10 +349,12 @@ class BookPdfService {
           : null;
       return _PhotoPageEntry(
         bytes: bytesByUrl[e.url]!,
+        memoryId: e.memory.id,
+        rawId: e.rawId,
+        photoText: e.rawId != null ? photoTexts[e.rawId] : null,
         date: _dateStr(e.memory),
         title: showCaption ? e.memory.title : null,
         caption: showCaption ? e.memory.rawContent : null,
-        locationComment: showCaption ? locationComments[e.memory.id] : null,
         isPortrait: isPortraitAt(i),
         listenUrl: listenUrl,
         watchUrl: watchUrl,
@@ -648,11 +665,35 @@ class BookPdfService {
     } else {
       bytes = await buildAndSave(null);
     }
-    return (
+    // Plan des photos (page, case) — l'éditeur d'aperçu s'en sert pour savoir
+    // quelle photo a été touchée sur la page rastérisée. Mêmes rectangles que
+    // le rendu (`_cellRects`), donc toujours alignés avec ce qui est affiché.
+    // Page 0 = couverture ; les pages photos suivent dans l'ordre.
+    final slots = <BookPhotoSlot>[];
+    for (var p = 0; p < photoPages.length; p++) {
+      final page = photoPages[p];
+      final rects = _cellRects(page.tpl, page.entries.length);
+      for (var i = 0; i < page.entries.length && i < rects.length; i++) {
+        final e = page.entries[i];
+        final r = rects[i];
+        slots.add(BookPhotoSlot(
+          pageIndex: p + 1,
+          memoryId: e.memoryId,
+          rawId: e.rawId,
+          left: r.x / _a4W,
+          top: r.y / _a4H,
+          width: r.w / _a4W,
+          height: r.h / _a4H,
+        ));
+      }
+    }
+
+    return BookPdfResult(
       bytes: bytes,
       pageCount: finalPageCount,
       photoCount: successfulPhotos.length,
       qualityWarnings: qualityWarnings,
+      slots: slots,
     );
   }
 
@@ -723,6 +764,142 @@ class BookPdfService {
       case _Tpl.h1:
         return const [(w: 1.0, h: 1.0)];
     }
+  }
+
+  /// Cases (en points, page A4 entière) d'un template — source unique pour le
+  /// rendu des photos (`_photoPage`) ET le plan de l'éditeur d'aperçu
+  /// (BookPhotoSlot). Zone imprimable = page moins la marge album ;
+  /// espacement `_gap` uniforme entre photos. Limité aux `n` premières cases
+  /// (une V2 peut ne porter qu'une photo).
+  static List<({double x, double y, double w, double h})> _cellRects(
+      _Tpl tpl, int n) {
+    const margin = _pageMargin;
+    const gap = _gap;
+    const cx = margin, cy = margin;
+    const cw = _a4W - 2 * margin;
+    const ch = _a4H - 2 * margin;
+    final List<({double x, double y, double w, double h})> rects;
+    switch (tpl) {
+      case _Tpl.v4: // grille 2×2, 4 cases identiques
+      case _Tpl.h4:
+        const w = (cw - gap) / 2, h = (ch - gap) / 2;
+        rects = const [
+          (x: cx, y: cy, w: w, h: h),
+          (x: cx + w + gap, y: cy, w: w, h: h),
+          (x: cx, y: cy + h + gap, w: w, h: h),
+          (x: cx + w + gap, y: cy + h + gap, w: w, h: h),
+        ];
+        break;
+      case _Tpl.v3: // 1 grande en haut + 2 en bas
+        const topH = (ch - gap) * 0.56;
+        const botH = ch - gap - topH;
+        const w = (cw - gap) / 2;
+        const botY = cy + topH + gap;
+        rects = const [
+          (x: cx, y: cy, w: cw, h: topH),
+          (x: cx, y: botY, w: w, h: botH),
+          (x: cx + w + gap, y: botY, w: w, h: botH),
+        ];
+        break;
+      case _Tpl.v2: // 2 empilées (demi-page chacune)
+      case _Tpl.h2:
+        const h = (ch - gap) / 2;
+        rects = const [
+          (x: cx, y: cy, w: cw, h: h),
+          (x: cx, y: cy + h + gap, w: cw, h: h),
+        ];
+        break;
+      case _Tpl.v1: // 1 photo pleine surface imprimable
+      case _Tpl.h1:
+        rects = const [(x: cx, y: cy, w: cw, h: ch)];
+        break;
+    }
+    return rects.take(n).toList();
+  }
+
+  // Encombrement des éléments fixes d'une page photo, que les textes posés
+  // sur les photos doivent éviter (cf. `_photoPage`).
+  static const double _qrBadgeH = 68; // HeartQr 56 + padding 6/6 (qrBadge)
+  static const double _pageBadgeH = 16; // numéro de page, 7pt + padding 3/3
+  // Bord droit de la carte légende du souvenir (posée `right: _a4W * 0.42`).
+  static const double _captionRight = _a4W * 0.58;
+
+  static PdfColor _hexToPdf(String hex) {
+    final v = int.tryParse(hex.replaceAll('#', ''), radix: 16) ?? 0xFFFFFF;
+    return PdfColor.fromInt(0xFF000000 | v);
+  }
+
+  /// Texte posé sur une photo (éditeur d'aperçu), dans la case `rect`.
+  /// Centré, à 10 mm (zone de sécurité) des bords de la case. Bandeau plein
+  /// optionnel derrière le texte, de couleur contrastée — jamais de
+  /// transparence (même règle que la carte légende). Renvoie null si le
+  /// texte ne tient nulle part (ne devrait pas arriver avec 120 caractères).
+  static pw.Widget? _photoTextBox({
+    required ({double x, double y, double w, double h}) rect,
+    required BookPhotoText text,
+    required pw.Font font,
+    required bool captionOnPage,
+    required double qrHeight,
+  }) {
+    const eps = 0.5;
+    const minWidth = 60 * PdfPageFormat.mm;
+    final touchesTop = rect.y < eps;
+    final touchesBottom = rect.y + rect.h > _a4H - eps;
+    final touchesLeft = rect.x < eps;
+    var left = rect.x + _safe;
+    final right = rect.x + rect.w - _safe;
+    var position = text.position;
+
+    // En haut d'une case qui touche le haut d'une page à légende : on se
+    // pose à droite de la carte légende s'il y a la place, sinon en bas.
+    if (position == 'top' && touchesTop && captionOnPage) {
+      final l = max(left, _captionRight + 8);
+      if (right - l >= minWidth) {
+        left = l;
+      } else {
+        position = 'bottom';
+      }
+    }
+    if (right - left < minWidth / 2) return null;
+
+    double? top, bottom;
+    if (position == 'top') {
+      top = rect.y + _safe;
+    } else {
+      var reserve = _safe;
+      if (touchesBottom) {
+        final r = max(_pageBadgeH, touchesLeft ? qrHeight : 0.0);
+        reserve = _safe + r + 6;
+      }
+      bottom = _a4H - (rect.y + rect.h) + reserve;
+    }
+
+    final color = _hexToPdf(text.color);
+    final bg = color.luminance > 0.5 ? _textDark : PdfColors.white;
+    final label = pw.Container(
+      padding: text.background
+          ? const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6)
+          : pw.EdgeInsets.zero,
+      color: text.background ? bg : null,
+      child: pw.Text(
+        text.text.trim(),
+        textAlign: pw.TextAlign.center,
+        maxLines: 4,
+        style: pw.TextStyle(font: font, fontSize: 14, color: color, lineSpacing: 2),
+      ),
+    );
+    return pw.Positioned(
+      left: left,
+      top: top,
+      bottom: bottom,
+      child: pw.SizedBox(
+        width: right - left,
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.center,
+          children: [pw.Flexible(child: label)],
+        ),
+      ),
+    );
   }
 
   /// Avertissements « photo trop peu résolue pour la taille où elle est
@@ -796,9 +973,7 @@ class BookPdfService {
     // Caption box (white solid — no alpha issues)
     pw.Widget captionBox(_PhotoPageEntry e, {double maxChars = 220}) {
       final hasTitle = e.title?.isNotEmpty ?? false;
-      final hasBody = (e.caption?.isNotEmpty ?? false) ||
-          (e.locationComment?.isNotEmpty ?? false) ||
-          hasTitle;
+      final hasBody = (e.caption?.isNotEmpty ?? false) || hasTitle;
       return pw.Container(
         color: PdfColors.white,
         padding:
@@ -832,27 +1007,6 @@ class BookPdfService {
                       fontSize: 9.5,
                       color: _textDark,
                       lineSpacing: 2.5)),
-            ],
-            if (e.locationComment != null && e.locationComment!.isNotEmpty) ...[
-              pw.SizedBox(height: 4),
-              pw.Row(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Container(
-                        margin: const pw.EdgeInsets.only(top: 2.5),
-                        width: 3,
-                        height: 3,
-                        decoration: pw.BoxDecoration(
-                            color: cover, shape: pw.BoxShape.circle)),
-                    pw.SizedBox(width: 4),
-                    pw.Expanded(
-                        child: pw.Text(e.locationComment!,
-                            style: pw.TextStyle(
-                                font: pR,
-                                fontSize: 8,
-                                color: cover,
-                                fontStyle: pw.FontStyle.italic))),
-                  ]),
             ],
           ],
         ),
@@ -906,65 +1060,25 @@ class BookPdfService {
           ],
         );
 
-    // ── Rendu des 6 templates ────────────────────────────────────────────────
-    // Zone imprimable = page moins la marge album ; espacement `_gap` uniforme
-    // entre photos. Chaque photo remplit sa case en `cover` (ratio conservé,
+    // ── Rendu des templates ──────────────────────────────────────────────────
+    // Géométrie des cases : `_cellRects` (partagée avec le plan de l'éditeur
+    // d'aperçu). Chaque photo remplit sa case en `cover` (ratio conservé,
     // léger recadrage), comme demandé dans la spec.
-    const margin = _pageMargin;
-    const gap = _gap;
-    final cx = margin, cy = margin;
-    final cw = _a4W - 2 * margin;
-    final ch = _a4H - 2 * margin;
-
-    pw.Widget cell(double x, double y, double w, double h, _PhotoPageEntry e) =>
+    final rects = _cellRects(tpl, entries.length);
+    final photos = <pw.Widget>[
+      for (var i = 0; i < rects.length; i++)
         pw.Positioned(
-            left: x,
-            top: y,
+            left: rects[i].x,
+            top: rects[i].y,
             child: pw.SizedBox(
-                width: w,
-                height: h,
-                child: pw.Image(pw.MemoryImage(e.bytes),
+                width: rects[i].w,
+                height: rects[i].h,
+                child: pw.Image(pw.MemoryImage(entries[i].bytes),
                     fit: pw.BoxFit.cover,
-                    alignment: e.isPortrait
+                    alignment: entries[i].isPortrait
                         ? pw.Alignment.topCenter
-                        : pw.Alignment.center)));
-
-    final photos = <pw.Widget>[];
-    switch (tpl) {
-      case _Tpl.v4: // grille 2×2, 4 cases identiques
-      case _Tpl.h4: // idem, orientation gérée par cell() (isPortrait)
-        final w = (cw - gap) / 2, h = (ch - gap) / 2;
-        photos.addAll([
-          cell(cx, cy, w, h, entries[0]),
-          cell(cx + w + gap, cy, w, h, entries[1]),
-          cell(cx, cy + h + gap, w, h, entries[2]),
-          cell(cx + w + gap, cy + h + gap, w, h, entries[3]),
-        ]);
-        break;
-      case _Tpl.v3: // 1 grande en haut + 2 en bas
-        final topH = (ch - gap) * 0.56;
-        final botH = ch - gap - topH;
-        final w = (cw - gap) / 2;
-        final botY = cy + topH + gap;
-        photos.addAll([
-          cell(cx, cy, cw, topH, entries[0]),
-          cell(cx, botY, w, botH, entries[1]),
-          cell(cx + w + gap, botY, w, botH, entries[2]),
-        ]);
-        break;
-      case _Tpl.v2: // 2 empilées (demi-page chacune)
-      case _Tpl.h2:
-        final h = (ch - gap) / 2;
-        photos.add(cell(cx, cy, cw, h, entries[0]));
-        if (entries.length > 1) {
-          photos.add(cell(cx, cy + h + gap, cw, h, entries[1]));
-        }
-        break;
-      case _Tpl.v1: // 1 photo pleine surface imprimable
-      case _Tpl.h1:
-        photos.add(cell(cx, cy, cw, ch, entries[0]));
-        break;
-    }
+                        : pw.Alignment.center))),
+    ];
 
     // QR média : une seule entrée le porte (dernière page du souvenir).
     _PhotoPageEntry? qrEntry;
@@ -973,6 +1087,29 @@ class BookPdfService {
     }
     // Carte légende sur la 1ʳᵉ page du souvenir (au moins la date).
     final hasCaption = entries[0].showCaption;
+
+    // Textes posés sur les photos (éditeur d'aperçu). Toujours dans la zone
+    // de sécurité, et jamais sous la légende du souvenir (haut-gauche), le
+    // QR (bas-gauche) ou le numéro de page (bas-droite) : ces éléments
+    // réservent leur place, le texte se décale en conséquence.
+    final qrHeight = qrEntry == null
+        ? 0.0
+        : (qrEntry.watchUrl != null && qrEntry.listenUrl != null
+            ? 2 * _qrBadgeH + 4
+            : _qrBadgeH);
+    final photoTexts = <pw.Widget>[];
+    for (var i = 0; i < rects.length; i++) {
+      final t = entries[i].photoText;
+      if (t == null || t.text.trim().isEmpty) continue;
+      final placed = _photoTextBox(
+        rect: rects[i],
+        text: t,
+        font: pR,
+        captionOnPage: hasCaption,
+        qrHeight: qrHeight,
+      );
+      if (placed != null) photoTexts.add(placed);
+    }
 
     return pw.Stack(
       children: [
@@ -986,6 +1123,8 @@ class BookPdfService {
                 width: _a4W, height: _a4H, child: pw.Container(color: _cream))),
         // Photos du template
         ...photos,
+        // Textes posés sur les photos (éditeur d'aperçu)
+        ...photoTexts,
         // Légende — 1ʳᵉ page du souvenir, encadrée en haut-gauche (dans la
         // zone de sécurité pour ne pas être rognée).
         if (hasCaption)
@@ -1957,10 +2096,14 @@ class _BookPhotoPage {
 
 class _PhotoPageEntry {
   final Uint8List bytes;
+  final String memoryId;
+  // Identifiant stable de la photo (voir _PhotoEntry.rawId) — null = photo
+  // non éditable dans l'aperçu (alignement clés/URLs impossible).
+  final String? rawId;
+  final BookPhotoText? photoText;
   final String date;
   final String? title;
   final String? caption;
-  final String? locationComment;
   final bool isPortrait;
   final String? listenUrl;
   final String? watchUrl;
@@ -1971,13 +2114,57 @@ class _PhotoPageEntry {
   final bool showCaption;
   const _PhotoPageEntry(
       {required this.bytes,
+      required this.memoryId,
+      this.rawId,
+      this.photoText,
       required this.date,
       this.title,
       this.caption,
-      this.locationComment,
       this.isPortrait = true,
       this.listenUrl,
       this.watchUrl,
       this.videoCount = 0,
       this.showCaption = false});
+}
+
+/// Résultat de BookPdfService.generateForNotebook.
+class BookPdfResult {
+  final Uint8List bytes;
+  final int pageCount;
+  final int photoCount;
+  final List<String> qualityWarnings;
+
+  /// Plan des photos du livre, pour l'éditeur d'aperçu.
+  final List<BookPhotoSlot> slots;
+
+  const BookPdfResult({
+    required this.bytes,
+    required this.pageCount,
+    required this.photoCount,
+    required this.qualityWarnings,
+    this.slots = const [],
+  });
+}
+
+/// Case d'une photo sur une page du PDF — coordonnées en FRACTIONS de la
+/// page (0..1, origine en haut à gauche), directement utilisables sur la
+/// page rastérisée quelle que soit sa taille d'affichage.
+class BookPhotoSlot {
+  final int pageIndex;
+  final String memoryId;
+  final String? rawId;
+  final double left, top, width, height;
+
+  const BookPhotoSlot({
+    required this.pageIndex,
+    required this.memoryId,
+    required this.rawId,
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+  });
+
+  bool contains(double x, double y) =>
+      x >= left && x <= left + width && y >= top && y <= top + height;
 }
