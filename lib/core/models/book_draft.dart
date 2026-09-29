@@ -13,18 +13,32 @@ class BookPhotoText {
   /// Couleur du texte, '#RRGGBB' — une des couleurs de `palette`.
   final String color;
 
-  /// 'top' | 'bottom' — bord de la photo où le texte se pose.
+  /// Ancienne position fixe ('top' | 'bottom'), utilisée seulement quand
+  /// `x`/`y` sont absents (textes créés avant l'encadré déplaçable).
   final String position;
 
-  /// Bandeau plein derrière le texte (lisible sur toute photo, à l'impression).
+  /// Encadré blanc derrière le texte (lisible sur toute photo, à l'impression).
   final bool background;
+
+  /// Position libre de l'encadré dans la photo, 0..1 sur chaque axe
+  /// (0 = collé à gauche/en haut de la zone de sécurité, 1 = à droite/en
+  /// bas) — l'encadré reste TOUJOURS entier dans la photo, quelle que soit
+  /// sa taille (même logique d'alignement dans l'éditeur et dans le PDF).
+  final double? x;
+  final double? y;
 
   const BookPhotoText({
     required this.text,
-    this.color = '#FFFFFF',
+    this.color = '#2D2416',
     this.position = 'bottom',
     this.background = true,
+    this.x,
+    this.y,
   });
+
+  /// Position par défaut d'un nouveau texte : centré, en bas.
+  static const defaultX = 0.5;
+  static const defaultY = 0.92;
 
   /// Couleurs proposées — volontairement peu nombreuses pour garder un livre
   /// harmonieux et un choix simple au doigt.
@@ -43,6 +57,8 @@ class BookPhotoText {
         'color': color,
         'position': position,
         'background': background,
+        if (x != null) 'x': x,
+        if (y != null) 'y': y,
       };
 
   static BookPhotoText fromMap(Map<String, dynamic> d) => BookPhotoText(
@@ -50,6 +66,8 @@ class BookPhotoText {
         color: d['color'] as String? ?? '#FFFFFF',
         position: d['position'] == 'top' ? 'top' : 'bottom',
         background: d['background'] as bool? ?? true,
+        x: (d['x'] as num?)?.toDouble(),
+        y: (d['y'] as num?)?.toDouble(),
       );
 }
 

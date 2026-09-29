@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -158,8 +159,25 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   bool _updatingPreview = false;
   int _previewSeq = 0;
   Timer? _draftSaveTimer;
+  // Empreinte du dernier état sauvegardé (ou de l'état initial) : on n'écrit
+  // que si quelque chose a VRAIMENT changé, et le brouillon n'est créé qu'au
+  // premier vrai changement — ouvrir l'écran ne crée rien.
+  String? _lastSavedSig;
+  // Brouillon repris : bandeau récapitulatif sur l'écran de départ.
+  BookDraft? _resumedDraft;
+  // Couleur proposée pour le prochain texte : la dernière choisie.
+  String _lastTextColor = '#2D2416';
 
   bool get _draftsEnabled => !widget.queueMode && widget.editOrderId == null;
+
+  /// Toute modification d'état (sélection, titre, couverture, textes, photos
+  /// retirées, aperçu…) programme une sauvegarde du brouillon ; elle n'écrit
+  /// que si l'empreinte a changé (voir _saveDraftIfChanged).
+  @override
+  void setState(VoidCallback fn) {
+    super.setState(fn);
+    _scheduleDraftSave();
+  }
   Set<String> _selectedMemoryIds = {};
   String? _coverPhotoUrl;
   // Photo du DOS (4ᵉ de couverture, optionnelle) — même sélecteur que la
@@ -461,7 +479,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     _coverAnim.dispose();
     _progressTimer?.cancel();
     // Retouche encore en attente d'écriture : on la sauve tout de suite.
-    if (_draftSaveTimer?.isActive ?? false) _saveDraftNow();
+    if (_draftSaveTimer?.isActive ?? false) _saveDraftIfChanged();
     _draftSaveTimer?.cancel();
     super.dispose();
   }
@@ -613,6 +631,13 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       if (draft != null) {
         _pendingDraft = null;
         await _applyDraft(draft, allMemories, resolving);
+      } else {
+        // État de départ (couverture par défaut comprise, résolue en
+        // arrière-plan) = rien à sauvegarder tant qu'on n'a rien touché.
+        _lastSavedSig = _draftSignature();
+        resolving.then((_) {
+          if (mounted && _draftId == null) _lastSavedSig = _draftSignature();
+        });
       }
     } catch (e) {
       // Sans ça, une lecture qui pend/échoue laissait un spinner plein écran
@@ -753,11 +778,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _generating = false;
         _showPreview = true;
       });
-      // Brouillon : créé à la 1ʳᵉ génération, mis à jour ensuite.
-      if (_draftsEnabled) {
-        _draftId ??= BookDraftService.newId();
-        _saveDraftNow();
-      }
+
       // Prévient AVANT l'achat plutôt que de laisser découvrir une photo
       // floue à réception — jamais bloquant, l'utilisateur reste libre de
       // continuer (cf. book_pdf_service.dart::_photoPageQualityWarnings).
@@ -1136,7 +1157,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               }
             },
           ),
-          actions: const [],
+          actions: [
+            if (_draftId != null && _draftsEnabled)
+              IconButton(
+                tooltip: 'Supprimer le brouillon',
+                icon: const Icon(Icons.delete_outline,
+                    color: AppColors.textMedium),
+                onPressed: _deleteDraft,
+              ),
+          ],
         ),
         body: _showPreview
             ? _buildBookPreview()
@@ -1189,6 +1218,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       padding: const EdgeInsets.all(28),
       child: Column(
         children: [
+          if (_resumedDraft != null) _resumedDraftBanner(),
           // Animated book cover
           ScaleTransition(
             scale: _coverScale,
@@ -1494,7 +1524,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     final memory = i == -1 ? null : _memories[i];
     final featured = memory?.bookFeaturedMedia.contains(id) ?? false;
     final res = await PhotoEditSheet.open(context,
-        initial: _photoTexts[id], featured: featured);
+        slot: slot,
+        defaultColor: _lastTextColor,
+        initial: _photoTexts[id],
+        featured: featured);
     if (res == null || !mounted) return;
     switch (res) {
       case PhotoTextSaved(:final text):
@@ -1503,6 +1536,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             _photoTexts.remove(id);
           } else {
             _photoTexts[id] = text;
+            _lastTextColor = text.color;
           }
         });
       case PhotoRemoved():
@@ -1550,26 +1584,51 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       setState(() => _updatingPreview = false);
       _showSnack('Mise à jour de l\'aperçu impossible : $e');
     }
-    _scheduleDraftSave();
   }
 
   // ── Brouillon ─────────────────────────────────────────────────────────────
 
   void _scheduleDraftSave() {
-    if (_draftId == null) return;
+    // Pas avant la fin du chargement (baseline posée), ni hors brouillon.
+    if (!_draftsEnabled || _lastSavedSig == null) return;
     _draftSaveTimer?.cancel();
-    _draftSaveTimer = Timer(const Duration(milliseconds: 800), _saveDraftNow);
+    _draftSaveTimer =
+        Timer(const Duration(milliseconds: 800), _saveDraftIfChanged);
   }
 
-  /// Écrit le brouillon (silencieux : un échec ne gêne jamais l'édition, la
-  /// prochaine retouche réessaiera). Les photos de couverture sont stockées
-  /// par CLÉ R2 quand on la connaît — une URL signée expire après 1 h.
-  Future<void> _saveDraftNow() async {
+  String? _photoIdOf(String? url) =>
+      url == null ? null : (_keyByUrl[url] ?? url);
+
+  /// Empreinte de tout ce que le brouillon garde — deux états identiques
+  /// donnent la même chaîne (ensembles triés).
+  String _draftSignature() => jsonEncode({
+        'sel': (_selectedMemoryIds.toList()..sort()),
+        'title': _titleCtrl.text.trim(),
+        'cover': _photoIdOf(_coverPhotoUrl),
+        'back': _photoIdOf(_backCoverPhotoUrl),
+        'exCover': _excludeCoverPhotoFromBook,
+        'growth': (_excludedGrowthChildIds.toList()..sort()),
+        'ex': (_excludedPhotoIds.toList()..sort()),
+        'texts': [
+          for (final k in (_photoTexts.keys.toList()..sort()))
+            _photoTexts[k]!.toMap(k),
+        ],
+        'pages': _previewPageCount,
+      });
+
+  /// Écrit le brouillon s'il a changé depuis la dernière écriture — et le
+  /// crée au premier vrai changement. Silencieux : un échec ne gêne jamais
+  /// l'édition, la prochaine modification réessaiera. Les photos de
+  /// couverture sont stockées par CLÉ R2 quand on la connaît — une URL
+  /// signée expire après 1 h.
+  Future<void> _saveDraftIfChanged() async {
     _draftSaveTimer?.cancel();
-    final id = _draftId;
     final uid = FirebaseAuth.instance.currentUser?.uid;
-    if (id == null || uid == null || !_draftsEnabled) return;
-    String? idOf(String? url) => url == null ? null : (_keyByUrl[url] ?? url);
+    if (uid == null || !_draftsEnabled || _lastSavedSig == null) return;
+    final sig = _draftSignature();
+    if (sig == _lastSavedSig) return;
+    final id = _draftId ??= BookDraftService.newId();
+    final idOf = _photoIdOf;
     try {
       await BookDraftService.save(BookDraft(
         id: id,
@@ -1587,10 +1646,48 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         pageCount: _previewPageCount,
         updatedAt: DateTime.now(),
       ));
+      _lastSavedSig = sig;
     } catch (_) {}
   }
 
-  /// Réapplique un brouillon repris, puis ouvre directement l'aperçu.
+  /// Supprime le brouillon (depuis l'écran du livre) et quitte : rester ici
+  /// le recréerait à la prochaine modification.
+  Future<void> _deleteDraft() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Supprimer ce brouillon ?'),
+        content: const Text(
+            'Les textes et retouches de ce livre seront perdus. Les souvenirs '
+            'et leurs photos ne sont pas touchés.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.error),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || _draftId == null) return;
+    _draftSaveTimer?.cancel();
+    _lastSavedSig = null; // plus aucune sauvegarde depuis cet écran
+    try {
+      await BookDraftService.delete(_draftId!);
+    } catch (e) {
+      _showSnack('Suppression impossible : $e');
+      return;
+    }
+    if (!mounted) return;
+    context.go('/home');
+  }
+
+  /// Réapplique un brouillon repris, sur l'écran de départ (« Générer le
+  /// livre ») : tout est restauré, l'aperçu s'ouvre quand on le demande.
   Future<void> _applyDraft(BookDraft draft, List<MemoryModel> loaded,
       Future<void> resolving) async {
     final loadedIds = loaded.map((m) => m.id).toSet();
@@ -1608,6 +1705,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _photoTexts
         ..clear()
         ..addAll(draft.photoTexts);
+      if (draft.photoTexts.isNotEmpty) {
+        _lastTextColor = draft.photoTexts.values.last.color;
+      }
+      _resumedDraft = draft;
     });
     if (draft.title.isNotEmpty) _titleCtrl.text = draft.title;
     // Couverture : clé R2 → URL signée, connue une fois les photos résolues.
@@ -1624,8 +1725,49 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       final cover = urlOf(draft.coverPhotoId);
       if (cover != null) _coverPhotoUrl = cover;
       _backCoverPhotoUrl = urlOf(draft.backCoverPhotoId);
+      _previewPageCount = draft.pageCount;
     });
-    await _generate();
+    // État restauré = état sauvegardé : rien à réécrire tant qu'on n'y
+    // touche pas.
+    _lastSavedSig = _draftSignature();
+  }
+
+  /// Bandeau « brouillon repris » en haut de l'écran de départ.
+  Widget _resumedDraftBanner() {
+    final d = _resumedDraft!;
+    final parts = [
+      if (d.photoTexts.isNotEmpty)
+        '${d.photoTexts.length} texte${d.photoTexts.length > 1 ? 's' : ''}',
+      if (d.excludedPhotoIds.isNotEmpty)
+        '${d.excludedPhotoIds.length} photo${d.excludedPhotoIds.length > 1 ? 's' : ''} retirée${d.excludedPhotoIds.length > 1 ? 's' : ''}',
+    ];
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.sageDark, width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.history_edu, color: AppColors.sageDark),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              parts.isEmpty
+                  ? 'Brouillon repris — tout est sauvegardé automatiquement.'
+                  : 'Brouillon repris : ${parts.join(', ')}. Tout est sauvegardé automatiquement.',
+              style: const TextStyle(color: AppColors.textDark, fontSize: 13),
+            ),
+          ),
+          TextButton(
+            onPressed: _generating ? null : _generate,
+            child: const Text('Aperçu'),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildPhotoPreview() {

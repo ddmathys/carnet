@@ -680,6 +680,10 @@ class BookPdfService {
           pageIndex: p + 1,
           memoryId: e.memoryId,
           rawId: e.rawId,
+          bytes: e.bytes,
+          isPortrait: e.isPortrait,
+          widthPt: r.w,
+          heightPt: r.h,
           left: r.x / _a4W,
           top: r.y / _a4H,
           width: r.w / _a4W,
@@ -841,6 +845,30 @@ class BookPdfService {
     required bool captionOnPage,
     required double qrHeight,
   }) {
+    // Position libre (encadré déplaçable de l'éditeur) : l'encadré est
+    // aligné dans la case moins la zone de sécurité, donc toujours entier et
+    // jamais rogné, sans avoir à mesurer le texte. Même calcul que
+    // PhotoEditSheet (Alignment(2x-1, 2y-1) dans la zone inset).
+    if (text.x != null && text.y != null) {
+      final w = rect.w - 2 * _safe, h = rect.h - 2 * _safe;
+      if (w <= 0 || h <= 0) return null;
+      return pw.Positioned(
+        left: rect.x + _safe,
+        top: rect.y + _safe,
+        child: pw.SizedBox(
+          width: w,
+          height: h,
+          child: pw.Align(
+            alignment: pw.Alignment(
+                text.x!.clamp(0.0, 1.0) * 2 - 1, text.y!.clamp(0.0, 1.0) * 2 - 1),
+            child: pw.ConstrainedBox(
+              constraints: pw.BoxConstraints(maxWidth: w * photoTextMaxWidth),
+              child: _photoTextLabel(text, font),
+            ),
+          ),
+        ),
+      );
+    }
     const eps = 0.5;
     const minWidth = 60 * PdfPageFormat.mm;
     final touchesTop = rect.y < eps;
@@ -874,20 +902,7 @@ class BookPdfService {
       bottom = _a4H - (rect.y + rect.h) + reserve;
     }
 
-    final color = _hexToPdf(text.color);
-    final bg = color.luminance > 0.5 ? _textDark : PdfColors.white;
-    final label = pw.Container(
-      padding: text.background
-          ? const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6)
-          : pw.EdgeInsets.zero,
-      color: text.background ? bg : null,
-      child: pw.Text(
-        text.text.trim(),
-        textAlign: pw.TextAlign.center,
-        maxLines: 4,
-        style: pw.TextStyle(font: font, fontSize: 14, color: color, lineSpacing: 2),
-      ),
-    );
+    final label = _photoTextLabel(text, font);
     return pw.Positioned(
       left: left,
       top: top,
@@ -901,6 +916,39 @@ class BookPdfService {
       ),
     );
   }
+
+  /// Largeur max de l'encadré, en fraction de la zone utile de la case.
+  static const double photoTextMaxWidth = 0.8;
+
+  /// Encadré du texte posé sur une photo : blanc par défaut (encre si le
+  /// texte lui-même est très clair, pour qu'il reste lisible), ou texte seul.
+  /// Tailles en points — l'éditeur (PhotoEditSheet) applique les mêmes,
+  /// mises à l'échelle de l'écran.
+  static pw.Widget _photoTextLabel(BookPhotoText text, pw.Font font) {
+    final color = _hexToPdf(text.color);
+    final bg = color.luminance > 0.8 ? _textDark : PdfColors.white;
+    return pw.Container(
+      padding: text.background
+          ? const pw.EdgeInsets.symmetric(
+              horizontal: photoTextPadH, vertical: photoTextPadV)
+          : pw.EdgeInsets.zero,
+      color: text.background ? bg : null,
+      child: pw.Text(
+        text.text.trim(),
+        textAlign: pw.TextAlign.center,
+        maxLines: 4,
+        style: pw.TextStyle(
+            font: font, fontSize: photoTextFontSize, color: color, lineSpacing: 2),
+      ),
+    );
+  }
+
+  static const double photoTextFontSize = 14;
+  static const double photoTextPadH = 10;
+  static const double photoTextPadV = 6;
+  /// Zone de sécurité (points) — l'éditeur en a besoin pour placer l'encadré
+  /// exactement comme le PDF.
+  static const double safeMarginPt = _safe;
 
   /// Avertissements « photo trop peu résolue pour la taille où elle est
   /// imprimée » (< `_minDpi`), tous souvenirs confondus — même principe que
@@ -2155,10 +2203,22 @@ class BookPhotoSlot {
   final String? rawId;
   final double left, top, width, height;
 
+  /// La photo telle que placée dans la case (mêmes octets, même recadrage
+  /// `cover` que le PDF) — fond de l'éditeur de texte.
+  final Uint8List? bytes;
+  final bool isPortrait;
+
+  /// Taille de la case en points PDF (pour mettre le texte à l'échelle).
+  final double widthPt, heightPt;
+
   const BookPhotoSlot({
     required this.pageIndex,
     required this.memoryId,
     required this.rawId,
+    this.bytes,
+    this.isPortrait = true,
+    this.widthPt = 0,
+    this.heightPt = 0,
     required this.left,
     required this.top,
     required this.width,

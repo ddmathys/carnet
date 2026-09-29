@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../core/models/book_draft.dart';
+import '../../core/services/book_pdf_service.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Ce que l'utilisateur a décidé pour une photo touchée dans l'éditeur
@@ -22,16 +23,30 @@ class PhotoFeaturedToggled extends PhotoEditResult {
   const PhotoFeaturedToggled();
 }
 
-/// Feuille « cette photo » : texte posé sur la photo (couleur, position,
-/// bandeau), mise en grand, retrait du livre.
+/// Feuille « cette photo » : la photo telle qu'elle est cadrée dans le livre,
+/// avec le texte dans un encadré qu'on déplace au doigt (rendu identique au
+/// PDF, à l'échelle de l'écran) ; couleur, encadré blanc on/off ; mise en
+/// grand ; retrait du livre.
 class PhotoEditSheet extends StatefulWidget {
   final BookPhotoText? initial;
   final bool featured;
+  final BookPhotoSlot slot;
 
-  const PhotoEditSheet({super.key, this.initial, this.featured = false});
+  /// Couleur proposée pour un nouveau texte : la dernière choisie.
+  final String defaultColor;
+
+  const PhotoEditSheet({
+    super.key,
+    required this.slot,
+    required this.defaultColor,
+    this.initial,
+    this.featured = false,
+  });
 
   static Future<PhotoEditResult?> open(
     BuildContext context, {
+    required BookPhotoSlot slot,
+    required String defaultColor,
     BookPhotoText? initial,
     bool featured = false,
   }) =>
@@ -42,7 +57,12 @@ class PhotoEditSheet extends StatefulWidget {
         shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
         ),
-        builder: (_) => PhotoEditSheet(initial: initial, featured: featured),
+        builder: (_) => PhotoEditSheet(
+          slot: slot,
+          defaultColor: defaultColor,
+          initial: initial,
+          featured: featured,
+        ),
       );
 
   @override
@@ -52,17 +72,22 @@ class PhotoEditSheet extends StatefulWidget {
 class _PhotoEditSheetState extends State<PhotoEditSheet> {
   late final TextEditingController _textCtrl;
   late String _color;
-  late String _position;
   late bool _background;
+  late double _x;
+  late double _y;
+  final _boxKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     final t = widget.initial;
     _textCtrl = TextEditingController(text: t?.text ?? '');
-    _color = t?.color ?? BookPhotoText.palette.first;
-    _position = t?.position ?? 'bottom';
+    _color = t?.color ?? widget.defaultColor;
     _background = t?.background ?? true;
+    // Ancien texte sans position libre : on le place là où il était.
+    _x = t?.x ?? BookPhotoText.defaultX;
+    _y = t?.y ??
+        (t?.position == 'top' ? 1 - BookPhotoText.defaultY : BookPhotoText.defaultY);
   }
 
   @override
@@ -83,17 +108,113 @@ class _PhotoEditSheetState extends State<PhotoEditSheet> {
           : BookPhotoText(
               text: text,
               color: _color,
-              position: _position,
               background: _background,
+              x: _x,
+              y: _y,
             )),
+    );
+  }
+
+  /// La photo cadrée comme dans le livre, et l'encadré déplaçable par-dessus.
+  Widget _photoPreview(double maxW) {
+    final slot = widget.slot;
+    final cellW = slot.widthPt > 0 ? slot.widthPt : 1.0;
+    final cellH = slot.heightPt > 0 ? slot.heightPt : 1.0;
+    const maxH = 300.0;
+    var w = maxW, h = maxW * cellH / cellW;
+    if (h > maxH) {
+      h = maxH;
+      w = maxH * cellW / cellH;
+    }
+    // Échelle points PDF → pixels écran : même mise en page que le PDF.
+    final scale = w / cellW;
+    final inset = BookPdfService.safeMarginPt * scale;
+    final areaW = w - 2 * inset, areaH = h - 2 * inset;
+
+    final color = _hex(_color);
+    final bg = color.computeLuminance() > 0.8 ? AppColors.ink : Colors.white;
+    final text = _textCtrl.text.trim();
+
+    final box = Container(
+      key: _boxKey,
+      padding: _background
+          ? EdgeInsets.symmetric(
+              horizontal: BookPdfService.photoTextPadH * scale,
+              vertical: BookPdfService.photoTextPadV * scale)
+          : EdgeInsets.zero,
+      decoration: BoxDecoration(
+        color: _background ? bg : null,
+        border: Border.all(color: AppColors.sageDark, width: 1.5),
+      ),
+      child: Text(
+        text.isEmpty ? 'Ton texte' : text,
+        textAlign: TextAlign.center,
+        maxLines: 4,
+        style: TextStyle(
+          fontFamily: 'PlayfairDisplay',
+          fontSize: BookPdfService.photoTextFontSize * scale,
+          height: 1.25,
+          color: text.isEmpty ? color.withOpacity(0.45) : color,
+        ),
+      ),
+    );
+
+    return Center(
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(6),
+        child: SizedBox(
+          width: w,
+          height: h,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: slot.bytes != null
+                    ? Image.memory(slot.bytes!,
+                        fit: BoxFit.cover,
+                        alignment: slot.isPortrait
+                            ? Alignment.topCenter
+                            : Alignment.center)
+                    : Container(color: AppColors.softGray),
+              ),
+              Positioned(
+                left: inset,
+                top: inset,
+                width: areaW,
+                height: areaH,
+                child: Align(
+                  alignment: Alignment(_x * 2 - 1, _y * 2 - 1),
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxWidth: areaW * BookPdfService.photoTextMaxWidth),
+                    child: GestureDetector(
+                      onPanUpdate: (d) {
+                        final size = _boxKey.currentContext?.size;
+                        if (size == null) return;
+                        final rangeX = areaW - size.width;
+                        final rangeY = areaH - size.height;
+                        setState(() {
+                          if (rangeX > 0) {
+                            _x = (_x + d.delta.dx / rangeX).clamp(0.0, 1.0);
+                          }
+                          if (rangeY > 0) {
+                            _y = (_y + d.delta.dy / rangeY).clamp(0.0, 1.0);
+                          }
+                        });
+                      },
+                      child: box,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final color = _hex(_color);
-    // Même règle de contraste que le PDF (BookPdfService._photoTextBox).
-    final bg = color.computeLuminance() > 0.5 ? AppColors.ink : Colors.white;
     final hasInitial = widget.initial != null;
 
     return Padding(
@@ -116,15 +237,14 @@ class _PhotoEditSheetState extends State<PhotoEditSheet> {
                   ),
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
+              LayoutBuilder(
+                  builder: (_, box) => _photoPreview(box.maxWidth)),
+              const SizedBox(height: 6),
               const Text(
-                'Texte sur la photo',
-                style: TextStyle(
-                  fontFamily: 'PlayfairDisplay',
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.textDark,
-                ),
+                'Fais glisser l\'encadré pour placer ton texte.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.softGray, fontSize: 12),
               ),
               const SizedBox(height: 12),
               TextField(
@@ -146,39 +266,6 @@ class _PhotoEditSheetState extends State<PhotoEditSheet> {
                 ),
                 onChanged: (_) => setState(() {}),
               ),
-              // Aperçu du rendu (couleur + bandeau), sur un fond « photo ».
-              if (_textCtrl.text.trim().isNotEmpty)
-                Container(
-                  height: 64,
-                  margin: const EdgeInsets.only(bottom: 12),
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF7FA7C9), Color(0xFFD9B98C)],
-                    ),
-                  ),
-                  alignment: Alignment.center,
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Container(
-                    padding: _background
-                        ? const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5)
-                        : EdgeInsets.zero,
-                    color: _background ? bg : null,
-                    child: Text(
-                      _textCtrl.text.trim(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                          fontFamily: 'PlayfairDisplay',
-                          fontSize: 15,
-                          color: color),
-                    ),
-                  ),
-                ),
-              const Text('Couleur',
-                  style: TextStyle(color: AppColors.textMedium, fontSize: 13)),
-              const SizedBox(height: 8),
               Row(
                 children: [
                   for (final hex in BookPhotoText.palette)
@@ -187,8 +274,8 @@ class _PhotoEditSheetState extends State<PhotoEditSheet> {
                       child: GestureDetector(
                         onTap: () => setState(() => _color = hex),
                         child: Container(
-                          width: 36,
-                          height: 36,
+                          width: 34,
+                          height: 34,
                           decoration: BoxDecoration(
                             color: _hex(hex),
                             shape: BoxShape.circle,
@@ -204,36 +291,16 @@ class _PhotoEditSheetState extends State<PhotoEditSheet> {
                     ),
                 ],
               ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  const Text('Position',
-                      style:
-                          TextStyle(color: AppColors.textMedium, fontSize: 13)),
-                  const Spacer(),
-                  SegmentedButton<String>(
-                    segments: const [
-                      ButtonSegment(value: 'top', label: Text('En haut')),
-                      ButtonSegment(value: 'bottom', label: Text('En bas')),
-                    ],
-                    selected: {_position},
-                    showSelectedIcon: false,
-                    onSelectionChanged: (v) =>
-                        setState(() => _position = v.first),
-                  ),
-                ],
-              ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 value: _background,
                 onChanged: (v) => setState(() => _background = v),
-                title: const Text('Bandeau derrière le texte',
+                title: const Text('Encadré blanc',
                     style: TextStyle(color: AppColors.textDark, fontSize: 14)),
                 subtitle: const Text('Plus lisible une fois imprimé',
                     style:
                         TextStyle(color: AppColors.textMedium, fontSize: 12)),
               ),
-              const SizedBox(height: 8),
               ElevatedButton(
                 onPressed: _save,
                 style: ElevatedButton.styleFrom(
@@ -253,8 +320,8 @@ class _PhotoEditSheetState extends State<PhotoEditSheet> {
                 children: [
                   Expanded(
                     child: OutlinedButton.icon(
-                      onPressed: () =>
-                          Navigator.pop(context, const PhotoFeaturedToggled()),
+                      onPressed: () => Navigator.pop(
+                          context, const PhotoFeaturedToggled()),
                       icon: Icon(
                           widget.featured
                               ? Icons.grid_view_rounded
