@@ -2,6 +2,7 @@ import { db } from './firebase'
 import { FieldValue, Timestamp } from 'firebase-admin/firestore'
 import { sendEmail, ADMIN_EMAIL } from './resend'
 import { escapeHtml } from './verify'
+import { posterLabel } from './poster_pricing'
 import {
   parseProdigiOrder,
   isShipmentDispatched,
@@ -207,7 +208,7 @@ export async function notifyCustomerOfShipment(orderId: string): Promise<void> {
   const ref = `#${orderId.slice(0, 8).toUpperCase()}`
   const isPoster = o.productType === 'poster'
   const title = escapeHtml(
-    isPoster ? `Tirage ${String(o.posterSize ?? '')}` : String(o.bookTitle ?? '')
+    isPoster ? posterLabel(String(o.posterSize ?? '')) : String(o.bookTitle ?? '')
   )
   const firstName = escapeHtml(String(o.firstName ?? ''))
   const trackingNumber = str(o.trackingNumber)

@@ -11,6 +11,7 @@ import '../../core/config/app_config.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/backend_client.dart';
 import '../../core/services/order_service.dart';
+import '../../core/services/poster_pricing.dart';
 
 class AdminOrdersScreen extends StatefulWidget {
   const AdminOrdersScreen({super.key});
@@ -421,7 +422,7 @@ class _AdminOrderCardState extends State<_AdminOrderCard> {
                     style: const TextStyle(fontSize: 13, color: AppColors.textMedium)),
                   Text(
                     o.isPoster
-                        ? 'Tirage ${o.posterSize ?? ''} · ${o.posterOrientation == 'landscape' ? 'paysage' : 'portrait'} · ${o.posterHangerColor ?? ''}'
+                        ? '${PosterPricing.label(o.posterSize ?? '')} · ${o.posterOrientation == 'landscape' ? 'paysage' : 'portrait'} · ${PosterPricing.colorLabel(o.posterSize ?? '', o.posterHangerColor ?? '')}'
                         : '${o.coverType == 'hard' ? 'Couverture rigide' : 'Couverture souple'} · ${o.memoryCount} souvenirs',
                     style: const TextStyle(fontSize: 13, color: AppColors.textMedium)),
                   const SizedBox(height: 14),

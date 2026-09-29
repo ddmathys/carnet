@@ -137,6 +137,30 @@ class OrderService {
     return data;
   }
 
+  /// Devis Prodigi réel d'un tirage (affiche, toile ou encadré) — admin
+  /// uniquement, gratuit, ne commande rien. Sert à confirmer les coûts du
+  /// catalogue (PosterPricing) avant de les ouvrir aux clients.
+  static Future<Map<String, dynamic>> verifyPosterQuote({
+    required String size,
+    required String orientation,
+    required String color,
+  }) async {
+    final data = await BackendClient.postJson(
+      '/api/prodigi/quote',
+      {
+        'productType': 'poster',
+        'posterSize': size,
+        'posterOrientation': orientation,
+        'posterColor': color,
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec du devis Prodigi');
+    }
+    return data;
+  }
+
   /// Le client confirme avoir reçu sa commande expédiée ("J'ai bien reçu ma
   /// commande") : passe le statut à 'archived' côté backend (Admin SDK — le
   /// client n'a pas le droit d'écrire `orders` directement, voir

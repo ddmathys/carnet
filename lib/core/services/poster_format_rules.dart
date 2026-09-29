@@ -51,31 +51,34 @@ class PosterFormatRules {
   /// Plus petit format du catalogue qui respecte la règle. Si aucun ne suffit
   /// (collage très dense), renvoie le plus grand format disponible : mieux
   /// vaut le maximum possible qu'un écran sans aucun choix.
-  static String minSizeFor(PosterLayout layout) {
+  static String minSizeFor(PosterLayout layout, [String material = 'hanger']) {
     final orientation = orientationOf(layout);
+    final sizes = PosterPricing.sizesFor(material);
     String? largest;
-    for (final size in PosterPricing.sizes) {
+    for (final size in sizes) {
       if (PosterPricing.entryFor(size, orientation) == null) continue;
       largest = size;
       if (fits(layout, size)) return size;
     }
-    return largest ?? PosterPricing.sizes.first;
+    return largest ?? sizes.first;
   }
 
   /// Formats sélectionnables : le minimum imposé et tous ceux au-dessus
   /// (`PosterPricing.sizes` est trié du plus petit au plus grand), moins ceux
   /// qui n'existent pas dans l'orientation du collage (A0 paysage).
-  static List<String> allowedSizes(PosterLayout layout) {
+  static List<String> allowedSizes(PosterLayout layout,
+      [String material = 'hanger']) {
     final orientation = orientationOf(layout);
-    final from = PosterPricing.sizes.indexOf(minSizeFor(layout));
+    final sizes = PosterPricing.sizesFor(material);
+    final from = sizes.indexOf(minSizeFor(layout, material));
     return [
-      for (final size in PosterPricing.sizes.sublist(from < 0 ? 0 : from))
+      for (final size in sizes.sublist(from < 0 ? 0 : from))
         if (PosterPricing.entryFor(size, orientation) != null) size,
     ];
   }
 
   static bool isTooSmall(PosterLayout layout, String size) =>
-      !allowedSizes(layout).contains(size);
+      !allowedSizes(layout, PosterPricing.materialOf(size)).contains(size);
 
   /// Taille approximative d'une photo du collage à ce format, pour l'afficher
   /// à l'utilisateur (« environ 9 cm par photo »). null si format indisponible.

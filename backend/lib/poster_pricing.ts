@@ -21,7 +21,22 @@
 // lus via `POST /v4.0/quotes` (`shippingMethod: Standard`,
 // `destinationCountryCode: CH`) le 21.08.26 — à re-vérifier si Prodigi change
 // ses tarifs de livraison.
-export type PosterSize = 'A4' | 'A3' | 'A2' | 'A1' | 'A0'
+// Tableaux muraux (ajoutés le 29.09.26) : même produit « poster » côté
+// commande, la MATIÈRE est portée par la taille — `CAN-16X20` = toile tendue
+// Prodigi GLOBAL-CAN-16X20, `CFP-16X20` = tirage encadré GLOBAL-CFP-16X20.
+// Aucune donnée de commande à migrer, tout le flux poster (paiement, mails,
+// commandes groupées, admin) reste valable. Les deux SKU sont les mêmes en
+// portrait et en paysage (Prodigi oriente d'après l'image).
+//
+// ⚠️ `usdCost` des tableaux = ESTIMATIONS, pas encore confirmées par un devis
+// Prodigi (la route temporaire utilisée pour le puzzle n'a pas pu être
+// refaite). Côté app, ces produits restent réservés à l'admin tant que
+// `wallCostsVerified` (poster_pricing.dart) est faux — l'admin vérifie chaque
+// taille avec « Vérifier chez Prodigi » puis on remplace ces valeurs.
+export type WallMaterial = 'CAN' | 'CFP'
+export type WallInches = '12X16' | '16X20' | '24X32' | '28X40'
+export type WallSize = `${WallMaterial}-${WallInches}`
+export type PosterSize = 'A4' | 'A3' | 'A2' | 'A1' | 'A0' | WallSize
 export type PosterOrientation = 'portrait' | 'landscape'
 export type PosterHangerColor = 'black' | 'natural' | 'white'
 
@@ -33,7 +48,7 @@ export interface PosterCatalogEntry {
   printAreaPx: { width: number; height: number }
 }
 
-const CATALOG: Record<PosterSize, Partial<Record<PosterOrientation, PosterCatalogEntry>>> = {
+const CATALOG: Partial<Record<PosterSize, Partial<Record<PosterOrientation, PosterCatalogEntry>>>> = {
   A4: {
     portrait: { sku: 'POSTER-HANGER-20-A4-PORT', usdCost: 23.03, printAreaPx: { width: 2490, height: 3510 } },
     landscape: { sku: 'POSTER-HANGER-30-A4-LAND', usdCost: 24.20, printAreaPx: { width: 3510, height: 2490 } },
@@ -56,6 +71,70 @@ const CATALOG: Record<PosterSize, Partial<Record<PosterOrientation, PosterCatalo
   },
 }
 
+const WALL_INCHES: Record<WallInches, { w: number; h: number }> = {
+  '12X16': { w: 12, h: 16 },
+  '16X20': { w: 16, h: 20 },
+  '24X32': { w: 24, h: 32 },
+  '28X40': { w: 28, h: 40 },
+}
+
+// Coût estimé article + livraison Suisse (USD) — voir ⚠️ en tête de fichier.
+const WALL_USD_COST: Record<WallMaterial, Record<WallInches, number>> = {
+  CAN: { '12X16': 45, '16X20': 55, '24X32': 85, '28X40': 110 },
+  CFP: { '12X16': 55, '16X20': 70, '24X32': 120, '28X40': 150 },
+}
+
+function parseWallSize(size: string): { material: WallMaterial; inches: WallInches } | null {
+  const m = /^(CAN|CFP)-(12X16|16X20|24X32|28X40)$/.exec(size)
+  return m ? { material: m[1] as WallMaterial, inches: m[2] as WallInches } : null
+}
+
+function wallCatalogEntry(size: string, orientation: PosterOrientation): PosterCatalogEntry | null {
+  const wall = parseWallSize(size)
+  if (!wall) return null
+  const { w, h } = WALL_INCHES[wall.inches]
+  // Résolution de référence à 300 DPI (contrôle qualité côté app uniquement —
+  // Prodigi cadre lui-même le fichier, `sizing: 'fillPrintArea'`).
+  const px = { width: w * 300, height: h * 300 }
+  return {
+    sku: `GLOBAL-${wall.material}-${wall.inches}`,
+    usdCost: WALL_USD_COST[wall.material][wall.inches],
+    printAreaPx: orientation === 'landscape' ? { width: px.height, height: px.width } : px,
+  }
+}
+
+/**
+ * Attributs Prodigi de l'article selon la matière : couleur de la baguette
+ * (poster) ou du cadre (encadré), bords en miroir pour la toile (la photo
+ * reste entière en façade, les côtés du châssis prolongent l'image).
+ */
+export function posterItemAttributes(size: string, color: string): Record<string, string> {
+  const wall = parseWallSize(size)
+  if (wall?.material === 'CAN') return { wrap: 'MirrorWrap' }
+  return { color }
+}
+
+/** Libellé client : « Tirage A3 », « Toile 40×50 cm », « Tirage encadré 40×50 cm ». */
+export function posterLabel(size: string): string {
+  const wall = parseWallSize(size)
+  if (!wall) return `Tirage ${size}`
+  const { w, h } = WALL_INCHES[wall.inches]
+  const cm = `${Math.round((w * 2.54) / 10) * 10}×${Math.round((h * 2.54) / 10) * 10} cm`
+  return wall.material === 'CAN' ? `Toile ${cm}` : `Tirage encadré ${cm}`
+}
+
+/** Libellé de la couleur choisie (baguette ou cadre) — vide pour la toile. */
+export function posterColorLabel(size: string, color: string): string {
+  const wall = parseWallSize(size)
+  if (wall?.material === 'CAN') return 'Bords en miroir'
+  const labels: Record<string, string> = {
+    black: 'Noir',
+    natural: wall ? 'Bois naturel' : 'Chêne',
+    white: 'Blanc',
+  }
+  return labels[color] ?? color
+}
+
 // Même taux/marge/arrondi que lib/pricing.ts, pour rester cohérent visuellement
 // avec le prix des livres (un seul modèle de marge dans toute l'app).
 const USD_TO_CHF = 0.9
@@ -66,7 +145,7 @@ export function posterCatalogEntry(
   size: PosterSize,
   orientation: PosterOrientation
 ): PosterCatalogEntry | null {
-  return CATALOG[size]?.[orientation] ?? null
+  return CATALOG[size]?.[orientation] ?? wallCatalogEntry(size, orientation)
 }
 
 function marginFor(cost: number): number {
@@ -83,7 +162,10 @@ export function computePosterPrice(size: PosterSize, orientation: PosterOrientat
 }
 
 export function isPosterSize(v: unknown): v is PosterSize {
-  return v === 'A4' || v === 'A3' || v === 'A2' || v === 'A1' || v === 'A0'
+  return (
+    v === 'A4' || v === 'A3' || v === 'A2' || v === 'A1' || v === 'A0' ||
+    (typeof v === 'string' && parseWallSize(v) != null)
+  )
 }
 
 export function isPosterOrientation(v: unknown): v is PosterOrientation {

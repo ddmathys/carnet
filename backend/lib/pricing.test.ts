@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { computePrice, resolveCoverType } from './pricing.ts'
-import { computePosterPrice } from './poster_pricing.ts'
+import { computePosterPrice, posterCatalogEntry, posterItemAttributes, posterLabel } from './poster_pricing.ts'
 
 // Non-régression du bug corrigé le 15.09.26 : checkout.ts ignorait
 // 'layflat' et facturait au tarif 'soft' (moins cher que le coût
@@ -41,4 +41,23 @@ test('computePosterPrice couvre toutes les tailles/orientations du catalogue sau
       }
     }
   }
+})
+
+test('tableaux muraux : toile et encadré, SKU Prodigi et attributs par matière', () => {
+  for (const inches of ['12X16', '16X20', '24X32', '28X40'] as const) {
+    for (const orientation of ['portrait', 'landscape'] as const) {
+      const can = posterCatalogEntry(`CAN-${inches}`, orientation)
+      const cfp = posterCatalogEntry(`CFP-${inches}`, orientation)
+      assert.equal(can?.sku, `GLOBAL-CAN-${inches}`)
+      assert.equal(cfp?.sku, `GLOBAL-CFP-${inches}`)
+      assert.ok((computePosterPrice(`CAN-${inches}`, orientation) ?? 0) > 0)
+      assert.ok((computePosterPrice(`CFP-${inches}`, orientation) ?? 0) > 0)
+    }
+  }
+  assert.deepEqual(posterItemAttributes('CAN-16X20', 'black'), { wrap: 'MirrorWrap' })
+  assert.deepEqual(posterItemAttributes('CFP-16X20', 'white'), { color: 'white' })
+  assert.deepEqual(posterItemAttributes('A3', 'natural'), { color: 'natural' })
+  assert.equal(posterLabel('CAN-16X20'), 'Toile 40×50 cm')
+  assert.equal(posterLabel('A3'), 'Tirage A3')
+  assert.equal(posterCatalogEntry('CAN-99X99' as never, 'portrait'), null)
 })

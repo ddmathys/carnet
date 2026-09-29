@@ -4,6 +4,7 @@ import { requireAuth } from '../../lib/verify'
 import { auth, db } from '../../lib/firebase'
 import { deleteObject, presignGet } from '../../lib/r2'
 import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
+import { posterLabel } from '../../lib/poster_pricing'
 import { row, wrap } from '../email/order'
 
 // URLs :
@@ -94,7 +95,7 @@ async function handleOrdersPending(req: VercelRequest, res: VercelResponse) {
       name: `${o.firstName ?? ''} ${o.lastName ?? ''}`.trim() || '—',
       item:
         o.productType === 'poster'
-          ? `Tirage ${String(o.posterSize ?? '')}`
+          ? posterLabel(String(o.posterSize ?? ''))
           : String(o.bookTitle ?? 'Livre'),
       price: `CHF ${Number(o.price ?? 0).toFixed(2)}`,
       days,
@@ -182,7 +183,7 @@ async function handleOrderReceived(req: VercelRequest, res: VercelResponse) {
   const ref8 = `#${orderId.slice(0, 8).toUpperCase()}`
   const item =
     order.productType === 'poster'
-      ? `Tirage ${String(order.posterSize ?? '')}`
+      ? posterLabel(String(order.posterSize ?? ''))
       : String(order.bookTitle ?? 'Livre')
   const html = wrap(`
     <p style="margin:0 0 16px;font-size:16px;color:#2d2d2d;">

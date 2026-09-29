@@ -13,6 +13,7 @@ import '../../core/models/tag_model.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/models/memory_activity_model.dart';
 import '../../core/constants/milestone_types.dart';
+import '../../core/services/poster_pricing.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/memory_activity_service.dart';
 import '../books/pdf_viewer_screen.dart';
@@ -832,7 +833,9 @@ class _PrintOrderCard extends StatelessWidget {
         ? (order.puzzleSize != null
             ? 'Puzzle ${PuzzlePricing.label(order.puzzleSize!)}'
             : 'Puzzle')
-        : (order.posterSize ?? 'Tirage');
+        : (order.posterSize != null
+            ? PosterPricing.sizeLabel(order.posterSize!)
+            : 'Tirage');
     return GestureDetector(
       onTap: onTap,
       child: SizedBox(

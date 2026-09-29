@@ -6,6 +6,7 @@ import {
   computePosterPrice,
   isPosterOrientation,
   isPosterSize,
+  posterLabel,
 } from '../../lib/poster_pricing'
 import { computePuzzlePrice, isPuzzleSize } from '../../lib/puzzle_pricing'
 
@@ -85,7 +86,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     trustedPrice = price
     const orientationLabel = o.posterOrientation === 'landscape' ? 'paysage' : 'portrait'
-    productName = `Tirage ${o.posterSize} ${orientationLabel}`
+    productName = `${posterLabel(o.posterSize)} ${orientationLabel}`
 
     // Tirages groupés dans la même commande (voir OrderModel.additionalPosters
     // / backend/api/prodigi/[action].ts) : un seul article Stripe, prix total

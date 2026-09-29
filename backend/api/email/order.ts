@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth, escapeHtml } from '../../lib/verify'
 import { db } from '../../lib/firebase'
 import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
+import { posterColorLabel, posterLabel } from '../../lib/poster_pricing'
 
 // Envoie la notification admin + la confirmation client pour une commande.
 // L'app appelle ce endpoint juste après avoir créé le document orders/{orderId}.
@@ -34,11 +35,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ref = `#${orderId.slice(0, 8).toUpperCase()}`
   const isPoster = o.productType === 'poster'
   const isPuzzle = o.productType === 'puzzle'
-  const posterColorLabel: Record<string, string> = { black: 'Noir', natural: 'Chêne', white: 'Blanc' }
   // Titre de l'article : le titre du livre, ou un libellé généré pour un
   // poster/puzzle (pas de titre saisi par l'utilisateur pour ces produits).
   const itemTitle = isPoster
-    ? `Tirage ${escapeHtml(String(o.posterSize ?? ''))}`
+    ? escapeHtml(posterLabel(String(o.posterSize ?? '')))
     : isPuzzle
       ? `Puzzle ${escapeHtml(String(o.puzzleSize ?? ''))} pièces`
       : escapeHtml(String(o.bookTitle ?? ''))
@@ -47,9 +47,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const firstName = escapeHtml(String(o.firstName ?? ''))
   const userEmail = String(o.userEmail ?? '')
   const cover = isPoster
-    ? `${o.posterOrientation === 'landscape' ? 'Paysage' : 'Portrait'} · ${
-        posterColorLabel[String(o.posterHangerColor ?? '')] ?? String(o.posterHangerColor ?? '')
-      }`
+    ? `${o.posterOrientation === 'landscape' ? 'Paysage' : 'Portrait'} · ${escapeHtml(
+        posterColorLabel(String(o.posterSize ?? ''), String(o.posterHangerColor ?? ''))
+      )}`
     : isPuzzle
       ? 'Boîte métal'
       : o.coverType === 'hard'
@@ -139,7 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     userEmail
       ? sendEmail({
           to: userEmail,
-          subject: `Commande confirmée — ${isPoster ? `Tirage ${String(o.posterSize ?? '')}` : String(o.bookTitle ?? '')}`,
+          subject: `Commande confirmée — ${isPoster ? posterLabel(String(o.posterSize ?? '')) : String(o.bookTitle ?? '')}`,
           html: userHtml,
         })
       : Promise.resolve(false),

@@ -17,6 +17,7 @@ import {
   isPosterSize,
   isPosterOrientation,
   isPosterHangerColor,
+  posterItemAttributes,
   type PosterSize,
   type PosterOrientation,
 } from '../../lib/poster_pricing'
@@ -219,7 +220,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       sku: entry.sku,
       copies: 1,
       sizing: 'fillPrintArea',
-      attributes: { color },
+      attributes: posterItemAttributes(o.posterSize, color),
       assets: [{ printArea: 'default', url: pdfUrl }],
     }]
     trustedPrice = computePosterPrice(o.posterSize, o.posterOrientation)
@@ -241,7 +242,7 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
         sku: extraEntry.sku,
         copies: 1,
         sizing: 'fillPrintArea',
-        attributes: { color: extraColor },
+        attributes: posterItemAttributes(extra.posterSize, extraColor),
         assets: [{ printArea: 'default', url: extra.pdfUrl }],
       })
       const extraPrice = computePosterPrice(extra.posterSize, extra.posterOrientation)
@@ -455,6 +456,7 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     shippingMethod,
     posterSize,
     posterOrientation,
+    posterColor,
   } = (req.body ?? {}) as {
     productType?: string
     coverType?: string
@@ -463,12 +465,16 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     shippingMethod?: string
     posterSize?: string
     posterOrientation?: string
+    posterColor?: string
   }
 
   const isPoster = productType === 'poster'
   let sku: string | undefined
   let localPrintedPages: number | undefined
   let localPriceChf: number | null = null
+  // Coût Prodigi que NOTRE catalogue suppose (USD, article + livraison) —
+  // à comparer à prodigiCostUsd pour recaler poster_pricing.
+  let localCostUsd: number | null = null
 
   if (isPoster) {
     if (!isPosterSize(posterSize) || !isPosterOrientation(posterOrientation)) {
@@ -479,6 +485,7 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: `Aucun SKU poster pour ${posterSize}/${posterOrientation}` })
     }
     sku = entry.sku
+    localCostUsd = entry.usdCost
     localPriceChf = computePosterPrice(posterSize as PosterSize, posterOrientation as PosterOrientation)
   } else {
     if (coverType !== 'soft' && coverType !== 'hard' && coverType !== 'layflat') {
@@ -515,7 +522,15 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     currencyCode: 'USD',
     items: [
       isPoster
-        ? { sku, copies: 1, assets: [{ printArea: 'default' }] }
+        ? {
+            sku,
+            copies: 1,
+            attributes: posterItemAttributes(
+              String(posterSize),
+              isPosterHangerColor(posterColor) ? posterColor : 'natural'
+            ),
+            assets: [{ printArea: 'default' }],
+          }
         : { sku, copies: 1, assets: [{ printArea: 'default', pageCount: localPrintedPages }] },
     ],
   }
@@ -564,6 +579,7 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
       ok: true,
       localPrintedPages,
       localPriceChf,
+      localCostUsd,
       prodigiCostUsd,
       prodigiRaw: data ?? raw.slice(0, 2000),
     })

@@ -83,6 +83,18 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   String _size = 'A4';
   String _color = 'natural';
+  // 'hanger' (affiche + baguette), 'canvas' (toile), 'framed' (encadré) —
+  // voir PosterPricing.materials. Toujours égal à materialOf(_size).
+  String _material = 'hanger';
+
+  bool get _isAdmin =>
+      FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
+  // Toile/encadré : coûts pas encore confirmés chez Prodigi → admin seul.
+  bool get _wallAvailable => PosterPricing.wallCostsVerified || _isAdmin;
+
+  // Devis Prodigi réel de la taille choisie (admin — voir _verifyProdigi).
+  bool _checkingProdigi = false;
+  String? _prodigiResult;
   final _captionCtrl = TextEditingController();
 
   bool _loading = true;
@@ -132,9 +144,10 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
 
   /// Format papier minimum imposé par le collage courant (nombre de photos ET
   /// mises en avant) — voir poster_format_rules.dart.
-  String get _minSize => PosterFormatRules.minSizeFor(_layout);
+  String get _minSize => PosterFormatRules.minSizeFor(_layout, _material);
 
-  List<String> get _allowedSizes => PosterFormatRules.allowedSizes(_layout);
+  List<String> get _allowedSizes =>
+      PosterFormatRules.allowedSizes(_layout, _material);
 
   /// Vrai si au moins un des souvenirs choisis a une vidéo ou un mémo vocal —
   /// détermine si la section de choix fin (case à cocher par vidéo/mémo)
@@ -270,7 +283,10 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
           .timeout(const Duration(seconds: 10));
       if (order == null || !mounted) return;
       setState(() {
-        if (order.posterSize != null) _size = order.posterSize!;
+        if (order.posterSize != null) {
+          _size = order.posterSize!;
+          _material = PosterPricing.materialOf(_size);
+        }
         if (order.posterHangerColor != null) _color = order.posterHangerColor!;
         // Une ancienne commande peut porter une taille devenue trop petite
         // pour ce collage : on la remonte plutôt que de la laisser bloquer.
@@ -322,9 +338,45 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   /// justement celui que la qualité interdit. Appelée dès la sortie de
   /// l'étape Taille (pas seulement à la commande) pour ne pas laisser
   /// l'utilisateur remplir toute l'adresse avant de découvrir le problème.
+  /// Changement de support (affiche / toile / encadré) : on repart du plus
+  /// petit format autorisé pour ce collage dans cette matière.
+  void _selectMaterial(String material) {
+    if (material == _material) return;
+    setState(() {
+      _material = material;
+      _size = PosterFormatRules.minSizeFor(_layout, material);
+      _bottleneckIndex = null;
+      _prodigiResult = null;
+    });
+  }
+
+  Future<void> _verifyProdigi() async {
+    setState(() {
+      _checkingProdigi = true;
+      _prodigiResult = null;
+    });
+    try {
+      final r = await OrderService.verifyPosterQuote(
+          size: _size, orientation: _orientation, color: _color);
+      final real = (r['prodigiCostUsd'] as num?)?.toStringAsFixed(2);
+      final ours = (r['localCostUsd'] as num?)?.toStringAsFixed(2);
+      if (!mounted) return;
+      setState(() => _prodigiResult =
+          '${PosterPricing.label(_size)} (${PosterPricing.entryFor(_size, _orientation)?.sku}) — '
+          'Prodigi : \$${real ?? '?'} (article + livraison CH) · '
+          'notre estimation : \$${ours ?? '?'}');
+    } catch (e) {
+      if (!mounted) return;
+      setState(() =>
+          _prodigiResult = e.toString().replaceFirst('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _checkingProdigi = false);
+    }
+  }
+
   String? _sizeValidationError() {
     if (PosterFormatRules.isTooSmall(_layout, _size)) {
-      return 'Avec ${_photoUrls.length} photos, le format minimum est $_minSize.';
+      return 'Avec ${_photoUrls.length} photos, le format minimum est ${PosterPricing.sizeLabel(_minSize)}.';
     }
     final quality = _quality[_size];
     if (quality == null || quality.verdict == PosterQualityVerdict.disabled) {
@@ -463,7 +515,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
         id: '',
         userId: user.uid,
         userEmail: user.email ?? '',
-        bookTitle: 'Tirage $_size',
+        bookTitle: PosterPricing.label(_size),
         coverType: '',
         price: _totalPrice,
         firstName: _firstNameCtrl.text.trim(),
@@ -572,10 +624,12 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
     final each = cm == null
         ? ''
         : ' — la plus petite photo y fait ${cm.toStringAsFixed(0)} cm de côté';
+    final min = PosterPricing.sizeLabel(_minSize);
     if (n == 1) {
-      return 'Une photo plein cadre : tous les formats sont ouverts, du $_minSize au A0.';
+      final max = PosterPricing.sizeLabel(PosterPricing.sizesFor(_material).last);
+      return 'Une photo plein cadre : tous les formats sont ouverts, du $min au $max.';
     }
-    return '$n photos : format $_minSize minimum$each. En dessous, chaque photo deviendrait une vignette — les formats plus petits sont verrouillés.';
+    return '$n photos : format $min minimum$each. En dessous, chaque photo deviendrait une vignette — les formats plus petits sont verrouillés.';
   }
 
   /// Largeur/hauteur de la page choisie (identique pour tous les formats A,
@@ -792,9 +846,52 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
   Widget _buildSizeStep() {
     final quality = _quality;
     final allowed = _allowedSizes;
+    final colors = PosterPricing.colorsFor(_material);
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
+        if (_wallAvailable) ...[
+          const Text('Support',
+              style: TextStyle(
+                  fontFamily: 'PlayfairDisplay',
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textDark)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final m in PosterPricing.materials)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: SizedBox(
+                        width: double.infinity,
+                        child: Text(PosterPricing.materialLabel(m),
+                            textAlign: TextAlign.center),
+                      ),
+                      selected: _material == m,
+                      showCheckmark: false,
+                      onSelected: (_) => _selectMaterial(m),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(PosterPricing.materialDescription(_material),
+              style: const TextStyle(
+                  fontSize: 12.5, color: AppColors.textMedium, height: 1.35)),
+          if (!PosterPricing.wallCostsVerified && _material != 'hanger')
+            const Padding(
+              padding: EdgeInsets.only(top: 6),
+              child: Text(
+                  'Admin : prix provisoires, visibles par toi seul tant que les '
+                  'coûts Prodigi ne sont pas confirmés.',
+                  style: TextStyle(fontSize: 12, color: AppColors.amber)),
+            ),
+          const SizedBox(height: 20),
+        ],
         const Text('Taille',
             style: TextStyle(
                 fontFamily: 'PlayfairDisplay',
@@ -806,7 +903,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
             style: const TextStyle(
                 fontSize: 12.5, color: AppColors.textMedium, height: 1.35)),
         const SizedBox(height: 10),
-        for (final size in PosterPricing.sizes)
+        for (final size in PosterPricing.sizesFor(_material))
           _SizeCard(
             size: size,
             quality: quality[size],
@@ -825,7 +922,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
               if (!allowed.contains(size) &&
                   PosterPricing.entryFor(size, _orientation) != null) {
                 _showSnack(
-                    '$size est trop petit pour ${_photoUrls.length} photos — format minimum : $_minSize.');
+                    '${PosterPricing.sizeLabel(size)} est trop petit pour ${_photoUrls.length} photos — format minimum : ${PosterPricing.sizeLabel(_minSize)}.');
                 return;
               }
               final q = quality[size];
@@ -836,41 +933,79 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                     _step = 0;
                   });
                   _showSnack(
-                      'Taille $size trop juste : la photo entourée en rouge n\'est pas assez nette pour cette taille — retire-la ou enlève sa mise en avant.');
+                      'Taille ${PosterPricing.sizeLabel(size)} trop juste : la photo entourée en rouge n\'est pas assez nette pour cette taille — retire-la ou enlève sa mise en avant.');
                 } else {
-                  _showSnack('Taille $size indisponible pour cette orientation.');
+                  _showSnack('Taille ${PosterPricing.sizeLabel(size)} indisponible pour cette orientation.');
                 }
                 return;
               }
               setState(() {
                 _size = size;
                 _bottleneckIndex = null;
+                _prodigiResult = null;
               });
             },
           ),
-        const SizedBox(height: 20),
-        const Text('Couleur du support',
-            style: TextStyle(
-                fontFamily: 'PlayfairDisplay',
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-                color: AppColors.textDark)),
-        const SizedBox(height: 10),
-        Row(
-          children: [
-            for (final color in PosterPricing.hangerColors)
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: _ColorChip(
-                    color: color,
-                    selected: _color == color,
-                    onTap: () => setState(() => _color = color),
+        if (colors.isNotEmpty) ...[
+          const SizedBox(height: 20),
+          Text(
+              _material == 'framed'
+                  ? 'Couleur du cadre'
+                  : 'Couleur des baguettes',
+              style: const TextStyle(
+                  fontFamily: 'PlayfairDisplay',
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.textDark)),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              for (final color in colors)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: _ColorChip(
+                      color: color,
+                      label: PosterPricing.colorLabel(_size, color),
+                      selected: _color == color,
+                      onTap: () => setState(() {
+                        _color = color;
+                        _prodigiResult = null;
+                      }),
+                    ),
                   ),
                 ),
-              ),
+            ],
+          ),
+        ],
+        // Devis réel Prodigi de la taille choisie (admin) — sert à confirmer
+        // les coûts du catalogue avant de les ouvrir aux clients.
+        if (_isAdmin) ...[
+          const SizedBox(height: 16),
+          OutlinedButton.icon(
+            onPressed: _checkingProdigi ? null : _verifyProdigi,
+            icon: _checkingProdigi
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2))
+                : const Icon(Icons.fact_check_outlined, size: 16),
+            label: const Text('Vérifier chez Prodigi',
+                style: TextStyle(fontSize: 12.5)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: AppColors.amber,
+              side: const BorderSide(color: AppColors.amber),
+              minimumSize: const Size(0, 36),
+            ),
+          ),
+          if (_prodigiResult != null) ...[
+            const SizedBox(height: 6),
+            SelectableText(_prodigiResult!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                    fontSize: 12, color: AppColors.textMedium)),
           ],
-        ),
+        ],
         const SizedBox(height: 24),
         ElevatedButton(
           onPressed: () {
@@ -909,7 +1044,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
         _posterSummaryTile(
-          label: 'Tirage $_size · ${_orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(_color)}',
+          label: '${PosterPricing.label(_size)} · ${_orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.colorLabel(_size, _color)}',
           price: price,
         ),
         if (showCart) ...[
@@ -917,7 +1052,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
             Padding(
               padding: const EdgeInsets.only(top: 8),
               child: _posterSummaryTile(
-                label: 'Tirage ${item.size} · ${item.orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.hangerColorLabel(item.color)}',
+                label: '${PosterPricing.label(item.size)} · ${item.orientation == 'landscape' ? 'Paysage' : 'Portrait'} · ${PosterPricing.colorLabel(item.size, item.color)}',
                 price: item.price,
                 onRemove: () => setState(() => _extraPosters.remove(item)),
               ),
@@ -1348,7 +1483,7 @@ class _SizeCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(size,
+                    Text(PosterPricing.sizeLabel(size),
                         style: const TextStyle(
                             fontSize: 14, fontWeight: FontWeight.w700, color: AppColors.textDark)),
                     Text('${badge.$3}$tileLabel',
@@ -1369,9 +1504,14 @@ class _SizeCard extends StatelessWidget {
 
 class _ColorChip extends StatelessWidget {
   final String color;
+  final String label;
   final bool selected;
   final VoidCallback onTap;
-  const _ColorChip({required this.color, required this.selected, required this.onTap});
+  const _ColorChip(
+      {required this.color,
+      required this.label,
+      required this.selected,
+      required this.onTap});
 
   Color get _swatch => switch (color) {
         'black' => const Color(0xFF2B2B2B),
@@ -1404,7 +1544,7 @@ class _ColorChip extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 6),
-            Text(PosterPricing.hangerColorLabel(color),
+            Text(label,
                 style: const TextStyle(fontSize: 11.5, color: AppColors.textDark)),
           ],
         ),

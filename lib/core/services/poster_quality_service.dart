@@ -89,7 +89,7 @@ class PosterQualityService {
     final orientation =
         layout.orientation == PosterOrientation.landscape ? 'landscape' : 'portrait';
     return {
-      for (final size in PosterPricing.sizes)
+      for (final size in PosterPricing.allSizes)
         size: evaluate(
           size: size,
           orientation: orientation,
