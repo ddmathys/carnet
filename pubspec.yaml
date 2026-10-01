@@ -13,6 +13,11 @@ dependencies:
   # Firebase
   firebase_core: ^3.6.0
   firebase_auth: ^5.3.1
+  # Rapport de plantage. Ajouté le 01.10.26 (audit) : il n'existait AUCUNE
+  # visibilité sur les plantages en production — ni Crashlytics, ni Sentry, et
+  # 28 `catch` vides dans l'app. Un écran qui plante chez un proche ne
+  # laissait donc aucune trace exploitable.
+  firebase_crashlytics: ^4.1.3
   cloud_firestore: ^5.4.4
   firebase_storage: ^12.3.3
   google_sign_in: ^6.2.1

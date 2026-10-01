@@ -1,7 +1,11 @@
 import 'dart:async';
+// `PlatformDispatcher` (câblage du rapport de plantage) vient de dart:ui, que
+// foundation réexporte — pas besoin de l'importer en plus.
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_crashlytics/firebase_crashlytics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:app_links/app_links.dart';
@@ -41,6 +45,28 @@ import 'features/admin/admin_orders_screen.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // ── Rapport de plantage ───────────────────────────────────────────────────
+  // Ajouté le 01.10.26 (audit) : il n'existait AUCUNE visibilité sur les
+  // plantages en production. Un écran qui plante chez un proche ne laissait
+  // aucune trace, et l'application compte 28 `catch` vides où un échec passe
+  // inaperçu. On capte les deux familles d'erreurs non rattrapées :
+  //   - `FlutterError.onError` : celles du framework (build, layout, paint) ;
+  //   - `PlatformDispatcher.onError` : celles qui échappent à une zone async.
+  //
+  // Rien n'est envoyé depuis un build de debug : les plantages de
+  // développement n'ont pas à polluer le tableau de bord.
+  await FirebaseCrashlytics.instance
+      .setCrashlyticsCollectionEnabled(!kDebugMode);
+  FlutterError.onError = (details) {
+    FlutterError.presentError(details);
+    FirebaseCrashlytics.instance.recordFlutterFatalError(details);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    FirebaseCrashlytics.instance.recordError(error, stack, fatal: true);
+    return true;
+  };
+
   await initializeDateFormatting('fr', null);
 
   // Android : bascule sur le Photo Picker système (Android 13+, rétroporté via
