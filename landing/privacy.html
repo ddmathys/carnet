@@ -38,7 +38,7 @@
   <div class="card">
     <div class="brand">carnet.</div>
     <h1>Politique de confidentialité</h1>
-    <p class="updated">Dernière mise à jour : 28 août 2026</p>
+    <p class="updated">Dernière mise à jour : 1er octobre 2026</p>
 
     <p>
       Carnet est une application permettant de conserver des souvenirs de famille
@@ -58,9 +58,14 @@
     <ul>
       <li><strong>Compte</strong> : adresse email, et si vous utilisez la connexion Google, votre nom et votre photo de profil Google.</li>
       <li><strong>Contenu que vous ajoutez</strong> : photos, vidéos, mémos vocaux, titres, dates, lieux, tags, et — si vous les renseignez — des mesures de croissance (taille/poids) liées à un enfant.</li>
-      <li><strong>Notifications</strong> : un jeton technique propre à votre appareil, utilisé uniquement pour vous envoyer les notifications que vous avez activées.</li>
-      <li><strong>Commande d'impression</strong> (livre ou tirage) : nom, adresse postale — transmis à notre imprimeur uniquement pour l'expédition de votre commande.</li>
+      <li><strong>Commande d'impression</strong> (livre, tirage ou puzzle) : nom, adresse postale — transmis à notre imprimeur uniquement pour l'expédition de votre commande. Le paiement est traité par Stripe : nous ne voyons ni ne conservons vos données de carte.</li>
+      <li><strong>Données techniques</strong> : l'application n'embarque ni traceur publicitaire ni outil de mesure d'audience. Les adresses IP apparaissent dans les journaux techniques de nos hébergeurs (Vercel, Google, Cloudflare), conservés par eux pour une durée courte et utilisés uniquement pour la sécurité et le diagnostic de pannes.</li>
     </ul>
+    <p>
+      L'écran de connexion affiche une photo d'illustration chargée depuis
+      Unsplash : ouvrir cet écran transmet donc votre adresse IP à Unsplash,
+      avant toute création de compte. Aucune autre donnée ne lui est envoyée.
+    </p>
     <p>
       Carnet n'affiche pas de publicité et ne vend aucune donnée à des tiers à
       des fins commerciales.
@@ -78,21 +83,56 @@
     <h2>Partage avec des tiers</h2>
     <p>Pour fonctionner, Carnet s'appuie sur les prestataires suivants, qui traitent vos données en notre nom :</p>
     <ul>
-      <li><strong>Google Firebase</strong> (authentification, base de données, notifications push)</li>
+      <li><strong>Google Firebase</strong> (authentification et base de données)</li>
       <li><strong>Cloudflare R2</strong> (stockage des photos, vidéos et mémos vocaux)</li>
-      <li><strong>Resend</strong> (envoi des emails transactionnels : confirmation de commande, etc.)</li>
-      <li><strong>Prodigi</strong> (impression et expédition des livres et tirages commandés — reçoit uniquement les données nécessaires à la fabrication et l'envoi de votre commande)</li>
+      <li><strong>Vercel</strong> (hébergement de nos services : c'est lui qui sert les pages de partage et qui délivre les accès temporaires à vos médias)</li>
+      <li><strong>Resend</strong> (envoi des emails transactionnels : confirmation de commande, réinitialisation de mot de passe)</li>
+      <li><strong>Stripe</strong> (paiement des commandes d'impression)</li>
+      <li><strong>Prodigi</strong> (impression et expédition des livres, tirages et puzzles commandés — reçoit uniquement les données nécessaires à la fabrication et l'envoi de votre commande)</li>
+      <li><strong>Unsplash</strong> (photo d'illustration de l'écran de connexion, voir ci-dessus)</li>
     </ul>
     <p>
-      Vos souvenirs ne sont visibles que par vous et par les personnes avec qui
-      vous choisissez explicitement de les partager (via un lien d'invitation à
-      un tag). Nous ne consultons pas le contenu de votre carnet, sauf
-      nécessité technique (diagnostic d'un bug que vous nous signalez, par
-      exemple) ou obligation légale.
+      Vos souvenirs ne sont visibles que par vous et par les personnes à qui
+      vous donnez accès. Nous ne consultons pas le contenu de votre carnet,
+      sauf nécessité technique (diagnostic d'un bug que vous nous signalez) ou
+      obligation légale.
+    </p>
+
+    <h2>Les liens que vous créez vous-même</h2>
+    <p>
+      Trois fonctions de l'application produisent des adresses web que
+      <strong>toute personne qui les détient</strong> peut ouvrir, sans compte
+      ni mot de passe. C'est leur raison d'être — envoyer un souvenir à un
+      grand-parent, ou imprimer un code sur un objet — mais il faut le savoir
+      avant de les partager :
+    </p>
+    <ul>
+      <li><strong>Lien de partage d'un souvenir</strong> : valable
+      <strong>7 jours</strong>, puis il cesse de fonctionner. Il donne accès
+      aux photos et vidéos de ce seul souvenir.</li>
+      <li><strong>Code QR imprimé</strong> sur un tirage ou sur la couverture
+      d'un livre : il est <strong>permanent</strong>, puisqu'il doit
+      fonctionner aussi longtemps que l'objet existe. Il donne accès aux
+      vidéos et mémos vocaux que vous avez choisis au moment de la commande.</li>
+      <li><strong>Lien d'invitation à un tag</strong> : valable
+      <strong>30 jours</strong>, et vous pouvez le désactiver à tout moment
+      depuis l'application. Qui le suit voit les souvenirs portant ce tag,
+      présents et à venir, et peut en ajouter.</li>
+    </ul>
+    <p>
+      Ces pages demandent aux moteurs de recherche de ne pas les indexer, mais
+      un lien recopié sur un site public reste accessible à qui le trouve.
+      Partagez-les comme vous partageriez une photo.
     </p>
 
     <h2>Conservation et suppression</h2>
-    <p>Vos données sont conservées tant que votre compte Carnet existe.</p>
+    <p>
+      Vos souvenirs sont conservés tant que votre compte Carnet existe : nous
+      ne les effaçons jamais de notre initiative. Les durées fixes sont celles
+      des liens ci-dessus (7 et 30 jours), et les commandes d'impression
+      payées sont conservées dix ans sous forme anonyme, pour nos obligations
+      comptables suisses.
+    </p>
     <p>
       <strong>Supprimer un souvenir précis</strong> (photo, vidéo, mémo vocal,
       mesure de croissance) sans toucher au reste de votre compte : ouvrez le
@@ -111,8 +151,11 @@
 
     <h2>Vos droits</h2>
     <p>
-      Vous pouvez à tout moment demander l'accès, la correction ou la
-      suppression de vos données en nous contactant à l'adresse ci-dessous.
+      Vous pouvez à tout moment demander l'accès à vos données, leur
+      correction, leur suppression, ou une copie exportable, en écrivant à
+      l'adresse ci-dessous. Nous répondons dans un délai de 30 jours. La
+      suppression complète est aussi disponible sans nous écrire, directement
+      depuis l'application (Profil → « Supprimer mon compte »).
     </p>
 
     <h2>Modifications</h2>

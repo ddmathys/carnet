@@ -406,6 +406,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).json({ keys, urls })
   }
 
+  if (action === 'photos-play-batch') {
+    // Signature des photos de PLUSIEURS souvenirs en UN appel.
+    //
+    // `photo-play` ne traite qu'un souvenir : l'app l'appelait donc une fois
+    // PAR SOUVENIR affiché (un FutureBuilder par polaroïd), soit 200 appels
+    // pour un écran de 200 souvenirs — 200 invocations serverless, 200
+    // lectures Firestore et 200 signatures R2 pour une seule liste (audit du
+    // 01.10.26). Côté app, `PhotoService` regroupe désormais les demandes
+    // concurrentes et tape ici une seule fois.
+    //
+    // Le contrôle d'accès est le MÊME que celui de `photo-play`, souvenir par
+    // souvenir (`memoryIfMember`) : un identifiant auquel l'appelant n'a pas
+    // accès est simplement absent de la réponse, jamais une erreur globale.
+    const raw = Array.isArray(body.memoryIds) ? (body.memoryIds as unknown[]) : []
+    const memoryIds = [
+      ...new Set(
+        raw.filter((x): x is string => typeof x === 'string' && x.length > 0)
+      ),
+    ].slice(0, 100) // borne : un écran n'affiche pas plus que ça d'un coup
+    if (memoryIds.length === 0) {
+      return res.status(200).json({ results: {} })
+    }
+
+    type SignedPhotos = { keys: string[]; urls: string[] }
+    const entries = await Promise.all(
+      memoryIds.map(
+        async (memoryId): Promise<[string, SignedPhotos] | null> => {
+          const mem = await memoryIfMember(memoryId, user.uid)
+          if (!mem) return null
+          const keys = photoKeysOf(mem)
+          const urls = await Promise.all(keys.map((k) => presignGet(k, 3600)))
+          return [memoryId, { keys, urls }]
+        }
+      )
+    )
+
+    const results: Record<string, SignedPhotos> = {}
+    for (const e of entries) {
+      if (e) results[e[0]] = e[1]
+    }
+    return res.status(200).json({ results })
+  }
+
   if (action === 'photo-sign') {
     // Signature par lot de clés — deux cas légitimes :
     // (1) clés APPARTENANT à l'appelant (photos/{uid}/…) : génération de

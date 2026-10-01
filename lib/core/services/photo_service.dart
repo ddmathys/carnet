@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -103,41 +104,111 @@ class PhotoService {
   // (audit du 01.10.26).
   static final _signedCache = SignedUrlCache<List<String>>();
 
+  // ── Regroupement des demandes de signature ───────────────────────────────
+  //
+  // Chaque polaroïd, chaque vignette résout ses photos dans son propre
+  // `FutureBuilder`. Avant le 01.10.26, chacun déclenchait un appel HTTP
+  // `photo-play` : un écran de 200 souvenirs faisait 200 appels, soit 200
+  // invocations serverless, 200 lectures Firestore et 200 signatures R2 pour
+  // afficher UNE liste.
+  //
+  // On ne touche à aucun appelant : les demandes qui arrivent dans la même
+  // frame sont mises en file, et un seul appel groupé
+  // (`photos-play-batch`) les sert toutes. Les 14 endroits qui appellent
+  // `resolvePhotoUrls` en profitent sans le savoir.
+  static const _batchWindow = Duration(milliseconds: 16); // ~1 frame
+  static const _batchMaxSize = 100; // même borne que le backend
+
+  static final Map<String, Completer<List<String>>> _waiting = {};
+  static final Map<String, List<String>> _legacyUrlsById = {};
+  static final List<String> _queue = [];
+  static Timer? _batchTimer;
+
   /// URLs affichables des photos d'un souvenir (DOUBLE-LECTURE) :
   ///  - `mediaKeys` (R2) → URLs GET signées via le backend (membre uniquement) ;
   ///  - sinon `mediaUrls` (Firebase), puis `photoUrl` (ancien format).
-  static Future<List<String>> resolvePhotoUrls(MemoryModel m) async {
+  static Future<List<String>> resolvePhotoUrls(MemoryModel m) {
     if (m.mediaKeys.isEmpty) {
-      if (m.mediaUrls.isNotEmpty) return m.mediaUrls;
-      return (m.photoUrl != null && m.photoUrl!.isNotEmpty)
+      if (m.mediaUrls.isNotEmpty) return Future.value(m.mediaUrls);
+      return Future.value((m.photoUrl != null && m.photoUrl!.isNotEmpty)
           ? [m.photoUrl!]
-          : const [];
+          : const []);
     }
     final cached = _signedCache.get(m.id);
-    if (cached != null) return cached;
+    if (cached != null) return Future.value(cached);
+
+    // Déjà demandé et pas encore revenu : on partage la même attente plutôt
+    // que d'en lancer une seconde (deux widgets peuvent afficher le même
+    // souvenir — dashboard et liste, par exemple).
+    final pending = _waiting[m.id];
+    if (pending != null) return pending.future;
+
+    final completer = Completer<List<String>>();
+    _waiting[m.id] = completer;
+    _legacyUrlsById[m.id] = m.mediaUrls;
+    _queue.add(m.id);
+    _batchTimer ??= Timer(_batchWindow, _flushBatch);
+    return completer.future;
+  }
+
+  static Future<void> _flushBatch() async {
+    _batchTimer = null;
+    if (_queue.isEmpty) return;
+    final ids = _queue.take(_batchMaxSize).toList();
+    _queue.removeRange(0, ids.length);
+    // Il en reste (plus de 100 d'un coup) → un second tour juste après.
+    if (_queue.isNotEmpty) _batchTimer ??= Timer(_batchWindow, _flushBatch);
+
+    // Repli commun à tous les chemins d'échec : les anciennes URLs Firebase
+    // du souvenir, comme le faisait la version non groupée.
+    void fallbackAll() {
+      for (final id in ids) {
+        _waiting
+            .remove(id)
+            ?.complete(_legacyUrlsById.remove(id) ?? const <String>[]);
+      }
+    }
+
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
-    if (token == null) return const [];
+    if (token == null) {
+      fallbackAll();
+      return;
+    }
     try {
       final res = await http.post(
-        Uri.parse('${AppConfig.backendUrl}/api/video/photo-play'),
+        Uri.parse('${AppConfig.backendUrl}/api/video/photos-play-batch'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({'memoryId': m.id}),
+        body: jsonEncode({'memoryIds': ids}),
       );
       if (res.statusCode != 200) {
-        // Repli : si la signature échoue mais qu'il reste d'anciennes URLs.
-        return m.mediaUrls;
+        fallbackAll();
+        return;
       }
       final data = jsonDecode(res.body) as Map<String, dynamic>;
-      final signed = (data['urls'] as List<dynamic>).cast<String>();
-      // Souvenir mixte (édité) : clés R2 signées PUIS anciennes URLs Firebase.
-      final merged = <String>[...signed, ...m.mediaUrls];
-      _signedCache.put(m.id, merged);
-      return merged;
+      final results = data['results'] as Map<String, dynamic>? ?? const {};
+      for (final id in ids) {
+        final legacy = _legacyUrlsById.remove(id) ?? const <String>[];
+        final entry = results[id] as Map<String, dynamic>?;
+        final completer = _waiting.remove(id);
+        if (completer == null) continue;
+        if (entry == null) {
+          // Accès refusé ou souvenir disparu → repli sur l'existant.
+          completer.complete(legacy);
+          continue;
+        }
+        final signed = (entry['urls'] as List<dynamic>? ?? const [])
+            .whereType<String>()
+            .toList();
+        // Souvenir mixte (édité) : clés R2 signées PUIS anciennes URLs Firebase.
+        final merged = <String>[...signed, ...legacy];
+        _signedCache.put(id, merged);
+        completer.complete(merged);
+      }
     } catch (_) {
-      return m.mediaUrls;
+      fallbackAll();
     }
   }
 

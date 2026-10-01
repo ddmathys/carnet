@@ -129,28 +129,62 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (confirmed == true) await _deleteAccount();
   }
 
+  /// Nombre maximum de tours. Le backend travaille par tranches de 45 s et
+  /// répond `done: false` tant qu'il reste des données : un très gros compte
+  /// demande plusieurs appels. Au-delà, on rend la main en disant quoi faire
+  /// plutôt que de boucler indéfiniment.
+  static const _deleteMaxRounds = 12;
+
   Future<void> _deleteAccount() async {
     setState(() => _deletingAccount = true);
-    final result = await BackendClient.postJson(
-      '/api/notebook/delete-account',
-      const {},
-      timeout: const Duration(seconds: 55),
-    );
-    if (!mounted) return;
-    if (result == null) {
-      setState(() => _deletingAccount = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-              'Échec de la suppression — vérifie ta connexion et réessaie.'),
-        ),
+
+    // Le backend est REPRENABLE depuis le 01.10.26 : chaque appel avance
+    // jusqu'à son échéance puis renvoie `done: false`. Avant, un compte avec
+    // un long historique dépassait le budget de 60 s, renvoyait une erreur, et
+    // rien ne permettait de reprendre — les données étaient à moitié effacées
+    // et le compte de connexion, lui, survivait.
+    for (var round = 0; round < _deleteMaxRounds; round++) {
+      final result = await BackendClient.postJson(
+        '/api/notebook/delete-account',
+        const {},
+        timeout: const Duration(seconds: 55),
       );
-      return;
+      if (!mounted) return;
+
+      if (result == null) {
+        setState(() => _deletingAccount = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Suppression interrompue — vérifie ta connexion et relance. '
+                'Ce qui est déjà supprimé ne revient pas, la reprise '
+                'continue là où elle s\'est arrêtée.'),
+          ),
+        );
+        return;
+      }
+
+      if (result['done'] == true) {
+        // Le compte Firebase Auth vient d'être supprimé côté serveur ; on
+        // nettoie la session locale avant de renvoyer vers la connexion.
+        await FirebaseAuth.instance.signOut();
+        if (mounted) context.go('/auth');
+        return;
+      }
+      // Encore du travail : on repart pour un tour (l'étape en cours est dans
+      // `result['step']`, utile en diagnostic).
     }
-    // Le compte Firebase Auth a déjà été supprimé côté serveur ; on nettoie
-    // juste la session locale avant de renvoyer vers l'écran de connexion.
-    await FirebaseAuth.instance.signOut();
-    if (mounted) context.go('/auth');
+
+    // Jamais vu en pratique, mais on ne laisse pas l'écran bloqué.
+    setState(() => _deletingAccount = false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+            'Suppression très longue — relance-la pour terminer. Tout ce qui '
+            'est déjà supprimé l\'est définitivement.'),
+      ),
+    );
   }
 
   @override
