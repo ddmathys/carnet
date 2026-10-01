@@ -47,7 +47,9 @@ class PdfService {
               'Authorization': 'Bearer $token',
               'Content-Type': 'application/json',
             },
-            body: jsonEncode(const {}),
+            // Le backend EXIGE la taille depuis le 01.10.26 : sans elle, il
+            // signait un PUT R2 sans aucune contrainte de taille.
+            body: jsonEncode({'sizeBytes': bytes.length}),
           )
           .timeout(const Duration(seconds: 30));
       if (signRes.statusCode != 200) {

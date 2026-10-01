@@ -1,6 +1,11 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { randomUUID } from 'crypto'
-import { requireAuth, escapeHtml } from '../../lib/verify'
+import {
+  requireAuth,
+  escapeHtml,
+  publicPageHeaders,
+  NOINDEX_META,
+} from '../../lib/verify'
 import { db } from '../../lib/firebase'
 import {
   presignPut,
@@ -31,15 +36,42 @@ export const config = { maxDuration: 60 }
 const MAX_PHOTO_BYTES = 50 * 1024 * 1024 // 50 Mo
 const MAX_AUDIO_BYTES = 100 * 1024 * 1024 // 100 Mo
 const MAX_VIDEO_BYTES = 2 * 1024 * 1024 * 1024 // 2 Go
+// Un livre de 300 pages de photos pèse lourd, mais pas ça. Les règles
+// Firebase Storage historiques plafonnaient déjà les PDF à 200 Mo.
+const MAX_PDF_BYTES = 300 * 1024 * 1024 // 300 Mo
+// Photo de puzzle : un JPG à la résolution d'impression (9035×6200 pour le
+// 1000 pièces) tient largement là-dedans.
+const MAX_PUZZLE_PHOTO_BYTES = 80 * 1024 * 1024 // 80 Mo
 
-/** Valide `sizeBytes` (optionnel, envoyé par l'app avant l'upload) contre un
- *  plafond. Absent/invalide → undefined (URL signée SANS contrainte de
- *  taille, pour rester compatible avec un client pas encore à jour). Un
- *  entier positif au-delà du plafond → 'too_large' (l'appelant doit refuser
- *  la requête). */
-function clampSizeBytes(raw: unknown, max: number): number | undefined | 'too_large' {
-  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) return undefined
-  return raw > max ? 'too_large' : Math.round(raw)
+/** Valide `sizeBytes` (envoyé par l'app avant l'upload) contre un plafond,
+ *  et REFUSE la requête s'il est absent.
+ *
+ *  La version précédente l'acceptait absent et signait alors l'URL
+ *  PUT **sans** contrainte de `Content-Length` : il suffisait d'omettre le
+ *  champ pour obtenir un droit d'écriture illimité sur le bucket. Le plafond
+ *  était donc décoratif (audit du 01.10.26).
+ *
+ *  Retourne la taille, ou un message d'erreur prêt à renvoyer en 400. Un
+ *  client antérieur au 15.09.26 n'envoie pas ce champ : il reçoit maintenant
+ *  une invitation explicite à se mettre à jour, plutôt qu'un contournement
+ *  silencieux du plafond. */
+function requireSizeBytes(
+  raw: unknown,
+  max: number,
+  label: string
+): { bytes: number } | { error: string } {
+  if (typeof raw !== 'number' || !Number.isFinite(raw) || raw <= 0) {
+    return {
+      error:
+        'Version de Carnet trop ancienne pour envoyer ce média — mets l’application à jour (dmathys.dev/download/carnet.apk).',
+    }
+  }
+  if (raw > max) {
+    return {
+      error: `${label} trop volumineux (max ${Math.round(max / (1024 * 1024))} Mo)`,
+    }
+  }
+  return { bytes: Math.round(raw) }
 }
 
 /** URL backend permanente d'un PDF (voir lib/r2.ts) : elle redirige vers une
@@ -98,7 +130,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // déjà être imprimé dans le PDF avant qu'un orderId existe).
     const reelId = (req.query.o ?? '') as string
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
-    res.setHeader('Cache-Control', 'public, max-age=300')
+    // `private` : la page contient des URLs signées vers les vidéos — elle ne
+    // doit pas être mise en cache par un intermédiaire partagé.
+    res.setHeader('Cache-Control', 'private, max-age=60')
+    publicPageHeaders(res)
 
     if (!reelId) {
       return res.status(400).send(reelPage('Lien invalide', '<p>Identifiant manquant.</p>'))
@@ -177,6 +212,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const token = (req.query.o ?? '') as string
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.setHeader('Cache-Control', 'no-store')
+    publicPageHeaders(res)
 
     if (!token) {
       return res.status(400).send(sharePage('Lien invalide', '<p>Identifiant manquant.</p>'))
@@ -251,7 +287,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // d'accumuler des liens publics ouverts indéfiniment sur R2).
     const memoryId = (body.memoryId ?? '') as string
     const message = typeof body.message === 'string' ? body.message.trim().slice(0, 300) : ''
-    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    const mem = await memoryIfMember(memoryId, user.uid)
     if (!mem) return res.status(403).json({ error: 'Accès refusé' })
 
     const photoKeys = photoKeysOf(mem)
@@ -295,7 +331,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // si le demandeur est membre du carnet propriétaire du souvenir. Remplace
     // l'ancienne reconstruction d'URL publique (bucket désormais privé).
     const memoryId = (body.memoryId ?? '') as string
-    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    const mem = await memoryIfMember(memoryId, user.uid)
     if (!mem) return res.status(403).json({ error: 'Accès refusé' })
     const keys = videoKeysOf(mem)
     const urls = await Promise.all(keys.map((k) => presignGet(k, 3600)))
@@ -307,12 +343,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!notebookId) {
       return res.status(400).json({ error: 'notebookId manquant' })
     }
-    const sizeBytes = clampSizeBytes(body.sizeBytes, MAX_VIDEO_BYTES)
-    if (sizeBytes === 'too_large') {
-      return res.status(400).json({
-        error: `Vidéo trop volumineuse (max ${Math.round(MAX_VIDEO_BYTES / (1024 * 1024))} Mo)`,
-      })
-    }
+    const size = requireSizeBytes(body.sizeBytes, MAX_VIDEO_BYTES, 'Vidéo')
+    if ('error' in size) return res.status(400).json({ error: size.error })
+    const sizeBytes = size.bytes
     // La clé inclut l'uid → l'utilisateur ne peut écrire/supprimer que ses objets.
     const contentType = 'video/mp4'
     const key = `videos/${user.uid}/${notebookId}/${randomUUID()}.mp4`
@@ -348,12 +381,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!notebookId) {
       return res.status(400).json({ error: 'notebookId manquant' })
     }
-    const sizeBytes = clampSizeBytes(body.sizeBytes, MAX_PHOTO_BYTES)
-    if (sizeBytes === 'too_large') {
-      return res.status(400).json({
-        error: `Photo trop volumineuse (max ${Math.round(MAX_PHOTO_BYTES / (1024 * 1024))} Mo)`,
-      })
-    }
+    const size = requireSizeBytes(body.sizeBytes, MAX_PHOTO_BYTES, 'Photo')
+    if ('error' in size) return res.status(400).json({ error: size.error })
+    const sizeBytes = size.bytes
     const contentType = 'image/jpeg'
     const key = `photos/${user.uid}/${notebookId}/${randomUUID()}.jpg`
     try {
@@ -369,7 +399,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // membre du carnet. Les souvenirs sans `mediaKeys` (anciens) renvoient une
     // liste vide → l'app retombe sur leurs URLs Firebase (double-lecture).
     const memoryId = (body.memoryId ?? '') as string
-    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    const mem = await memoryIfMember(memoryId, user.uid)
     if (!mem) return res.status(403).json({ error: 'Accès refusé' })
     const keys = photoKeysOf(mem)
     const urls = await Promise.all(keys.map((k) => presignGet(k, 3600)))
@@ -436,12 +466,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!notebookId) {
       return res.status(400).json({ error: 'notebookId manquant' })
     }
-    const sizeBytes = clampSizeBytes(body.sizeBytes, MAX_AUDIO_BYTES)
-    if (sizeBytes === 'too_large') {
-      return res.status(400).json({
-        error: `Mémo vocal trop volumineux (max ${Math.round(MAX_AUDIO_BYTES / (1024 * 1024))} Mo)`,
-      })
-    }
+    const size = requireSizeBytes(body.sizeBytes, MAX_AUDIO_BYTES, 'Mémo vocal')
+    if ('error' in size) return res.status(400).json({ error: size.error })
+    const sizeBytes = size.bytes
     const contentType = 'audio/mp4'
     const key = `audio/${user.uid}/${notebookId}/${randomUUID()}.m4a`
     try {
@@ -454,7 +481,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (action === 'audio-play') {
     const memoryId = (body.memoryId ?? '') as string
-    const mem = await memoryIfMember(memoryId, user.uid, user.email)
+    const mem = await memoryIfMember(memoryId, user.uid)
     if (!mem) return res.status(403).json({ error: 'Accès refusé' })
     const key = audioKeyOf(mem)
     const url = key ? await presignGet(key, 3600) : null
@@ -478,9 +505,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'book-upload-url') {
     // Le PDF part sur R2 comme le reste. On renvoie AUSSI l'URL stable : c'est
     // elle qu'on enregistre dans la commande, et que l'imprimeur suivra.
+    // Plafond ajouté le 01.10.26 : ces trois endpoints n'acceptaient AUCUNE
+    // taille, donc signaient un PUT illimité.
+    const size = requireSizeBytes(body.sizeBytes, MAX_PDF_BYTES, 'PDF du livre')
+    if ('error' in size) return res.status(400).json({ error: size.error })
     const key = `books/${user.uid}/${randomUUID()}.pdf`
     try {
-      const uploadUrl = await presignPut(key, 'application/pdf')
+      // 1 h de validité : un PDF de livre fait des dizaines de Mo et part
+      // souvent depuis un réseau mobile (10 min ne suffisaient pas toujours).
+      const uploadUrl = await presignPut(key, 'application/pdf', 3600, size.bytes)
       return res.status(200).json({
         uploadUrl,
         key,
@@ -507,9 +540,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // ── PDF des posters (même infra que les livres, préfixe R2 différent) ────
   if (action === 'poster-upload-url') {
+    const size = requireSizeBytes(body.sizeBytes, MAX_PDF_BYTES, 'PDF du tirage')
+    if ('error' in size) return res.status(400).json({ error: size.error })
     const key = `posters/${user.uid}/${randomUUID()}.pdf`
     try {
-      const uploadUrl = await presignPut(key, 'application/pdf')
+      const uploadUrl = await presignPut(key, 'application/pdf', 3600, size.bytes)
       return res.status(200).json({
         uploadUrl,
         key,
@@ -538,9 +573,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // cadre lui-même la photo dans la zone d'impression, pas de PDF composé
   // côté app comme pour le poster) ────────────────────────────────────────
   if (action === 'puzzle-upload-url') {
+    const size = requireSizeBytes(
+      body.sizeBytes,
+      MAX_PUZZLE_PHOTO_BYTES,
+      'Photo du puzzle'
+    )
+    if ('error' in size) return res.status(400).json({ error: size.error })
     const key = `puzzles/${user.uid}/${randomUUID()}.jpg`
     try {
-      const uploadUrl = await presignPut(key, 'image/jpeg')
+      const uploadUrl = await presignPut(key, 'image/jpeg', 3600, size.bytes)
       return res.status(200).json({
         uploadUrl,
         key,
@@ -578,7 +619,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'memoryIds manquant' })
     }
     for (const memoryId of memoryIds) {
-      const mem = await memoryIfMember(memoryId, user.uid, user.email)
+      const mem = await memoryIfMember(memoryId, user.uid)
       if (!mem) return res.status(403).json({ error: `Accès refusé au souvenir ${memoryId}` })
     }
     // Sélection fine cochée côté app (poster_generate_screen.dart) : quelles
@@ -624,7 +665,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // l'appartenance en parallèle (un `for await` séquentiel dépasserait le
     // budget de 60 s bien avant).
     const members = await Promise.all(
-      memoryIds.map((id) => memoryIfMember(id, user.uid, user.email))
+      memoryIds.map((id) => memoryIfMember(id, user.uid))
     )
     const refusedAt = members.findIndex((m) => !m)
     if (refusedAt >= 0) {
@@ -692,6 +733,7 @@ function reelPage(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>${escapeHtml(titleText)} · carnet</title>
 <style>
   *{box-sizing:border-box}
@@ -718,6 +760,7 @@ function sharePage(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>${escapeHtml(titleText)} · carnet</title>
 <style>
   *{box-sizing:border-box}

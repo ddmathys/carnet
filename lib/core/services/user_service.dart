@@ -4,9 +4,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 class UserService {
   static final _db = FirebaseFirestore.instance;
 
-  // Call on every login to keep profile fresh and resolve pending invites.
+  /// Appelé à chaque connexion pour tenir le profil à jour.
+  ///
+  /// Ne résout plus d'« invitations par e-mail en attente » : ce chemin a été
+  /// retiré le 01.10.26 avec la porte `invitedEmails` des règles Firestore.
+  /// Il accordait un accès sur la seule base d'une adresse jamais vérifiée,
+  /// et plus rien n'alimentait la liste depuis la bascule vers les tags — le
+  /// partage passe par un lien d'invitation (`TagService.createInviteLink`).
   static Future<void> onLogin() async {
-    await Future.wait([saveProfile(), resolvePendingInvites()]);
+    await saveProfile();
   }
 
   // Write/update the current user's profile document.
@@ -21,22 +27,4 @@ class UserService {
     }, SetOptions(merge: true));
   }
 
-  // When a user logs in, grant them access to notebooks they were invited to.
-  static Future<void> resolvePendingInvites() async {
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null || (user.email ?? '').isEmpty) return;
-    final email = user.email!.toLowerCase();
-
-    final snap = await _db
-        .collection('notebooks')
-        .where('invitedEmails', arrayContains: email)
-        .get();
-
-    for (final doc in snap.docs) {
-      await doc.reference.update({
-        'sharedWith': FieldValue.arrayUnion([user.uid]),
-        'invitedEmails': FieldValue.arrayRemove([email]),
-      });
-    }
-  }
 }

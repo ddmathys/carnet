@@ -1,5 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { escapeHtml } from '../lib/verify'
+import { escapeHtml, publicPageHeaders, NOINDEX_META } from '../lib/verify'
 import { projectId } from '../lib/firebase'
 
 // Page publique de lecture des vidéos d'un souvenir — cible des QR codes
@@ -15,6 +15,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   const m = (req.query.m ?? '') as string
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
   res.setHeader('Cache-Control', 'no-store')
+  publicPageHeaders(res)
 
   if (!m || typeof m !== 'string') {
     return res.status(400).send(page('Lien invalide', '<p>Identifiant manquant.</p>'))
@@ -48,6 +49,7 @@ function appPage(cfgJson: string, memoryIdJson: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>Vidéo souvenir · carnet</title>
 ${styleTag()}
 </head>
@@ -195,6 +197,7 @@ function page(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>${escapeHtml(titleText)} · carnet</title>
 ${styleTag()}
 </head>

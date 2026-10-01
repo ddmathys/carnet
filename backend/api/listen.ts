@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { db } from '../lib/firebase'
-import { escapeHtml } from '../lib/verify'
+import { escapeHtml, publicPageHeaders, NOINDEX_META } from '../lib/verify'
 import { presignGet } from '../lib/r2'
 
 // Page publique d'écoute d'un mémo vocal — cible des QR codes imprimés dans le livre.
@@ -31,7 +31,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
-  res.setHeader('Cache-Control', 'public, max-age=300')
+  // `private` : la page porte une URL signée vers le mémo vocal, elle n'a
+  // rien à faire dans un cache partagé (elle était en `public` avant).
+  res.setHeader('Cache-Control', 'private, max-age=60')
+  publicPageHeaders(res)
 
   if (!audioUrl) {
     return res
@@ -52,6 +55,7 @@ function page(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>${escapeHtml(titleText)} · carnet</title>
 <style>
   *{box-sizing:border-box}

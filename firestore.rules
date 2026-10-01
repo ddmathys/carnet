@@ -30,14 +30,19 @@ service cloud.firestore {
     }
 
     // ── Notebooks ──────────────────────────────────────────────────────────
+    //
+    // La porte « invité par e-mail » (`invitedEmails`) a été RETIRÉE le
+    // 01.10.26. Elle accordait la lecture à quiconque présente un jeton dont
+    // le claim `email` figure dans la liste — or l'app ne demande aucune
+    // vérification d'adresse : connaître une adresse invitée mais pas encore
+    // inscrite suffisait à créer ce compte et à entrer. C'était un chemin
+    // mort de toute façon : plus aucune ligne de code n'AJOUTE d'adresse à
+    // `invitedEmails` depuis la bascule vers les tags, le partage réel passe
+    // par un lien d'invitation (backend/api/tag/[action].ts).
     match /notebooks/{notebookId} {
-      // Lecture : propriétaire, collaborateur, ou invité par email
-      // (l'invité doit pouvoir lister ses invitations pour les résoudre au login)
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid
         || request.auth.uid in resource.data.get('sharedWith', [])
-        || (request.auth.token.email != null
-            && request.auth.token.email in resource.data.get('invitedEmails', []))
       );
 
       allow create: if isAuth()
@@ -50,11 +55,6 @@ service cloud.firestore {
         || (request.auth.uid in resource.data.get('sharedWith', [])
             && request.resource.data.diff(resource.data).affectedKeys()
                  .hasOnly(['memoriesCount', 'lastMemoryAt', 'updatedAt']))
-        // Invité par email : peut convertir son invitation en accès au login
-        || (request.auth.token.email != null
-            && request.auth.token.email in resource.data.get('invitedEmails', [])
-            && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['sharedWith', 'invitedEmails']))
       );
 
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
@@ -64,24 +64,17 @@ service cloud.firestore {
     // Le partage se pilote ici : les collaborateurs d'un tag sont recopiés dans
     // le champ `sharedWith` de chaque souvenir qui le porte (voir memories).
     match /tags/{tagId} {
+      // Même retrait que sur les carnets (01.10.26) : plus de porte
+      // `invitedEmails`, non vérifiée et plus alimentée par personne.
       allow read: if isAuth() && (
         resource.data.userId == request.auth.uid
         || request.auth.uid in resource.data.get('sharedWith', [])
-        || (request.auth.token.email != null
-            && request.auth.token.email in resource.data.get('invitedEmails', []))
       );
 
       allow create: if isAuth()
         && request.resource.data.userId == request.auth.uid;
 
-      allow update: if isAuth() && (
-        resource.data.userId == request.auth.uid
-        // Invité par email : convertit son invitation en accès à la connexion
-        || (request.auth.token.email != null
-            && request.auth.token.email in resource.data.get('invitedEmails', [])
-            && request.resource.data.diff(resource.data).affectedKeys()
-                 .hasOnly(['sharedWith', 'invitedEmails']))
-      );
+      allow update: if isAuth() && resource.data.userId == request.auth.uid;
 
       allow delete: if isAuth() && resource.data.userId == request.auth.uid;
     }

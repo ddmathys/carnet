@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
+import '../utils/signed_url_cache.dart';
 
 class AudioService {
   static final _storage = FirebaseStorage.instance;
@@ -54,12 +55,14 @@ class AudioService {
     return key;
   }
 
-  static final Map<String, String?> _signedCache = {};
+  // Même péremption que pour les photos : les URLs R2 vivent 1 h, le cache
+  // les périme avant elles (audit du 01.10.26).
+  static final _signedCache = SignedUrlCache<String?>();
 
   /// URL signée du mémo vocal R2 d'un souvenir (via `audio-play`, membre only).
   /// null si pas d'audio R2. Mise en cache (URLs valables ~1 h).
   static Future<String?> signedAudioUrl(String memoryId) async {
-    if (_signedCache.containsKey(memoryId)) return _signedCache[memoryId];
+    if (_signedCache.has(memoryId)) return _signedCache.get(memoryId);
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (token == null) return null;
     try {
@@ -74,7 +77,7 @@ class AudioService {
       if (res.statusCode != 200) return null;
       final data = jsonDecode(res.body) as Map<String, dynamic>;
       final url = data['url'] as String?;
-      _signedCache[memoryId] = url;
+      _signedCache.put(memoryId, url);
       return url;
     } catch (_) {
       return null;

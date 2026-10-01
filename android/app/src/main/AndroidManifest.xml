@@ -8,14 +8,19 @@
          Picker système (useAndroidPhotoPicker, main.dart), qui donne accès
          aux fichiers choisis sans cette permission large — Play Console la
          flague sinon comme "autorisation non déclarée/injustifiée". -->
-    <!-- Android 13+ : afficher une notification demande l'accord explicite de
-         l'utilisateur, réclamé depuis le profil ou à la création du compte. -->
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- POST_NOTIFICATIONS retirée le 01.10.26 : les notifications push ont
+         été supprimées du produit (plus de firebase_messaging, plus une ligne
+         de code qui en affiche). Une permission déclarée sans usage est
+         signalée par la Play Console et apparaît au client à l'installation
+         pour rien. -->
 
     <application
         android:label="Carnet album souvenir"
         android:name="${applicationName}"
-        android:icon="@mipmap/ic_launcher">
+        android:icon="@mipmap/ic_launcher"
+        android:fullBackupContent="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:allowBackup="false">
         <activity
             android:name=".MainActivity"
             android:exported="true"

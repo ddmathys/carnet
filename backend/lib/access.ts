@@ -7,8 +7,7 @@ import { db } from './firebase'
 // vidéos ET photos.
 export async function memoryIfMember(
   memoryId: string,
-  uid: string,
-  email?: string | null
+  uid: string
 ): Promise<Record<string, unknown> | null> {
   if (!memoryId || !uid) return null
 
@@ -35,16 +34,12 @@ export async function memoryIfMember(
   const asStrings = (v: unknown): string[] =>
     Array.isArray(v) ? (v as unknown[]).filter((x): x is string => typeof x === 'string') : []
   const sharedWith = asStrings(nb.sharedWith)
-  const invitedEmails = asStrings(nb.invitedEmails)
 
-  // Membre = propriétaire, collaborateur (sharedWith), ou invité par email pas
-  // encore « accepté » (invitedEmails) — même périmètre que la lecture autorisée
-  // par firestore.rules. Permet au grand-parent invité de voir depuis le QR
-  // dès sa première connexion, avant même d'ouvrir l'app.
-  const isMember =
-    nb.userId === uid ||
-    sharedWith.includes(uid) ||
-    (!!email && invitedEmails.includes(email))
+  // Membre = propriétaire ou collaborateur (`sharedWith`) — même périmètre que
+  // la lecture autorisée par firestore.rules. La porte `invitedEmails` a été
+  // retirée le 01.10.26 : non vérifiée (aucune confirmation d'adresse dans
+  // l'app) et plus alimentée depuis la bascule vers les tags.
+  const isMember = nb.userId === uid || sharedWith.includes(uid)
 
   return isMember ? mem : null
 }

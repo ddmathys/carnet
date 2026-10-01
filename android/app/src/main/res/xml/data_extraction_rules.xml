@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ : rien de cette application ne part dans une sauvegarde, ni vers
+  le Drive de l'utilisateur (cloud-backup), ni vers un nouveau téléphone
+  (device-transfer). Posé le 01.10.26 : `allowBackup` était laissé à sa valeur
+  par défaut (vrai), donc les données locales de Carnet — y compris le cache de
+  médias en attente d'envoi et les préférences — remontaient dans la
+  sauvegarde Google de l'appareil. Pour une application qui ne contient que
+  des photos d'enfants, c'est une copie de trop, hors de notre contrôle.
+
+  Les souvenirs eux-mêmes vivent dans Firestore et sur R2 : une réinstallation
+  les retrouve en se reconnectant, rien n'est perdu par ce choix.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>

@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { db } from '../lib/firebase'
-import { escapeHtml } from '../lib/verify'
+import { escapeHtml, publicPageHeaders, NOINDEX_META } from '../lib/verify'
 
 // Page publique cible des liens d'invitation https. Elle rebondit vers l'app
 // (schéma carnet://join?token=…) et propose le téléchargement en repli.
@@ -11,6 +11,7 @@ const DOWNLOAD_URL =
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = (req.query.token ?? '') as string
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
+  publicPageHeaders(res)
 
   if (!token || typeof token !== 'string') {
     return res.status(400).send(page('Lien invalide', '<p>Token manquant.</p>'))
@@ -66,6 +67,7 @@ function page(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>${escapeHtml(titleText)} · carnet</title>
 <style>
   *{box-sizing:border-box}

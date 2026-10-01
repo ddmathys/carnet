@@ -1,7 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { createHmac, timingSafeEqual } from 'crypto'
 import { db } from '../../lib/firebase'
-import { escapeHtml } from '../../lib/verify'
+import { escapeHtml, publicPageHeaders, NOINDEX_META } from '../../lib/verify'
 import { FieldValue } from 'firebase-admin/firestore'
 
 // Double rôle sur la même URL (pas un fichier séparé : le plan Vercel Hobby
@@ -29,6 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
 async function handleBrowserReturn(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Content-Type', 'text/html; charset=utf-8')
+  publicPageHeaders(res)
 
   if (req.query.canceled === '1') {
     return res.status(200).send(page('Paiement annulé',
@@ -157,6 +158,7 @@ function page(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
+${NOINDEX_META}
 <title>${escapeHtml(titleText)} · carnet</title>
 <style>
   *{box-sizing:border-box}

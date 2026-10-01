@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:http/http.dart' as http;
 import '../config/app_config.dart';
+import '../utils/signed_url_cache.dart';
 import '../models/memory_model.dart';
 import 'audio_service.dart';
 import 'video_service.dart';
@@ -96,9 +97,11 @@ class PhotoService {
     return results.whereType<String>().toList();
   }
 
-  // Cache d'URLs signées par souvenir (évite un aller-retour à chaque affichage
-  // dans la même session ; les URLs sont valables ~1 h).
-  static final Map<String, List<String>> _signedCache = {};
+  // Cache d'URLs signées par souvenir (évite un aller-retour à chaque
+  // affichage). Les URLs R2 vivent 1 h : le cache les périme avant elles,
+  // sinon l'app affichait des cadres vides au bout d'une heure d'ouverture
+  // (audit du 01.10.26).
+  static final _signedCache = SignedUrlCache<List<String>>();
 
   /// URLs affichables des photos d'un souvenir (DOUBLE-LECTURE) :
   ///  - `mediaKeys` (R2) → URLs GET signées via le backend (membre uniquement) ;
@@ -110,7 +113,7 @@ class PhotoService {
           ? [m.photoUrl!]
           : const [];
     }
-    final cached = _signedCache[m.id];
+    final cached = _signedCache.get(m.id);
     if (cached != null) return cached;
     final token = await FirebaseAuth.instance.currentUser?.getIdToken();
     if (token == null) return const [];
@@ -131,7 +134,7 @@ class PhotoService {
       final signed = (data['urls'] as List<dynamic>).cast<String>();
       // Souvenir mixte (édité) : clés R2 signées PUIS anciennes URLs Firebase.
       final merged = <String>[...signed, ...m.mediaUrls];
-      _signedCache[m.id] = merged;
+      _signedCache.put(m.id, merged);
       return merged;
     } catch (_) {
       return m.mediaUrls;
@@ -141,6 +144,9 @@ class PhotoService {
   /// À appeler après édition d'un souvenir pour forcer une nouvelle signature.
   static void invalidateSignedCache(String memoryId) =>
       _signedCache.remove(memoryId);
+
+  /// Vide tout le cache (changement de compte).
+  static void clearSignedCache() => _signedCache.clear();
 
   /// Map clé→URL signée des photos R2 d'un souvenir (via photo-play, membre
   /// uniquement). Sert l'écran d'édition (afficher les photos existantes tout
