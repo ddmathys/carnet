@@ -893,7 +893,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _orderMessage = 'Génération du livre…';
     });
     try {
-      final price = _priceFor(_coverType);
+      // Pas de `price` local ici : un livre mis en file est un article
+      // SUPPLÉMENTAIRE de la commande, donc tarifé port déduit
+      // (BookPricing.priceAdditional, plus bas) ; la commande racine, elle,
+      // passe par `_totalPrice`.
       final bookTitle = _titleCtrl.text.trim().isNotEmpty
           ? _titleCtrl.text.trim()
           : _notebook!.title;
