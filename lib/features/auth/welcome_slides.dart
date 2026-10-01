@@ -177,7 +177,9 @@ class BottomSheetCta extends StatelessWidget {
                 onPressed: () => context.push('/auth?mode=signup'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: WelcomePalette.terra,
-                  foregroundColor: Colors.white,
+                  // Blanc sur terra = 3.01:1, sous le seuil AA pour ce
+                  // corps de texte ; `ink` donne 5.47:1 (audit du 01.10.26).
+                  foregroundColor: WelcomePalette.ink,
                   elevation: 0,
                   padding: const EdgeInsets.symmetric(vertical: 16),
                   shape:

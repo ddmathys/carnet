@@ -58,7 +58,32 @@ class PuzzlePricing {
     return (raw * 2).ceilToDouble() / 2;
   }
 
+  /// Part « livraison » comprise dans `usdCost`. Jamais isolée sur un devis
+  /// Prodigi pour les puzzles : volontairement PRUDENTE (le port réel est plus
+  /// proche de $17). Miroir de backend/lib/puzzle_pricing.ts.
+  static const double _shippingUsd = 12.0;
+
+  /// Prix d'un puzzle SUPPLÉMENTAIRE dans la même commande : port déduit.
+  static double? priceAdditional(String size) {
+    final entry = entryFor(size);
+    if (entry == null) return null;
+    final usd = entry.usdCost - _shippingUsd;
+    final cost = (usd < 0 ? 0.0 : usd) * _usdToChf;
+    final raw = cost + marginFor(cost);
+    return (raw * 2).ceilToDouble() / 2;
+  }
+
   static String format(double price) => 'CHF ${price.toStringAsFixed(2)}';
+
+  /// Prix du puzzle le moins cher du catalogue. Étiquette « dès … ».
+  static double get minPrice {
+    double? best;
+    for (final s in sizes) {
+      final p = price(s);
+      if (p != null && (best == null || p < best)) best = p;
+    }
+    return best ?? 0;
+  }
 
   static String label(String size) => '${entryFor(size)?.pieces ?? size} pièces';
 }

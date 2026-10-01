@@ -492,7 +492,11 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                 ? _captionCtrl.text.trim()
                 : null,
             pdfUrl: uploaded.url,
-            price: PosterPricing.price(_size, _orientation) ?? 0,
+            // Prix d'un article SUPPLÉMENTAIRE : port déduit. Prodigi ne
+            // facture la livraison qu'une fois par commande groupée — la
+            // compter sur chaque article surfacturait le client (audit du
+            // 01.10.26). Le backend recalcule à l'identique.
+            price: PosterPricing.priceAdditional(_size, _orientation) ?? 0,
             memoryIds: _uniqueMemories.map((m) => m.id).toList(),
             photoKey: photoKey,
             photoUrl: photoUrl,
@@ -1103,7 +1107,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
             ElevatedButton(
               onPressed: _placeOrder,
               style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                  backgroundColor: AppColors.amber, foregroundColor: AppColors.onAccent),
               child: const Text('Ajouter à la commande'),
             )
         else
@@ -1152,7 +1156,7 @@ class _PosterGenerateScreenState extends State<PosterGenerateScreen> {
                   ElevatedButton(
                     onPressed: _placeOrder,
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                        backgroundColor: AppColors.amber, foregroundColor: AppColors.onAccent),
                     child: Text(widget.editOrderId != null ? 'Renvoyer' : 'Commander'),
                   ),
               ],

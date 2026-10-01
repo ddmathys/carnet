@@ -194,6 +194,12 @@ class PosterPricing {
     );
   }
 
+  /// Part « livraison » comprise dans `usdCost` (devis réel du 21.08.26 :
+  /// A1 portrait = article $27.28 + livraison $17.67). Miroir de
+  /// backend/lib/poster_pricing.ts — ne sert qu'à déduire le port d'un tirage
+  /// supplémentaire groupé.
+  static const double _shippingUsd = 17.67;
+
   static double marginFor(double cost) =>
       cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
 
@@ -206,6 +212,32 @@ class PosterPricing {
     final cost = entry.usdCost * _usdToChf;
     final raw = cost + marginFor(cost);
     return (raw * 2).ceilToDouble() / 2;
+  }
+
+  /// Prix d'un tirage SUPPLÉMENTAIRE dans la même commande : port déduit,
+  /// Prodigi ne le facturant qu'une fois par commande. Miroir de
+  /// `computeAdditionalPosterPrice` (backend/lib/poster_pricing.ts).
+  static double? priceAdditional(String size, String orientation) {
+    final entry = entryFor(size, orientation);
+    if (entry == null) return null;
+    final usd = entry.usdCost - _shippingUsd;
+    final cost = (usd < 0 ? 0.0 : usd) * _usdToChf;
+    final raw = cost + marginFor(cost);
+    return (raw * 2).ceilToDouble() / 2;
+  }
+
+  /// Prix du tirage le moins cher du catalogue PUBLIC (les tableaux muraux
+  /// restent réservés à l'admin tant que leurs coûts ne sont pas confirmés,
+  /// voir `wallCostsVerified`). Sert l'étiquette « dès … » du catalogue.
+  static double get minPrice {
+    double? best;
+    for (final size in sizes) {
+      for (final o in const ['portrait', 'landscape']) {
+        final p = price(size, o);
+        if (p != null && (best == null || p < best)) best = p;
+      }
+    }
+    return best ?? 0;
   }
 
   static String format(double price) => 'CHF ${price.toStringAsFixed(2)}';

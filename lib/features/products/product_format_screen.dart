@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/book_pricing.dart';
+import '../../core/services/poster_pricing.dart';
+import '../../core/services/puzzle_pricing.dart';
 import '../../core/theme/app_theme.dart';
 
 /// Choix du format avant de composer un souvenir imprimé — point d'entrée
@@ -28,6 +31,13 @@ class ProductFormatScreen extends StatelessWidget {
     if (ids == null || ids.isEmpty || !context.mounted) return;
     context.push('/book/new?memories=${ids.join(',')}');
   }
+
+  /// « dès 37 CHF » — CALCULÉ depuis la table de prix, jamais écrit en dur :
+  /// l'écran annonçait « dès 29 CHF » pour le livre alors que le plancher
+  /// réel est CHF 37.50, écart découvert seulement au moment de payer (audit
+  /// du 01.10.26). Arrondi à l'entier INFÉRIEUR interdit — on arrondit au
+  /// franc supérieur pour ne jamais annoncer moins que ce qui sera facturé.
+  static String _from(double price) => 'dès ${price.ceil()} CHF';
 
   void _comingSoon(BuildContext context, String label) {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -69,7 +79,7 @@ class ProductFormatScreen extends StatelessWidget {
             iconColor: AppColors.sageDark,
             title: 'Livre',
             subtitle: 'Ton carnet en version papier, page après page.',
-            priceLabel: 'dès 29 CHF',
+            priceLabel: _from(BookPricing.minPrice),
             onTap: () => _startLivre(context),
           ),
           const SizedBox(height: 12),
@@ -78,7 +88,7 @@ class ProductFormatScreen extends StatelessWidget {
             iconColor: AppColors.success,
             title: 'Poster',
             subtitle: 'Une ou plusieurs photos, prêtes à accrocher.',
-            priceLabel: 'dès 31 CHF',
+            priceLabel: _from(PosterPricing.minPrice),
             onTap: () => context.push('/poster/select'),
           ),
           const SizedBox(height: 12),
@@ -87,7 +97,7 @@ class ProductFormatScreen extends StatelessWidget {
             iconColor: AppColors.coverPink,
             title: 'Puzzle',
             subtitle: 'Ton souvenir préféré, à reconstituer en famille.',
-            priceLabel: 'dès 34 CHF',
+            priceLabel: _from(PuzzlePricing.minPrice),
             onTap: () => context.push('/puzzle/select'),
           ),
           const SizedBox(height: 12),

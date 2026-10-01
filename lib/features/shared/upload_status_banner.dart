@@ -83,6 +83,49 @@ class UploadStatusBanner extends StatelessWidget {
             ),
           );
         }
+        // Médias définitivement perdus (fichiers locaux disparus entre deux
+        // lancements) : on le DIT, avec un bouton pour refermer le message —
+        // il n'y a rien à réessayer, seulement à rajouter les photos.
+        if (q.lostJobs > 0 && q.failed.isEmpty) {
+          final n = q.lostJobs;
+          return _strip(
+            color: AppColors.error.withOpacity(0.10),
+            child: Row(
+              children: [
+                const Icon(Icons.image_not_supported_outlined,
+                    size: 16, color: AppColors.errorText),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    n == 1
+                        ? 'Un souvenir n a pas reçu ses médias : les fichiers '
+                            'ne sont plus sur le téléphone. Rouvre-le et '
+                            'rajoute-les.'
+                        : '$n souvenirs n ont pas reçu leurs médias : les '
+                            'fichiers ne sont plus sur le téléphone. Rouvre-les '
+                            'et rajoute-les.',
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.errorText),
+                  ),
+                ),
+                TextButton(
+                  onPressed: q.acknowledgeLost,
+                  style: TextButton.styleFrom(
+                    minimumSize: Size.zero,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 10, vertical: 4),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  child: const Text('Compris',
+                      style: TextStyle(
+                          color: AppColors.errorText,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 12.5)),
+                ),
+              ],
+            ),
+          );
+        }
         if (q.failed.isNotEmpty) {
           final n = q.failed.length;
           final reason = q.lastError;
@@ -91,7 +134,7 @@ class UploadStatusBanner extends StatelessWidget {
             child: Row(
               children: [
                 const Icon(Icons.cloud_off_outlined,
-                    size: 16, color: AppColors.error),
+                    size: 16, color: AppColors.errorText),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -100,7 +143,7 @@ class UploadStatusBanner extends StatelessWidget {
                             : 'Échec de l\'envoi de $n souvenirs') +
                         (reason != null ? ' — $reason' : ''),
                     style: const TextStyle(
-                        fontSize: 12.5, color: AppColors.error),
+                        fontSize: 12.5, color: AppColors.errorText),
                   ),
                 ),
                 TextButton(
@@ -113,7 +156,7 @@ class UploadStatusBanner extends StatelessWidget {
                   ),
                   child: const Text('Réessayer',
                       style: TextStyle(
-                          color: AppColors.error,
+                          color: AppColors.errorText,
                           fontWeight: FontWeight.w600,
                           fontSize: 12.5)),
                 ),

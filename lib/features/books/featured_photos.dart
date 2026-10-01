@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../core/utils/chunked_writer.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
@@ -267,16 +268,18 @@ class _FeaturedPhotosScreenState extends State<FeaturedPhotosScreen> {
     }
     setState(() => _saving = true);
     try {
-      final batch = FirebaseFirestore.instance.batch();
+      // Un livre peut porter plusieurs centaines de souvenirs : ecriture par
+      // lots (un `WriteBatch` unique echoue en bloc au-dela de 500).
+      final writer = ChunkedWriter();
       final updated = <MemoryModel>[];
       for (final m in changed) {
         final ids = _featured[m.id]!.toList();
-        batch.update(
+        await writer.update(
             FirebaseFirestore.instance.collection('memories').doc(m.id),
             {'bookFeaturedMedia': ids});
         updated.add(m.copyWith(bookFeaturedMedia: ids));
       }
-      await batch.commit();
+      await writer.flush();
       if (mounted) Navigator.pop(context, updated);
     } catch (_) {
       if (mounted) {

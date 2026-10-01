@@ -216,7 +216,11 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
           _QueuedPuzzle(
             sku: entry?.sku,
             size: _size,
-            price: PuzzlePricing.price(_size) ?? 0,
+            // Prix d'un article SUPPLÉMENTAIRE : port déduit. Prodigi ne
+            // facture la livraison qu'une fois par commande groupée — la
+            // compter sur chaque article surfacturait le client (audit du
+            // 01.10.26). Le backend recalcule à l'identique.
+            price: PuzzlePricing.priceAdditional(_size) ?? 0,
             pdfUrl: uploaded.url,
             photoKey: _photoKey,
             photoUrl: _photoKey == null ? _photoUrl : null,
@@ -435,7 +439,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
             ElevatedButton(
               onPressed: _placeOrder,
               style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                  backgroundColor: AppColors.amber, foregroundColor: AppColors.onAccent),
               child: const Text('Ajouter à la commande'),
             )
         else
@@ -484,7 +488,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
                   ElevatedButton(
                     onPressed: _placeOrder,
                     style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                        backgroundColor: AppColors.amber, foregroundColor: AppColors.onAccent),
                     child: const Text('Commander'),
                   ),
               ],

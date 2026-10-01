@@ -88,6 +88,14 @@ jobs:
       - name: Analyse statique (flutter analyze)
         run: flutter analyze --no-fatal-infos
 
+      # Ajouté le 01.10.26 (audit) : les tests Dart existaient mais n'étaient
+      # lancés par personne — seul `flutter analyze` tournait ici, donc aucune
+      # régression de calcul (tarifs, pagination des livres) n'était attrapée
+      # avant la production. Les tables de prix de l'app sont des MIROIRS de
+      # celles du backend : ce sont justement elles que ces tests figent.
+      - name: Tests (flutter test)
+        run: flutter test
+
       # Le numéro de build (visible dans l'app sur l'écran de connexion,
       # "v1.0.0 (N)") ne bougeait jamais (fixé à 1 dans pubspec.yaml) — donc
       # aucun moyen de vérifier qu'un téléphone a bien la dernière version.

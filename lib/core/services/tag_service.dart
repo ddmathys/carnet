@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/memory_model.dart';
 import '../models/tag_model.dart';
+import '../utils/chunked_writer.dart';
 import 'backend_client.dart';
 import 'memory_query_service.dart';
 
@@ -321,16 +322,14 @@ class TagService {
     final clean = label.trim();
     if (uid == null || clean.isEmpty) return;
     final mine = await myTags();
-    final batch = _db.batch();
-    var writes = 0;
+    final writer = ChunkedWriter(_db);
     for (final t in mine) {
       if (t.label.trim().toLowerCase() == clean.toLowerCase() &&
           t.kind != kind) {
-        batch.update(_col.doc(t.id), {'kind': kind});
-        writes++;
+        await writer.update(_col.doc(t.id), {'kind': kind});
       }
     }
-    if (writes > 0) await batch.commit();
+    await writer.flush();
   }
 
   /// Photo de tête d'une personne (clé R2 `photos/{uid}/...`, ou null pour la
@@ -355,18 +354,16 @@ class TagService {
       ..remove('');
     if (wanted.isEmpty) return 0;
     final mine = await myTags();
-    final batch = _db.batch();
-    var writes = 0;
+    final writer = ChunkedWriter(_db);
     for (final t in mine) {
       if (t.kind != 'personne' &&
           !t.isChild &&
           wanted.contains(t.label.trim().toLowerCase())) {
-        batch.update(_col.doc(t.id), {'kind': 'personne'});
-        writes++;
+        await writer.update(_col.doc(t.id), {'kind': 'personne'});
       }
     }
-    if (writes > 0) await batch.commit();
-    return writes;
+    await writer.flush();
+    return writer.total;
   }
 
   /// Tags posés d'office sur un nouveau souvenir : l'année et le lieu.
@@ -412,7 +409,7 @@ class TagService {
     await _col.doc(tag.id).update({'label': clean});
     // Le libellé est recopié sur les souvenirs (affichage sans lecture des tags).
     final memories = await _memoriesWithTag(tag.id);
-    final batch = _db.batch();
+    final writer = ChunkedWriter(_db);
     for (final doc in memories) {
       final labels = List<String>.from(doc.data()['tagLabels'] ?? []);
       final ids = List<String>.from(doc.data()['tagIds'] ?? []);
@@ -422,9 +419,9 @@ class TagService {
       } else if (!labels.contains(clean)) {
         labels.add(clean);
       }
-      batch.update(doc.reference, {'tagLabels': labels});
+      await writer.update(doc.reference, {'tagLabels': labels});
     }
-    await batch.commit();
+    await writer.flush();
   }
 
   /// Supprime le tag et le retire des souvenirs (les souvenirs, eux, restent).
@@ -435,21 +432,23 @@ class TagService {
     final tagsById = {for (final t in await myTags()) t.id: t};
     tagsById.remove(tag.id);
 
-    final batch = _db.batch();
+    final writer = ChunkedWriter(_db);
     for (final doc in memories) {
       final ids = List<String>.from(doc.data()['tagIds'] ?? [])
         ..remove(tag.id);
       final labels = [
         for (final id in ids) tagsById[id]?.label ?? '',
       ]..removeWhere((l) => l.isEmpty);
-      batch.update(doc.reference, {
+      await writer.update(doc.reference, {
         'tagIds': ids,
         'tagLabels': labels,
         'sharedWith': _sharedUnion(ids, tagsById, uid),
       });
     }
-    batch.delete(_col.doc(tag.id));
-    await batch.commit();
+    // Le tag lui-meme part en DERNIER : si le detachement des souvenirs
+    // echoue en route, le tag existe encore et l'operation est rejouable.
+    await writer.flush();
+    await _col.doc(tag.id).delete();
   }
 
   // ── Réparation ─────────────────────────────────────────────────────────────
@@ -494,8 +493,7 @@ class TagService {
 
       final keptByGroup = <String, TagModel>{};
       final replacedBy = <String, String>{}; // id du doublon → id du tag gardé
-      final tagBatch = _db.batch();
-      var tagWrites = 0;
+      final tagWriter = ChunkedWriter(_db);
 
       for (final entry in groups.entries) {
         final sorted = [...entry.value]
@@ -528,17 +526,15 @@ class TagService {
           update['invitedEmails'] = invited.toList();
         }
         if (update.isNotEmpty) {
-          tagBatch.update(_col.doc(keep.id), update);
-          tagWrites++;
+          await tagWriter.update(_col.doc(keep.id), update);
         }
         for (final d in dups) {
           replacedBy[d.id] = keep.id;
-          tagBatch.delete(_col.doc(d.id));
-          tagWrites++;
+          await tagWriter.delete(_col.doc(d.id));
         }
       }
 
-      if (tagWrites > 0) await tagBatch.commit();
+      await tagWriter.flush();
       if (replacedBy.isEmpty) return;
 
       // Les souvenirs pointent encore sur les doublons : on les repointe sur le
@@ -547,15 +543,14 @@ class TagService {
       final labelById = {for (final t in kept) t.id: t.label};
       final tagsById = {for (final t in kept) t.id: t};
 
-      final memBatch = _db.batch();
-      var memWrites = 0;
+      final memWriter = ChunkedWriter(_db);
       for (final doc in memSnap.docs) {
         final ids = List<String>.from(doc.data()['tagIds'] ?? []);
         if (!ids.any(replacedBy.containsKey)) continue;
         final fixed = <String>{
           for (final id in ids) replacedBy[id] ?? id,
         }.toList();
-        memBatch.update(doc.reference, {
+        await memWriter.update(doc.reference, {
           'tagIds': fixed,
           'tagLabels': [
             for (final id in fixed)
@@ -563,9 +558,8 @@ class TagService {
           ],
           'sharedWith': _sharedUnion(fixed, tagsById, uid),
         });
-        memWrites++;
       }
-      if (memWrites > 0) await memBatch.commit();
+      await memWriter.flush();
     } catch (_) {
       // Réparation best-effort : un échec ne doit pas empêcher l'app de démarrer.
     }
@@ -622,6 +616,39 @@ class TagService {
     };
   }
 
+  /// Liens d'invitation encore actifs (ni révoqués, ni expirés) émis par
+  /// l'utilisateur et couvrant au moins un des tags donnés.
+  ///
+  /// Sans cette liste, un lien partagé dans un groupe de messagerie restait
+  /// valable 30 jours sans que personne puisse le refermer ni même savoir
+  /// qu'il circulait (audit du 01.10.26).
+  static Future<List<TagInviteLink>> activeInviteLinks(
+      List<String> tagIds) async {
+    if (tagIds.isEmpty) return const [];
+    final data = await BackendClient.postJson(
+      '/api/tag/invites',
+      {'tagIds': tagIds},
+      timeout: const Duration(seconds: 20),
+    );
+    final raw = data?['invites'] as List<dynamic>? ?? const [];
+    return [
+      for (final e in raw)
+        if (e is Map<String, dynamic>) TagInviteLink.fromJson(e),
+    ];
+  }
+
+  /// Ferme définitivement un lien d'invitation. Qui l'ouvre ensuite voit
+  /// « Invitation révoquée » ; les personnes déjà entrées gardent leur accès
+  /// (c'est `revoke()` qui le leur retire).
+  static Future<bool> revokeInviteLink(String token) async {
+    final data = await BackendClient.postJson(
+      '/api/tag/revoke-invite',
+      {'token': token},
+      timeout: const Duration(seconds: 20),
+    );
+    return data?['ok'] == true;
+  }
+
   /// Rejoint un tag via le token d'un lien d'invitation.
   static Future<({String tagId, String label})?> joinByToken(String token) async {
     final data = await BackendClient.postJson(
@@ -660,13 +687,13 @@ class TagService {
     final tagsById = {for (final t in await myTags()) t.id: t};
     final memories = await _memoriesWithTag(tagId);
     if (memories.isEmpty) return;
-    final batch = _db.batch();
+    final writer = ChunkedWriter(_db);
     for (final doc in memories) {
       final ids = List<String>.from(doc.data()['tagIds'] ?? []);
-      batch.update(
+      await writer.update(
           doc.reference, {'sharedWith': _sharedUnion(ids, tagsById, uid)});
     }
-    await batch.commit();
+    await writer.flush();
   }
 
   /// Les UIDs qui doivent voir un souvenir portant [tagIds] : la réunion des
@@ -713,4 +740,51 @@ class TagService {
             List<String>.from(d.data()['tagIds'] ?? []).contains(tagId))
         .toList();
   }
+}
+
+
+/// Un lien d'invitation encore en circulation, tel que le backend le décrit
+/// (`/api/tag/invites`).
+class TagInviteLink {
+  final String token;
+  final String url;
+  final List<String> tagLabels;
+  final DateTime? createdAt;
+  final DateTime? expiresAt;
+
+  const TagInviteLink({
+    required this.token,
+    required this.url,
+    required this.tagLabels,
+    this.createdAt,
+    this.expiresAt,
+  });
+
+  factory TagInviteLink.fromJson(Map<String, dynamic> j) {
+    DateTime? at(Object? v) {
+      final ms = (v as num?)?.toInt() ?? 0;
+      return ms > 0 ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
+    }
+
+    return TagInviteLink(
+      token: (j['token'] as String?) ?? '',
+      url: (j['url'] as String?) ?? '',
+      tagLabels: [
+        for (final l in (j['tagLabels'] as List<dynamic>? ?? const []))
+          if (l is String && l.isNotEmpty) l,
+      ],
+      createdAt: at(j['createdAt']),
+      expiresAt: at(j['expiresAt']),
+    );
+  }
+
+  /// Jours restants avant expiration (0 si déjà expiré ou inconnu).
+  int get daysLeft {
+    final e = expiresAt;
+    if (e == null) return 0;
+    final d = e.difference(DateTime.now()).inHours / 24;
+    return d <= 0 ? 0 : d.ceil();
+  }
+
+  String get label => tagLabels.isEmpty ? 'Tag' : tagLabels.join(' · ');
 }

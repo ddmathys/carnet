@@ -29,7 +29,94 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'invite') return invite(res, user.uid, body)
   if (action === 'join') return join(res, user.uid, user.email, body)
   if (action === 'collaborators') return collaborators(res, user.uid, body)
+  if (action === 'invites') return listInvites(res, user.uid, body)
+  if (action === 'revoke-invite') return revokeInvite(res, user.uid, body)
   return res.status(404).json({ error: 'Action inconnue' })
+}
+
+// ── invites / revoke-invite ──────────────────────────────────────────────────
+
+// Un lien d'invitation vivait 30 jours sans que personne puisse le refermer :
+// le champ `revoked` existait depuis le début mais rien ne l'écrivait, et
+// l'app ne montrait même pas qu'un lien était en circulation (audit du
+// 01.10.26). Ces deux actions donnent au propriétaire la vue et la main :
+//   POST /api/tag/invites        { tagIds } → liens encore actifs
+//   POST /api/tag/revoke-invite  { token }  → ferme CE lien, définitivement
+//
+// Les documents `tagInvites` sont fermés côté client par les règles Firestore
+// (aucune règle = refus), donc tout passe par l'Admin SDK ici, et on ne révèle
+// que les liens créés par l'appelant lui-même.
+const PUBLIC_BASE = BASE_URL
+
+function liveInvite(d: Record<string, any>): boolean {
+  if (d.revoked === true) return false
+  if (typeof d.expiresAt === 'number' && Date.now() > d.expiresAt) return false
+  return true
+}
+
+async function listInvites(
+  res: VercelResponse,
+  uid: string,
+  body: Record<string, unknown>
+) {
+  const wanted = new Set(
+    Array.isArray(body.tagIds)
+      ? (body.tagIds as unknown[]).filter(
+          (t): t is string => typeof t === 'string' && t.length > 0
+        )
+      : []
+  )
+
+  const snap = await db
+    .collection('tagInvites')
+    .where('createdBy', '==', uid)
+    .get()
+
+  const invites = snap.docs
+    .map((doc) => ({ token: doc.id, d: doc.data() as Record<string, any> }))
+    .filter(({ d }) => liveInvite(d))
+    .filter(({ d }) => {
+      if (wanted.size === 0) return true
+      const ids: string[] = Array.isArray(d.tagIds)
+        ? d.tagIds
+        : [String(d.tagId ?? '')]
+      return ids.some((id) => wanted.has(id))
+    })
+    .sort((a, b) => Number(b.d.createdAt ?? 0) - Number(a.d.createdAt ?? 0))
+    .slice(0, 20)
+    .map(({ token, d }) => ({
+      token,
+      url: `${PUBLIC_BASE}/join?token=${token}&kind=tag`,
+      tagIds: Array.isArray(d.tagIds) ? d.tagIds : [String(d.tagId ?? '')],
+      tagLabels: Array.isArray(d.tagLabels)
+        ? d.tagLabels
+        : [String(d.tagLabel ?? 'Tag')],
+      createdAt: Number(d.createdAt ?? 0),
+      expiresAt: Number(d.expiresAt ?? 0),
+    }))
+
+  return res.status(200).json({ invites })
+}
+
+async function revokeInvite(
+  res: VercelResponse,
+  uid: string,
+  body: Record<string, unknown>
+) {
+  const token = body.token
+  if (!token || typeof token !== 'string') {
+    return res.status(400).json({ error: 'Missing token' })
+  }
+  const ref = db.collection('tagInvites').doc(token)
+  const snap = await ref.get()
+  if (!snap.exists) return res.status(404).json({ error: 'Invitation introuvable' })
+  const inv = snap.data() as Record<string, any>
+  // Seul l'émetteur peut refermer son lien.
+  if (inv.createdBy !== uid) {
+    return res.status(403).json({ error: 'Ce lien n’a pas été émis par toi' })
+  }
+  await ref.update({ revoked: true, revokedAt: Date.now() })
+  return res.status(200).json({ ok: true })
 }
 
 // ── invite ───────────────────────────────────────────────────────────────────

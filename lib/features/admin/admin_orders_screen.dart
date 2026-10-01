@@ -40,14 +40,14 @@ class _AdminOrdersScreenState extends State<AdminOrdersScreen> {
         backgroundColor: AppColors.sageDark,
         elevation: 0,
         title: const Text('Console admin',
-          style: TextStyle(fontFamily: 'PlayfairDisplay', fontWeight: FontWeight.bold, color: Colors.white)),
+          style: TextStyle(fontFamily: 'PlayfairDisplay', fontWeight: FontWeight.bold, color: AppColors.onAccent)),
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
+          icon: const Icon(Icons.arrow_back, color: AppColors.onAccent),
           onPressed: () => context.go('/home'),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.ios_share, color: Colors.white),
+            icon: const Icon(Icons.ios_share, color: AppColors.onAccent),
             tooltip: 'Partager l\'app',
             onPressed: () => showModalBottomSheet<void>(
               context: context,

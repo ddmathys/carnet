@@ -59,8 +59,28 @@ class BookPricing {
 
   /// Prix client = coût d'impression + marge, arrondi au 0.50 supérieur (le
   /// coût reste toujours couvert).
+  ///
+  /// Le nombre de pages est écrêté aux bornes du produit, comme côté serveur
+  /// (`printablePages`) : sans ça, l'app affichait le prix de 150 pages pour un
+  /// layflat que Stripe facturait à 122 (audit du 01.10.26).
   static double price({required String coverType, required int pages}) {
-    final cost = printCost(coverType: coverType, pages: pages);
+    final cost =
+        printCost(coverType: coverType, pages: printablePages(coverType, pages));
+    final raw = cost + marginFor(cost);
+    return (raw * 2).ceilToDouble() / 2;
+  }
+
+  /// Prix d'un livre SUPPLÉMENTAIRE dans la même commande : port déduit.
+  /// Prodigi ne facture la livraison qu'une fois par commande — l'additionner
+  /// par article faisait payer le port deux, trois fois (audit du 01.10.26).
+  /// Miroir de `computeAdditionalPrice` (backend/lib/pricing.ts).
+  static double priceAdditional(
+      {required String coverType, required int pages}) {
+    final shipping =
+        (_shippingUsd[coverType] ?? _shippingUsd['hard']!) * _usdToChf;
+    final cost =
+        printCost(coverType: coverType, pages: printablePages(coverType, pages)) -
+            shipping;
     final raw = cost + marginFor(cost);
     return (raw * 2).ceilToDouble() / 2;
   }
@@ -107,6 +127,12 @@ class BookPricing {
     if (v > max) v = max;
     return v;
   }
+
+  /// Prix du livre le MOINS cher possible : couverture souple au minimum de
+  /// pages. Sert l'étiquette « dès … » du catalogue, qui annonçait 29 CHF en
+  /// dur alors que le vrai plancher est 37.50 (audit du 01.10.26).
+  static double get minPrice =>
+      price(coverType: 'soft', pages: _minPages['soft']!);
 
   /// « CHF 24.90 »
   static String format(double price) => 'CHF ${price.toStringAsFixed(2)}';

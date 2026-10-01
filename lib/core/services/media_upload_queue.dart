@@ -1,6 +1,8 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'draft_media_uploader.dart';
 import 'photo_service.dart';
 import 'audio_service.dart';
@@ -40,6 +42,102 @@ class MediaUploadJob {
   final List<DraftUploadTicket?> photoTickets;
   final List<DraftUploadTicket?> videoTickets;
 
+  /// Forme persistable du travail (voir MediaUploadQueue._persist).
+  ///
+  /// On ne garde que des CHEMINS : les `File` se reconstruisent, les
+  /// `DraftUploadTicket` non — ils n'ont de sens que dans le processus qui les
+  /// a créés. Un job restauré repart donc d'un envoi frais, exactement comme
+  /// le repli déjà prévu quand un ticket a échoué.
+  Map<String, dynamic> toJson() => {
+        'memoryId': memoryId,
+        'notebookId': notebookId,
+        'localPhotos': [for (final f in localPhotos) f.path],
+        'existingPhotoUrls': existingPhotoUrls,
+        'removedPhotoUrls': removedPhotoUrls,
+        'existingPhotoKeys': existingPhotoKeys,
+        'removedPhotoKeys': removedPhotoKeys,
+        'localAudioPath': localAudioPath,
+        'existingAudioUrl': existingAudioUrl,
+        'existingAudioKey': existingAudioKey,
+        'audioRemoved': audioRemoved,
+        'audioDurationMs': audioDurationMs,
+        'localVideoPaths': localVideoPaths,
+        'localVideoDurations': localVideoDurations,
+        'existingVideoKeys': existingVideoKeys,
+        'existingVideoDurations': existingVideoDurations,
+        'removedVideoKeys': removedVideoKeys,
+      };
+
+  static MediaUploadJob fromJson(Map<String, dynamic> j) {
+    List<String> strs(Object? v) => [
+          for (final e in (v as List<dynamic>? ?? const []))
+            if (e is String) e,
+        ];
+    return MediaUploadJob(
+      memoryId: (j['memoryId'] as String?) ?? '',
+      notebookId: (j['notebookId'] as String?) ?? '',
+      localPhotos: [for (final p in strs(j['localPhotos'])) File(p)],
+      existingPhotoUrls: strs(j['existingPhotoUrls']),
+      removedPhotoUrls: strs(j['removedPhotoUrls']),
+      existingPhotoKeys: strs(j['existingPhotoKeys']),
+      removedPhotoKeys: strs(j['removedPhotoKeys']),
+      localAudioPath: j['localAudioPath'] as String?,
+      existingAudioUrl: j['existingAudioUrl'] as String?,
+      existingAudioKey: j['existingAudioKey'] as String?,
+      audioRemoved: j['audioRemoved'] == true,
+      audioDurationMs: (j['audioDurationMs'] as num?)?.toInt(),
+      localVideoPaths: strs(j['localVideoPaths']),
+      localVideoDurations: [
+        for (final e in (j['localVideoDurations'] as List<dynamic>? ?? const []))
+          (e as num?)?.toInt(),
+      ],
+      existingVideoKeys: strs(j['existingVideoKeys']),
+      existingVideoDurations: [
+        for (final e in (j['existingVideoDurations'] as List<dynamic>? ?? const []))
+          if (e is num) e.toInt(),
+      ],
+      removedVideoKeys: strs(j['removedVideoKeys']),
+    );
+  }
+
+  /// Reste-t-il quelque chose à faire, et les fichiers locaux sont-ils encore
+  /// là ? Un job restauré dont les fichiers ont disparu du cache de l'appareil
+  /// n'est plus rattrapable.
+  bool get hasLocalWork =>
+      localPhotos.isNotEmpty ||
+      localVideoPaths.isNotEmpty ||
+      localAudioPath != null;
+
+  /// Le même job, réduit aux fichiers qui existent encore sur l'appareil.
+  MediaUploadJob prunedToExistingFiles() => MediaUploadJob(
+        memoryId: memoryId,
+        notebookId: notebookId,
+        localPhotos: [for (final f in localPhotos) if (f.existsSync()) f],
+        existingPhotoUrls: existingPhotoUrls,
+        removedPhotoUrls: removedPhotoUrls,
+        existingPhotoKeys: existingPhotoKeys,
+        removedPhotoKeys: removedPhotoKeys,
+        localAudioPath: (localAudioPath != null &&
+                File(localAudioPath!).existsSync())
+            ? localAudioPath
+            : null,
+        existingAudioUrl: existingAudioUrl,
+        existingAudioKey: existingAudioKey,
+        audioRemoved: audioRemoved,
+        audioDurationMs: audioDurationMs,
+        localVideoPaths: [
+          for (final p in localVideoPaths) if (File(p).existsSync()) p
+        ],
+        localVideoDurations: [
+          for (var i = 0; i < localVideoPaths.length; i++)
+            if (File(localVideoPaths[i]).existsSync())
+              (i < localVideoDurations.length ? localVideoDurations[i] : null),
+        ],
+        existingVideoKeys: existingVideoKeys,
+        existingVideoDurations: existingVideoDurations,
+        removedVideoKeys: removedVideoKeys,
+      );
+
   const MediaUploadJob({
     required this.memoryId,
     required this.notebookId,
@@ -77,7 +175,18 @@ class MediaUploadQueue extends ChangeNotifier {
 
   int _pending = 0;
   final List<MediaUploadJob> _failed = [];
+  /// Travaux en cours d'envoi, pour pouvoir les PERSISTER : avant, la file ne
+  /// vivait qu'en mémoire — l'app tuée pendant un envoi (Android qui récupère
+  /// la RAM sur une grosse vidéo, c'est le cas courant), le souvenir restait
+  /// en base sans ses médias et il ne restait aucune trace du travail à faire
+  /// (audit du 01.10.26).
+  final List<MediaUploadJob> _inFlight = [];
   String? _lastError;
+
+  /// Souvenirs dont les médias ne sont PLUS rattrapables : le travail avait
+  /// bien été noté, mais les fichiers d'origine ont disparu du cache de
+  /// l'appareil entre-temps. On le dit au lieu de l'effacer en silence.
+  int _lostJobs = 0;
 
   // Progression du clip vidéo en cours d'envoi (le plus lourd des médias) :
   // fraction 0..1, index du clip et nombre total à envoyer. Alimente la barre
@@ -118,17 +227,107 @@ class MediaUploadQueue extends ChangeNotifier {
   /// pas doit le dire, jamais disparaître en silence.
   String? get lastError => _lastError;
 
+  /// Nombre de souvenirs dont les médias sont définitivement perdus (fichiers
+  /// locaux disparus). Remis à zéro par [acknowledgeLost].
+  int get lostJobs => _lostJobs;
+
+  void acknowledgeLost() {
+    if (_lostJobs == 0) return;
+    _lostJobs = 0;
+    notifyListeners();
+  }
+
   void enqueue(MediaUploadJob job) {
     _pending++;
+    _inFlight.add(job);
+    _persist();
     notifyListeners();
-    _run(job);
+    _run(job).whenComplete(() {
+      _inFlight.remove(job);
+      _persist();
+    });
   }
+
+  // ── Persistance ───────────────────────────────────────────────────────────
+
+  static const _prefsKey = 'mediaUploadQueue.pending.v1';
+
+  /// Écrit l'état de la file (en cours + échecs) sur le disque. Appelé à
+  /// chaque changement : c'est ce qui permet de reprendre après une fermeture
+  /// brutale de l'application.
+  Future<void> _persist() async {
+    try {
+      final jobs = [..._inFlight, ..._failed];
+      final prefs = await SharedPreferences.getInstance();
+      if (jobs.isEmpty) {
+        await prefs.remove(_prefsKey);
+        return;
+      }
+      await prefs.setString(
+        _prefsKey,
+        jsonEncode([for (final j in jobs) j.toJson()]),
+      );
+    } catch (e) {
+      // La persistance est un filet, pas le chemin critique : un échec ici ne
+      // doit jamais empêcher l'envoi en cours.
+      debugPrint('MediaUploadQueue: persistance impossible — $e');
+    }
+  }
+
+  /// Reprend les envois notés avant la dernière fermeture de l'app. À appeler
+  /// une fois l'utilisateur connecté (les uploads ont besoin de son jeton) —
+  /// voir SplashScreen.
+  Future<void> restorePending() async {
+    if (_restored) return;
+    _restored = true;
+    List<MediaUploadJob> saved;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_prefsKey);
+      if (raw == null || raw.isEmpty) return;
+      final decoded = jsonDecode(raw) as List<dynamic>;
+      saved = [
+        for (final e in decoded)
+          if (e is Map<String, dynamic>) MediaUploadJob.fromJson(e),
+      ];
+      // On libère tout de suite : les jobs repris sont re-persistés par
+      // `enqueue`, et un JSON illisible ne doit pas rester coincé là.
+      await prefs.remove(_prefsKey);
+    } catch (e) {
+      debugPrint('MediaUploadQueue: reprise impossible — $e');
+      return;
+    }
+
+    var lost = 0;
+    for (final job in saved) {
+      if (job.memoryId.isEmpty) continue;
+      final pruned = job.prunedToExistingFiles();
+      if (!pruned.hasLocalWork) {
+        // Les fichiers n'existent plus : rien à renvoyer. On le compte pour
+        // pouvoir le DIRE (bannière), au lieu de perdre l'information.
+        if (job.hasLocalWork) lost++;
+        continue;
+      }
+      enqueue(pruned);
+    }
+    if (lost > 0) {
+      _lostJobs += lost;
+      _lastError =
+          'Des médias n ont pas pu être envoyés : les fichiers ne sont plus '
+          'sur l appareil. Rouvre le souvenir et rajoute-les.';
+      notifyListeners();
+    }
+  }
+
+  bool _restored = false;
 
   /// Relance tous les travaux échoués.
   void retryFailed() {
     final jobs = List<MediaUploadJob>.of(_failed);
     _failed.clear();
     _lastError = null;
+    _lostJobs = 0;
+    _persist();
     notifyListeners();
     for (final j in jobs) {
       enqueue(j);
@@ -387,12 +586,14 @@ class MediaUploadQueue extends ChangeNotifier {
           existingVideoDurations: videoDurationsMs,
           removedVideoKeys: const [],
         ));
+        _persist();
       }
       return ok;
     } catch (e) {
       debugPrint('MediaUploadQueue: échec upload souvenir ${job.memoryId} — $e');
       _lastError = VideoService.lastFailureReason ?? 'Envoi interrompu';
       _failed.add(job);
+      _persist();
       return false;
     } finally {
       // Envoi terminé (ou échoué) → on efface toute progression résiduelle.

@@ -57,6 +57,24 @@ export function computePuzzlePrice(size: PuzzleSize): number | null {
   return Math.ceil(raw * 2) / 2
 }
 
+// Part « livraison » comprise dans `usdCost`. Contrairement aux posters, elle
+// n'a JAMAIS été isolée sur un devis Prodigi pour les puzzles : cette valeur
+// est donc volontairement PRUDENTE (le port réel vers la Suisse est plus
+// proche de $17). Elle ne sert qu'à déduire le port d'un puzzle supplémentaire
+// groupé : sous-estimer surfacture légèrement le client, surestimer vendrait à
+// perte. À remplacer par le chiffre d'un vrai devis groupé.
+const SHIPPING_USD = 12.0
+
+/** Prix d'un puzzle SUPPLÉMENTAIRE dans la même commande : port déduit, que
+ *  Prodigi ne facture qu'une fois par commande. */
+export function computeAdditionalPuzzlePrice(size: PuzzleSize): number | null {
+  const entry = puzzleCatalogEntry(size)
+  if (!entry) return null
+  const cost = Math.max(0, entry.usdCost - SHIPPING_USD) * USD_TO_CHF
+  const raw = cost + marginFor(cost)
+  return Math.ceil(raw * 2) / 2
+}
+
 export function isPuzzleSize(v: unknown): v is PuzzleSize {
   return v === '30' || v === '110' || v === '252' || v === '500' || v === '1000'
 }

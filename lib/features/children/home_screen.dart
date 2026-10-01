@@ -190,7 +190,7 @@ class _HomeScreenState extends State<HomeScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/memory/new?import=1'),
         backgroundColor: AppColors.sageDark,
-        foregroundColor: Colors.white,
+        foregroundColor: AppColors.onAccent,
         icon: const Icon(Icons.add_a_photo_outlined),
         label: const Text('Souvenir',
             style: TextStyle(fontWeight: FontWeight.w600)),
@@ -411,7 +411,7 @@ class _HomeScreenState extends State<HomeScreen> {
           height: 34,
           decoration: const BoxDecoration(
               color: AppColors.sageDark, shape: BoxShape.circle),
-          child: Icon(icon, size: 16, color: Colors.white),
+          child: Icon(icon, size: 16, color: AppColors.onAccent),
         ),
       ),
     );
@@ -452,7 +452,12 @@ class _HomeScreenState extends State<HomeScreen> {
             cat: _safeCat(_recentMemories[i].type),
             tilt: 0,
             onTap: () => context.push('/memory/${_recentMemories[i].id}'),
-            onDelete: () => _deleteMemory(_recentMemories[i]),
+            // Un souvenir partagé par quelqu'un d'autre ne se supprime pas
+            // d'ici (règles Firestore, 01.10.26).
+            onDelete: _recentMemories[i]
+                    .isOwnedBy(FirebaseAuth.instance.currentUser?.uid)
+                ? () => _deleteMemory(_recentMemories[i])
+                : null,
           ),
         ),
       ),
@@ -1312,7 +1317,7 @@ class _ActivityCard extends StatelessWidget {
               icon: const Icon(Icons.check, size: 16),
               label: const Text('Vu'),
               style: TextButton.styleFrom(
-                foregroundColor: Colors.white,
+                foregroundColor: AppColors.onAccent,
                 backgroundColor: AppColors.sageDark,
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 minimumSize: const Size(0, 34),

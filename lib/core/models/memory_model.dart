@@ -57,6 +57,14 @@ class MemoryModel {
   final int bookHorizontalDensity;
   final List<String> bookFeaturedMedia;
 
+  /// Vrai si [uid] est le PROPRIÉTAIRE du souvenir (et pas seulement un
+  /// collaborateur arrivé par un tag partagé). Depuis le 01.10.26, seules les
+  /// actions destructrices du propriétaire sont autorisées par
+  /// `firestore.rules` — l'interface doit donc masquer ce qu'un invité ne peut
+  /// de toute façon plus faire.
+  bool isOwnedBy(String? uid) =>
+      uid != null && uid.isNotEmpty && userId == uid;
+
   const MemoryModel({
     required this.id,
     required this.notebookId,

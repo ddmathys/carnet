@@ -10,10 +10,18 @@ import {
   PRODIGI_API_URL,
   PRODIGI_OPEN_STATUSES,
 } from '../../lib/prodigi'
-import { computePrice, printablePages, resolveCoverType, type CoverType } from '../../lib/pricing'
+import {
+  computePrice,
+  computeAdditionalPrice,
+  pagesOutOfRange,
+  printablePages,
+  resolveCoverType,
+  type CoverType,
+} from '../../lib/pricing'
 import {
   posterCatalogEntry,
   computePosterPrice,
+  computeAdditionalPosterPrice,
   isPosterSize,
   isPosterOrientation,
   isPosterHangerColor,
@@ -21,7 +29,13 @@ import {
   type PosterSize,
   type PosterOrientation,
 } from '../../lib/poster_pricing'
-import { puzzleCatalogEntry, computePuzzlePrice, isPuzzleSize } from '../../lib/puzzle_pricing'
+import {
+  puzzleCatalogEntry,
+  computePuzzlePrice,
+  computeAdditionalPuzzlePrice,
+  isPuzzleSize,
+} from '../../lib/puzzle_pricing'
+import { verifyKeySignature } from '../../lib/r2'
 
 // Route dynamique regroupant les endpoints Prodigi en UNE seule fonction
 // serverless (le plan Hobby de Vercel plafonne à 12 fonctions). URLs :
@@ -97,6 +111,54 @@ const SKU_ENV_NAME: Record<CoverType, string> = {
 function skuFor(coverType: CoverType): { sku?: string; envName: string } {
   const envName = SKU_ENV_NAME[coverType]
   return { sku: process.env[envName], envName }
+}
+
+// L'URL du fichier à imprimer vient du document `orders`, écrit par le CLIENT
+// (voir OrderService.createOrder) : sans contrôle, n'importe quelle adresse
+// pouvait être envoyée à Prodigi, qui l'aurait imprimée et expédiée. Ajouté le
+// 01.10.26 — on n'accepte que deux formes, toutes deux rattachées à un
+// propriétaire légitime (le client de la commande, ou l'admin qui a régénéré
+// le livre depuis la console) :
+//   1. notre URL stable `…/api/video/book-pdf?key=…&sig=…`, dont le HMAC est
+//      vérifié et dont la clé R2 doit être `books|posters|puzzles/{uid}/…` ;
+//   2. une URL Firebase Storage héritée, dont le chemin d'objet doit être
+//      `orders/{uid}/…` ou `pdfs/{uid}/…` (commandes d'avant la bascule R2).
+function assetUrlBelongsTo(rawUrl: string, uids: string[]): boolean {
+  const owners = uids.filter((u) => typeof u === 'string' && u.length > 0)
+  if (owners.length === 0) return false
+  let u: URL
+  try {
+    u = new URL(rawUrl)
+  } catch {
+    return false
+  }
+  if (u.protocol !== 'https:') return false
+
+  if (u.pathname === '/api/video/book-pdf') {
+    const key = u.searchParams.get('key') ?? ''
+    const sig = u.searchParams.get('sig') ?? ''
+    if (!key || !verifyKeySignature(key, sig)) return false
+    return owners.some((uid) =>
+      ['books', 'posters', 'puzzles'].some((p) => key.startsWith(`${p}/${uid}/`))
+    )
+  }
+
+  if (u.hostname === 'firebasestorage.googleapis.com') {
+    const marker = '/o/'
+    const at = u.pathname.indexOf(marker)
+    if (at === -1) return false
+    let objectPath: string
+    try {
+      objectPath = decodeURIComponent(u.pathname.slice(at + marker.length))
+    } catch {
+      return false
+    }
+    return owners.some((uid) =>
+      ['orders', 'pdfs'].some((p) => objectPath.startsWith(`${p}/${uid}/`))
+    )
+  }
+
+  return false
 }
 
 // Forme confirmée en sandbox le 06.08.26 pour un rejet SYNCHRONE (400) de
@@ -187,6 +249,16 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
   if (!pdfUrl) {
     return res.status(400).json({ error: 'Commande sans PDF (pdfUrl manquant)' })
   }
+  // Propriétaires légitimes du fichier : le client de la commande, ou l'admin
+  // appelant (qui a pu régénérer le livre depuis la console — le PDF est alors
+  // sous SA clé R2).
+  const assetOwners = [String(o.userId ?? ''), user.uid]
+  if (!assetUrlBelongsTo(pdfUrl, assetOwners)) {
+    return res.status(400).json({
+      error:
+        'PDF de la commande non reconnu — il doit être un fichier généré par Carnet pour ce client.',
+    })
+  }
 
   const isPoster = o.productType === 'poster'
   const isPuzzle = o.productType === 'puzzle'
@@ -233,6 +305,9 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       if (typeof extra.pdfUrl !== 'string' || !extra.pdfUrl) {
         return res.status(400).json({ error: 'pdfUrl manquant sur un tirage supplémentaire' })
       }
+      if (!assetUrlBelongsTo(extra.pdfUrl, assetOwners)) {
+        return res.status(400).json({ error: 'PDF non reconnu sur un tirage supplémentaire' })
+      }
       const extraEntry = posterCatalogEntry(extra.posterSize, extra.posterOrientation)
       if (!extraEntry) {
         return res.status(400).json({ error: `Aucun SKU poster pour ${extra.posterSize}/${extra.posterOrientation} (tirage supplémentaire)` })
@@ -245,7 +320,11 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
         attributes: posterItemAttributes(extra.posterSize, extraColor),
         assets: [{ printArea: 'default', url: extra.pdfUrl }],
       })
-      const extraPrice = computePosterPrice(extra.posterSize, extra.posterOrientation)
+      // Port déduit : une seule livraison pour toute la commande groupée.
+      const extraPrice = computeAdditionalPosterPrice(
+        extra.posterSize,
+        extra.posterOrientation
+      )
       if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
     }
   } else if (isPuzzle) {
@@ -284,6 +363,9 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       if (typeof extra.pdfUrl !== 'string' || !extra.pdfUrl) {
         return res.status(400).json({ error: 'pdfUrl manquant sur un puzzle supplémentaire' })
       }
+      if (!assetUrlBelongsTo(extra.pdfUrl, assetOwners)) {
+        return res.status(400).json({ error: 'Photo non reconnue sur un puzzle supplémentaire' })
+      }
       items.push({
         sku: extraEntry.sku,
         copies: 1,
@@ -293,7 +375,8 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
           { printArea: 'lid', url: extra.pdfUrl },
         ],
       })
-      const extraPrice = computePuzzlePrice(extra.puzzleSize)
+      // Port déduit : une seule livraison pour toute la commande groupée.
+      const extraPrice = computeAdditionalPuzzlePrice(extra.puzzleSize)
       if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
     }
   } else {
@@ -302,11 +385,23 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     if (!sku) {
       return res.status(503).json({ error: `SKU Prodigi manquant (env ${envName})` })
     }
+    // On envoie à Prodigi le nombre de pages RÉELLEMENT facturable (pair,
+    // borné au catalogue) — le même que celui sur lequel le prix est calculé.
+    // Avant, le prix était écrêté et la commande portait le brut : facturé
+    // 122 pages, imprimé 150 (audit du 01.10.26).
+    if (pageCount && pagesOutOfRange(orderCoverType, pageCount)) {
+      return res.status(400).json({
+        error: `Ce livre dépasse le nombre de pages imprimable pour cette couverture (${pageCount} pages).`,
+      })
+    }
+    const printedPages = pageCount
+      ? printablePages(orderCoverType, pageCount)
+      : undefined
     items = [{
       sku,
       copies: 1,
       sizing: 'fillPrintArea',
-      assets: [{ printArea: 'default', url: pdfUrl, pageCount }],
+      assets: [{ printArea: 'default', url: pdfUrl, pageCount: printedPages }],
     }]
     trustedPrice = pageCount ? computePrice(orderCoverType, pageCount) : null
 
@@ -323,17 +418,32 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       if (typeof extra.pdfUrl !== 'string' || !extra.pdfUrl) {
         return res.status(400).json({ error: 'pdfUrl manquant sur un livre supplémentaire' })
       }
+      if (!assetUrlBelongsTo(extra.pdfUrl, assetOwners)) {
+        return res.status(400).json({ error: 'PDF non reconnu sur un livre supplémentaire' })
+      }
       const extraPageCount = Number(extra.pageCount ?? 0)
       if (!extraPageCount || extraPageCount <= 0) {
         return res.status(400).json({ error: 'pageCount manquant sur un livre supplémentaire' })
+      }
+      if (pagesOutOfRange(extraCoverType, extraPageCount)) {
+        return res.status(400).json({
+          error: `Un livre supplémentaire dépasse le nombre de pages imprimable (${extraPageCount} pages).`,
+        })
       }
       items.push({
         sku: extraSku,
         copies: 1,
         sizing: 'fillPrintArea',
-        assets: [{ printArea: 'default', url: extra.pdfUrl, pageCount: extraPageCount }],
+        assets: [
+          {
+            printArea: 'default',
+            url: extra.pdfUrl,
+            pageCount: printablePages(extraCoverType, extraPageCount),
+          },
+        ],
       })
-      const extraPrice = computePrice(extraCoverType, extraPageCount)
+      // Port déduit : une seule livraison pour toute la commande groupée.
+      const extraPrice = computeAdditionalPrice(extraCoverType, extraPageCount)
       if (extraPrice != null) trustedPrice = (trustedPrice ?? 0) + extraPrice
     }
   }

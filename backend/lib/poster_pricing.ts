@@ -153,10 +153,31 @@ function marginFor(cost: number): number {
 }
 
 /** Prix client CHF = coût Prodigi total (article + livraison, converti) + marge, arrondi au 0.50 supérieur. */
+// Part « livraison » comprise dans `usdCost` ci-dessus. Lue sur le devis réel
+// du 21.08.26 (A1 portrait : article $27.28 + livraison $17.67 = $44.95) ; le
+// port Prodigi vers la Suisse ne dépend pas de la taille du tirage. Ne sert
+// QU'À déduire le port d'un article supplémentaire groupé — mieux vaut la
+// sous-estimer que la surestimer : une déduction trop petite surfacture un peu,
+// une déduction trop grande vend à perte.
+const SHIPPING_USD = 17.67
 export function computePosterPrice(size: PosterSize, orientation: PosterOrientation): number | null {
   const entry = posterCatalogEntry(size, orientation)
   if (!entry) return null
   const cost = entry.usdCost * USD_TO_CHF
+  const raw = cost + marginFor(cost)
+  return Math.ceil(raw * 2) / 2
+}
+
+/** Prix d'un tirage SUPPLÉMENTAIRE dans une commande déjà existante : même
+ *  calcul, port déduit (facturé une seule fois par commande chez Prodigi).
+ *  Voir backend/lib/pricing.ts pour le raisonnement complet. */
+export function computeAdditionalPosterPrice(
+  size: PosterSize,
+  orientation: PosterOrientation
+): number | null {
+  const entry = posterCatalogEntry(size, orientation)
+  if (!entry) return null
+  const cost = Math.max(0, entry.usdCost - SHIPPING_USD) * USD_TO_CHF
   const raw = cost + marginFor(cost)
   return Math.ceil(raw * 2) / 2
 }

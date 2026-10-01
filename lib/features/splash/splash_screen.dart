@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/services/media_migration_service.dart';
+import '../../core/services/media_upload_queue.dart';
 import '../../core/services/migration_service.dart';
 import '../../core/services/shared_media_service.dart';
 import '../../core/services/tag_migration_service.dart';
@@ -67,6 +68,12 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
         }
       } catch (_) {}
       try { await UserService.onLogin(); } catch (_) {}
+      // Envois de médias interrompus par une fermeture de l'app : on les
+      // reprend (sans bloquer le démarrage). La file est persistée sur le
+      // disque depuis le 01.10.26 — avant, un souvenir enregistré pendant
+      // qu'Android tuait l'application restait définitivement sans ses
+      // photos, et sans la moindre trace du travail à refaire.
+      MediaUploadQueue.instance.restorePending();
       // Médias restés sur Firebase Storage → R2, en tâche de fond (sans bloquer
       // le démarrage : la migration reprend là où elle s'est arrêtée).
       MediaMigrationService.runInBackground();

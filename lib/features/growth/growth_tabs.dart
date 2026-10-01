@@ -918,7 +918,7 @@ class MeasureSheetState extends State<MeasureSheet> {
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.sage,
             disabledBackgroundColor: AppColors.border,
-            foregroundColor: Colors.white,
+            foregroundColor: AppColors.onAccent,
             minimumSize: const Size(double.infinity, 52),
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(14)),
@@ -1175,12 +1175,12 @@ class EmptyState extends StatelessWidget {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.add, color: Colors.white, size: 20),
+                    Icon(Icons.add, color: AppColors.onAccent, size: 20),
                     SizedBox(width: 8),
                     Text(
                       'Ajouter une mesure',
                       style: TextStyle(
-                          color: Colors.white,
+                          color: AppColors.onAccent,
                           fontWeight: FontWeight.w700,
                           fontSize: 14),
                     ),

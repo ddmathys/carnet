@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -330,7 +331,12 @@ class _MemoriesListScreenState extends State<MemoriesListScreen> {
                                       }
                                     })
                                 : () => context.push('/memory/${m.id}'),
-                            onDelete: widget.selectionMode
+                            // Suppression réservée au propriétaire (règles
+                            // Firestore, 01.10.26) : pas de bouton sur un
+                            // souvenir qu'on nous a partagé.
+                            onDelete: (widget.selectionMode ||
+                                    !m.isOwnedBy(FirebaseAuth
+                                        .instance.currentUser?.uid))
                                 ? null
                                 : () => confirmAndDeleteMemory(context, m),
                             selected:

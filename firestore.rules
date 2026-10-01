@@ -100,6 +100,10 @@ service cloud.firestore {
                 && canAccessNotebook(mem.notebookId));
       }
 
+      function isMemoryOwner() {
+        return resource.data.get('userId', '') == request.auth.uid;
+      }
+
       allow read: if isAuth() && memberOfMemory(resource.data);
       allow create: if isAuth()
         && request.resource.data.get('userId', '') == request.auth.uid;
@@ -108,11 +112,32 @@ service cloud.firestore {
       // réécrire `userId` vers son propre uid ET vider `sharedWith` en un
       // seul update — volant le souvenir à son vrai propriétaire (trouvé lors
       // de l'audit sécurité du 03.09.26).
+      //
+      // Resserré le 01.10.26 : un collaborateur (membre via `sharedWith`,
+      // pas propriétaire) peut modifier le CONTENU du souvenir — titre, date,
+      // lieu, texte, médias, tags — mais pas sa STRUCTURE D'ACCÈS. Avant, il
+      // pouvait réécrire `sharedWith` (donc retirer les autres invités) et
+      // déplacer le souvenir vers un autre carnet. Le propriétaire, lui,
+      // garde tous les droits. Côté app, `memory_create_screen.dart::_save`
+      // renvoie les valeurs d'origine de ces champs quand l'éditeur n'est pas
+      // le propriétaire.
       allow update: if isAuth()
         && memberOfMemory(resource.data)
         && memberOfMemory(request.resource.data)
-        && request.resource.data.get('userId', '') == resource.data.get('userId', '');
-      allow delete: if isAuth() && memberOfMemory(resource.data);
+        && request.resource.data.get('userId', '') == resource.data.get('userId', '')
+        && (
+          isMemoryOwner()
+          || (request.resource.data.get('sharedWith', [])
+                == resource.data.get('sharedWith', [])
+              && request.resource.data.get('notebookId', '')
+                == resource.data.get('notebookId', ''))
+        );
+      // Suppression réservée au PROPRIÉTAIRE (01.10.26). Avant, tout membre
+      // pouvait supprimer : un grand-parent invité sur un tag effaçait
+      // définitivement le souvenir du parent, médias R2 compris, d'un seul
+      // geste et sans recours. Un invité qui ne veut plus voir un souvenir
+      // n'a pas à le détruire pour tout le monde.
+      allow delete: if isAuth() && isMemoryOwner();
     }
 
     // ── Books (histoires IA, legacy) ────────────────────────────────────────
@@ -167,8 +192,26 @@ service cloud.firestore {
 
     // ── Orders ──────────────────────────────────────────────────────────────
     match /orders/{orderId} {
+      // Une commande naît TOUJOURS « reçue », jamais payée (01.10.26).
+      // Avant, la règle ne vérifiait que `userId` : le client écrivant son
+      // document lui-même (OrderService.createOrder), rien ne l'empêchait de
+      // poser `status: 'paid'` et `price: 0`. La console admin l'affichait
+      // alors comme payée, le rappel quotidien poussait à l'envoyer à
+      // l'impression, et `prodigi/order` — qui ne contrôle que ce même
+      // `status` — fabriquait et expédiait le livre aux frais de la maison.
+      // Les champs ci-dessous ne sont écrits QUE par le backend (Admin SDK)
+      // ou l'admin : les interdire à la création ferme la porte pour de bon.
       allow create: if isAuth()
-        && request.resource.data.userId == request.auth.uid;
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.get('status', '') == 'received'
+        && !request.resource.data.keys().hasAny([
+             'paidAt', 'stripeSessionId', 'archivedAt', 'archivedBy',
+             'prodigiOrderId', 'prodigiStatus', 'prodigiStage',
+             'prodigiStageDetails', 'prodigiShipments', 'prodigiError',
+             'prodigiRetryCount', 'trackingNumber', 'trackingUrl',
+             'carrierName', 'shippedAt', 'shippedFromCountry',
+             'shippedNotifiedAt', 'accountDeleted'
+           ]);
       allow read: if isAuth()
         && (resource.data.userId == request.auth.uid || isAdmin());
       // Statut et notes gérés par l'admin uniquement

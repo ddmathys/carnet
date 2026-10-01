@@ -120,6 +120,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // Édition : propriétaire et carnet porteur d'origine (jamais réécrits).
   String? _editOwnerUid;
   String? _editNotebookId;
+  // `sharedWith` tel qu'il était en base à l'ouverture de l'édition. Un
+  // collaborateur (pas le propriétaire) le renvoie TEL QUEL : les règles
+  // Firestore lui interdisent depuis le 01.10.26 de toucher à la structure
+  // d'accès du souvenir, et le recalcul local ne voit de toute façon que SES
+  // tags — il aurait retiré les autres invités au passage.
+  List<String>? _editSharedWith;
 
   /// Le tag « enfant » sélectionné, s'il y en a un : il porte la date de
   /// naissance et alimente les courbes de croissance (héritage carnet enfant).
@@ -412,6 +418,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       _allTags = tags;
       _editOwnerUid = data['userId'] as String?;
       _editNotebookId = data['notebookId'] as String?;
+      _editSharedWith =
+          List<String>.from(data['sharedWith'] as List<dynamic>? ?? const []);
       // Tags du souvenir : on repart des libellés (le sélecteur travaille en
       // libellés) — résolus par id quand je peux lire le tag, sinon on garde
       // au moins le libellé du miroir `tagLabels` (même index que `tagIds`).
@@ -1565,7 +1573,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       // En édition, le souvenir garde son propriétaire (un collaborateur qui
       // modifie un souvenir partagé ne se l'approprie pas) et son carnet porteur.
       final ownerUid = _isEditing ? (_editOwnerUid ?? uid) : uid;
-      final sharedWith = TagService.sharedUidsFor(tagIds, allTags, ownerUid);
+      // Édition par un COLLABORATEUR : on ne recalcule pas la liste d'accès,
+      // on renvoie celle d'origine (voir `_editSharedWith`). Le propriétaire,
+      // lui, la recalcule normalement depuis ses tags.
+      final isCollaboratorEdit = _isEditing && ownerUid != uid;
+      final sharedWith = isCollaboratorEdit
+          ? (_editSharedWith ?? const <String>[])
+          : TagService.sharedUidsFor(tagIds, allTags, ownerUid);
 
       // Carnet porteur : l'espace unique de l'utilisateur (invisible dans l'UI,
       // mais requis par les clés de stockage R2 et le contrôle d'accès média).
@@ -1888,7 +1902,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                       backgroundColor: _saveEnabled
                           ? AppColors.sageDark
                           : AppColors.softGray.withOpacity(0.3),
-                      foregroundColor: Colors.white,
+                      foregroundColor: AppColors.onAccent,
                       padding: const EdgeInsets.symmetric(
                           horizontal: 16, vertical: 8),
                       shape: RoundedRectangleBorder(

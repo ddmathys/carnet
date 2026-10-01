@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import '../../../core/models/memory_model.dart';
 import '../../../core/services/photo_service.dart';
@@ -13,6 +14,42 @@ import '../../../core/theme/app_theme.dart';
 /// Renvoie true si le souvenir a bien été supprimé.
 Future<bool> confirmAndDeleteMemory(
     BuildContext context, MemoryModel memory) async {
+  // Garde-fou : depuis le 01.10.26, `firestore.rules` réserve la suppression
+  // au propriétaire. Les écrans masquent déjà le bouton pour un invité ; si on
+  // arrive quand même ici (souvenir ouvert avant un changement de partage),
+  // on explique au lieu de laisser remonter une erreur de permission brute.
+  if (!memory.isOwnedBy(FirebaseAuth.instance.currentUser?.uid)) {
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text(
+          'Souvenir partagé',
+          style: TextStyle(
+            fontFamily: 'Fraunces',
+            fontWeight: FontWeight.w600,
+            color: AppColors.textDark,
+          ),
+        ),
+        content: const Text(
+          'Ce souvenir appartient à la personne qui a partagé ce tag avec '
+          'toi — seule elle peut le supprimer. Tu peux en revanche le '
+          'modifier et y ajouter des photos.',
+          style: TextStyle(color: AppColors.textMedium, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Compris',
+                style: TextStyle(color: AppColors.sageDark)),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
   final photos = memory.mediaKeys.length +
       memory.mediaUrls.length +
       ((memory.mediaKeys.isEmpty &&
@@ -63,7 +100,7 @@ Future<bool> confirmAndDeleteMemory(
           onPressed: () => Navigator.pop(ctx, true),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.error,
-            foregroundColor: Colors.white,
+            foregroundColor: AppColors.onAccent,
           ),
           child: const Text('Supprimer'),
         ),

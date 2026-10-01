@@ -117,7 +117,7 @@ class _BookHistoryScreenState extends State<BookHistoryScreen> {
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/book/select'),
         backgroundColor: AppColors.sage,
-        foregroundColor: AppColors.white,
+        foregroundColor: AppColors.onAccent,
         icon: const Icon(Icons.add),
         label: const Text('Créer un livre'),
         shape: const StadiumBorder(),

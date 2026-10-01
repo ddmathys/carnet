@@ -45,6 +45,13 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
 
   Map<String, _CollabInfo> _collabInfos = {};
 
+  /// Liens d'invitation encore en circulation pour ces tags. Chargés à
+  /// l'ouverture : un lien transmis dans un groupe de messagerie reste valable
+  /// 30 jours, et le propriétaire doit pouvoir le voir et le refermer.
+  List<TagInviteLink> _activeLinks = const [];
+  bool _loadingLinks = true;
+  String? _revokingToken;
+
   /// Les tags que je possède : seuls ceux-là peuvent être partagés (le backend
   /// refuse le lien si un seul ne m'appartient pas).
   List<TagModel> get _ownTags {
@@ -62,6 +69,7 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
   void initState() {
     super.initState();
     _loadCollabInfos();
+    _loadActiveLinks();
   }
 
   @override
@@ -91,6 +99,80 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
     if (mounted) setState(() => _collabInfos = infos);
   }
 
+  Future<void> _loadActiveLinks() async {
+    final ids = [for (final t in _ownTags) t.id];
+    if (ids.isEmpty) {
+      if (mounted) setState(() => _loadingLinks = false);
+      return;
+    }
+    try {
+      final links = await TagService.activeInviteLinks(ids);
+      if (mounted) {
+        setState(() {
+          _activeLinks = links;
+          _loadingLinks = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loadingLinks = false);
+    }
+  }
+
+  /// Ferme un lien : qui l'ouvre ensuite voit « Invitation révoquée ». Les
+  /// personnes déjà entrées gardent leur accès — c'est « Retirer » qui le
+  /// leur enlève, dans la section « Accès actifs » juste dessous.
+  Future<void> _revokeLink(TagInviteLink link) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Désactiver ce lien ?',
+            style: TextStyle(
+                fontFamily: 'Fraunces',
+                fontWeight: FontWeight.w600,
+                color: AppColors.textDark)),
+        content: const Text(
+          'Plus personne ne pourra rejoindre avec ce lien, même si tu l as '
+          'déjà envoyé. Les personnes déjà entrées gardent leur accès — '
+          'retire-les une par une si besoin.',
+          style: TextStyle(color: AppColors.textMedium, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Annuler',
+                style: TextStyle(color: AppColors.textMedium)),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: AppColors.onAccent),
+            child: const Text('Désactiver'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    setState(() => _revokingToken = link.token);
+    final ok = await TagService.revokeInviteLink(link.token);
+    if (!mounted) return;
+    setState(() {
+      _revokingToken = null;
+      if (ok) {
+        _activeLinks =
+            [for (final l in _activeLinks) if (l.token != link.token) l];
+        // Le lien qu'on vient d'afficher est peut-être celui-là.
+        if (_inviteData?.url == link.url) _inviteData = null;
+      } else {
+        _error = 'Impossible de désactiver ce lien. Réessaie.';
+      }
+    });
+    if (ok) _flashCopied('Lien désactivé ✓');
+  }
+
   Future<void> _createInviteLink() async {
     setState(() {
       _creatingLink = true;
@@ -111,6 +193,7 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
         _inviteData = invite;
         _creatingLink = false;
       });
+      _loadActiveLinks();
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -151,12 +234,29 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
   /// Retire un collaborateur de TOUS les tags de la feuille où il figure : la
   /// feuille montre un accès, on l'y retire — pas un tag sur trois.
   Future<void> _removeCollaborator(String uid) async {
-    for (final tag in _ownTags) {
-      if (tag.sharedWith.contains(uid)) {
-        await TagService.revoke(tag, uid: uid);
+    // La révocation recopie l'accès retiré sur TOUS les souvenirs du tag :
+    // une erreur à ce moment-là laissait la personne avec son accès alors que
+    // l'interface la retirait quand même de la liste (audit du 01.10.26).
+    // Elle doit donc être visible, et la liste ne bouge qu'en cas de succès.
+    try {
+      for (final tag in _ownTags) {
+        if (tag.sharedWith.contains(uid)) {
+          await TagService.revoke(tag, uid: uid);
+        }
       }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error =
+            'Accès non retiré — vérifie ta connexion et réessaie.');
+      }
+      return;
     }
-    if (mounted) setState(() => _collabInfos.remove(uid));
+    if (mounted) {
+      setState(() {
+        _collabInfos.remove(uid);
+        _error = null;
+      });
+    }
   }
 
   @override
@@ -256,10 +356,12 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
                       ? (multiple
                           ? 'UN SEUL lien pour ces ${tags.length} tags : qui le '
                               'suit voit tous leurs souvenirs — y compris les '
-                              'prochains — et peut en ajouter.'
+                              'prochains — peut en ajouter et les modifier, '
+                              'mais pas les supprimer.'
                           : 'Qui suit ce lien voit tous les souvenirs tagués '
                               '« ${tags.first.label} » — y compris les prochains '
-                              '— et peut en ajouter.')
+                              '— peut en ajouter et les modifier, mais pas les '
+                              'supprimer.')
                       : 'Ces tags t\'ont été partagés : tu vois leurs souvenirs '
                           'et tu peux en ajouter.',
                   style: const TextStyle(
@@ -303,6 +405,15 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
                         style: const TextStyle(
                             fontSize: 13, color: AppColors.textDark),
                       ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Ce lien reste valable 30 jours. Tu peux le désactiver '
+                      'à tout moment dans « Liens actifs » ci-dessous.',
+                      style: TextStyle(
+                          color: AppColors.textMedium,
+                          fontSize: 11.5,
+                          height: 1.4),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
@@ -379,6 +490,24 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
                   ],
                   const SizedBox(height: 18),
                 ],
+                if (isOwner && (_activeLinks.isNotEmpty || _loadingLinks)) ...[
+                  const _SectionLabel('Liens actifs'),
+                  const SizedBox(height: 8),
+                  if (_loadingLinks)
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Text('Recherche des liens en circulation…',
+                          style: TextStyle(
+                              color: AppColors.textMedium, fontSize: 12)),
+                    )
+                  else
+                    ..._activeLinks.map((l) => _InviteLinkTile(
+                          link: l,
+                          busy: _revokingToken == l.token,
+                          onRevoke: () => _revokeLink(l),
+                        )),
+                  const SizedBox(height: 18),
+                ],
                 if (collaborators.isNotEmpty) ...[
                   const _SectionLabel('Accès actifs'),
                   const SizedBox(height: 8),
@@ -408,6 +537,78 @@ class _ShareTagSheetState extends State<ShareTagSheet> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Une ligne « Léa · Vacances — expire dans 12 j » + bouton Désactiver.
+class _InviteLinkTile extends StatelessWidget {
+  final TagInviteLink link;
+  final bool busy;
+  final VoidCallback onRevoke;
+
+  const _InviteLinkTile({
+    required this.link,
+    required this.busy,
+    required this.onRevoke,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final days = link.daysLeft;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: AppColors.background,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.link, size: 18, color: AppColors.sageDark),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(link.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        color: AppColors.textDark,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text(
+                  days <= 0
+                      ? 'expire aujourd hui'
+                      : 'expire dans $days jour${days > 1 ? 's' : ''}',
+                  style: const TextStyle(
+                      color: AppColors.textMedium, fontSize: 11.5),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.error))
+              : TextButton(
+                  onPressed: onRevoke,
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.error,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: const Size(0, 36),
+                  ),
+                  child: const Text('Désactiver',
+                      style: TextStyle(fontSize: 12.5)),
+                ),
+        ],
+      ),
     );
   }
 }

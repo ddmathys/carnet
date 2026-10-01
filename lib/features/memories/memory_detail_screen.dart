@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
@@ -243,15 +244,18 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
             label: 'Envoyer par lien',
             onTap: () => showShareLinkSheet(context, m),
           ),
-          const SizedBox(width: 8),
-          _RoundIcon(
-            icon: Icons.delete_outline,
-            label: 'Supprimer ce souvenir',
-            onTap: () async {
-              final deleted = await confirmAndDeleteMemory(context, m);
-              if (deleted && mounted) context.go('/home');
-            },
-          ),
+          // Suppression réservée au propriétaire (règles Firestore, 01.10.26).
+          if (m.isOwnedBy(FirebaseAuth.instance.currentUser?.uid)) ...[
+            const SizedBox(width: 8),
+            _RoundIcon(
+              icon: Icons.delete_outline,
+              label: 'Supprimer ce souvenir',
+              onTap: () async {
+                final deleted = await confirmAndDeleteMemory(context, m);
+                if (deleted && mounted) context.go('/home');
+              },
+            ),
+          ],
           const SizedBox(width: 8),
           GestureDetector(
             onTap: () => context.push('/memory/${m.id}/edit'),
@@ -265,12 +269,13 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
               child: const Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.edit_outlined, color: Colors.white, size: 16),
+                  Icon(Icons.edit_outlined,
+                      color: AppColors.onAccent, size: 16),
                   SizedBox(width: 6),
                   Text('Modifier',
                       style: TextStyle(
                         fontFamily: 'Outfit',
-                        color: Colors.white,
+                        color: AppColors.onAccent,
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
                       )),
@@ -549,7 +554,7 @@ class _MemoryDetailScreenState extends State<MemoryDetailScreen> {
               decoration: const BoxDecoration(
                   color: AppColors.sageDark, shape: BoxShape.circle),
               child: Icon(_audioPlaying ? Icons.pause : Icons.play_arrow,
-                  color: Colors.white, size: 22),
+                  color: AppColors.onAccent, size: 22),
             ),
           ),
           const SizedBox(width: 14),

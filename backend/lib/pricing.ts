@@ -78,3 +78,34 @@ export function computePrice(coverType: CoverType, rawPages: number): number {
   const raw = cost + marginFor(cost)
   return Math.ceil(raw * 2) / 2
 }
+
+// ── Articles GROUPÉS dans une même commande ──────────────────────────────────
+//
+// Prodigi facture la livraison UNE FOIS par commande, pas par article : c'est
+// tout l'intérêt du groupage (voir `additionalPosters`/`additionalBooks`/
+// `additionalPuzzles`). Or le prix total additionnait des prix d'articles qui
+// contiennent CHACUN le port — le client payait donc le port autant de fois
+// qu'il commandait d'articles (audit du 01.10.26 : deux posters A4 facturés
+// 2 × CHF 31 alors que Prodigi n'encaisse qu'un seul port).
+//
+// Le PREMIER article garde son prix complet (port inclus) ; chaque article
+// SUPPLÉMENTAIRE est facturé sans port. La marge (40 %, plancher CHF 10)
+// s'applique normalement au coût réduit, donc chaque article supplémentaire
+// rapporte toujours au moins CHF 10.
+export function computeAdditionalPrice(
+  coverType: CoverType,
+  rawPages: number
+): number {
+  const pages = printablePages(coverType, rawPages)
+  const cost = printCost(coverType, pages) - SHIPPING_USD[coverType] * USD_TO_CHF
+  const raw = cost + marginFor(cost)
+  return Math.ceil(raw * 2) / 2
+}
+
+// Nombre de pages hors bornes produit : refusé plutôt qu'écrêté en silence.
+// `printablePages` ramenait un livre layflat de 150 pages à 122 pour le PRIX,
+// alors que la commande envoyée à Prodigi transportait les 150 pages réelles —
+// facturé 122, imprimé 150 (audit du 01.10.26).
+export function pagesOutOfRange(coverType: CoverType, rawPages: number): boolean {
+  return rawPages > MAX_PAGES[coverType]
+}

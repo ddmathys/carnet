@@ -1122,7 +1122,7 @@ class _PayButtonState extends State<_PayButton> {
           label: const Text('Payer avec TWINT'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.amber,
-            foregroundColor: Colors.white,
+            foregroundColor: AppColors.onAccent,
             padding: const EdgeInsets.symmetric(vertical: 14),
           ),
         ),
@@ -1204,7 +1204,7 @@ class _PdfDownloadButtonState extends State<_PdfDownloadButton> {
         label: const Text('Télécharger le PDF'),
         style: ElevatedButton.styleFrom(
           backgroundColor: AppColors.sage,
-          foregroundColor: Colors.white,
+          foregroundColor: AppColors.onAccent,
           padding: const EdgeInsets.symmetric(vertical: 14),
         ),
       ),

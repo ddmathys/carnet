@@ -98,7 +98,7 @@ class _GrowthScreenState extends State<GrowthScreen> {
           floatingActionButton: FloatingActionButton.extended(
             onPressed: () => _openMeasureSheet(notebook),
             backgroundColor: AppColors.sage,
-            foregroundColor: Colors.white,
+            foregroundColor: AppColors.onAccent,
             icon: const Icon(Icons.add),
             label: const Text('Nouvelle mesure'),
           ),

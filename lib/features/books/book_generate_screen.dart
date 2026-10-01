@@ -943,7 +943,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           _QueuedBook(
             bookTitle: bookTitle,
             coverType: _coverType,
-            price: price,
+            // Prix d'un article SUPPLÉMENTAIRE : port déduit. Prodigi ne
+            // facture la livraison qu'une fois par commande groupée — la
+            // compter sur chaque article surfacturait le client (audit du
+            // 01.10.26). Le backend recalcule à l'identique.
+            price: BookPricing.priceAdditional(
+                coverType: _coverType, pages: _printedPagesFor(_coverType)),
             pageCount: pageCount,
             pdfUrl: pdfUrl,
             storagePath: uploaded.key,
@@ -2280,7 +2285,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               ElevatedButton(
                 onPressed: _placeOrder,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.amber, foregroundColor: Colors.white),
+                    backgroundColor: AppColors.amber, foregroundColor: AppColors.onAccent),
                 child: const Text('Ajouter à la commande'),
               )
           else
@@ -2343,7 +2348,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                         onPressed: _placeOrder,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.amber,
-                          foregroundColor: Colors.white,
+                          foregroundColor: AppColors.onAccent,
                         ),
                         child: Text(_orderButtonLabel),
                       ),

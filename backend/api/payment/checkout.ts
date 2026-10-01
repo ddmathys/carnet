@@ -1,14 +1,24 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from '../../lib/verify'
 import { db } from '../../lib/firebase'
-import { computePrice, resolveCoverType } from '../../lib/pricing'
+import {
+  computePrice,
+  computeAdditionalPrice,
+  pagesOutOfRange,
+  resolveCoverType,
+} from '../../lib/pricing'
 import {
   computePosterPrice,
+  computeAdditionalPosterPrice,
   isPosterOrientation,
   isPosterSize,
   posterLabel,
 } from '../../lib/poster_pricing'
-import { computePuzzlePrice, isPuzzleSize } from '../../lib/puzzle_pricing'
+import {
+  computePuzzlePrice,
+  computeAdditionalPuzzlePrice,
+  isPuzzleSize,
+} from '../../lib/puzzle_pricing'
 
 // Crée une session Stripe Checkout pour payer une commande (TWINT + carte).
 // Le montant est RECALCULÉ ici depuis coverType + pageCount (lib/pricing.ts) —
@@ -42,6 +52,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (o.userId !== user.uid) {
     return res.status(403).json({ error: 'Not your order' })
   }
+  // Une commande déjà payée (ou déjà partie à l'impression) ne doit pas
+  // pouvoir ouvrir une seconde session Checkout : deux encaissements pour un
+  // seul livre (audit du 01.10.26).
+  if (o.status !== 'received') {
+    return res
+      .status(409)
+      .json({ error: 'Cette commande n’est plus en attente de paiement.' })
+  }
 
   const isPoster = o.productType === 'poster'
   const isPuzzle = o.productType === 'puzzle'
@@ -67,7 +85,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!isPuzzleSize(extra?.puzzleSize)) {
         return res.status(400).json({ error: 'puzzleSize invalide sur un puzzle supplémentaire' })
       }
-      const extraPrice = computePuzzlePrice(extra.puzzleSize)
+      // Port déduit : Prodigi ne facture la livraison qu'une fois par
+      // commande (voir computeAdditionalPuzzlePrice).
+      const extraPrice = computeAdditionalPuzzlePrice(extra.puzzleSize)
       if (extraPrice == null) {
         return res.status(400).json({ error: `Aucun tarif pour le puzzle ${extra.puzzleSize} pièces (supplémentaire)` })
       }
@@ -96,7 +116,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!isPosterSize(extra?.posterSize) || !isPosterOrientation(extra?.posterOrientation)) {
         return res.status(400).json({ error: 'posterSize/posterOrientation invalide sur un tirage supplémentaire' })
       }
-      const extraPrice = computePosterPrice(extra.posterSize, extra.posterOrientation)
+      // Port déduit (facturé une seule fois par commande chez Prodigi).
+      const extraPrice = computeAdditionalPosterPrice(
+        extra.posterSize,
+        extra.posterOrientation
+      )
       if (extraPrice == null) {
         return res.status(400).json({ error: `Aucun tarif poster pour ${extra.posterSize}/${extra.posterOrientation} (tirage supplémentaire)` })
       }
@@ -113,6 +137,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .json({ error: 'pageCount manquant sur la commande — PDF non généré ?' })
     }
     const coverType = resolveCoverType(o.coverType)
+    // Au-delà des bornes du produit, le prix était écrêté alors que la
+    // commande envoyée à Prodigi portait le vrai nombre de pages : facturé
+    // 122, imprimé 150 (audit du 01.10.26). On refuse plutôt que d'écrêter.
+    if (pagesOutOfRange(coverType, rawPages)) {
+      return res.status(400).json({
+        error: `Ce livre dépasse le nombre de pages imprimable pour cette couverture (${rawPages} pages).`,
+      })
+    }
     trustedPrice = computePrice(coverType, rawPages)
     const bookTitle = String(o.bookTitle ?? 'Livre')
     const cover =
@@ -128,7 +160,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!extraPages || extraPages <= 0) {
         return res.status(400).json({ error: 'pageCount manquant sur un livre supplémentaire' })
       }
-      trustedPrice += computePrice(resolveCoverType(extra?.coverType), extraPages)
+      const extraCover = resolveCoverType(extra?.coverType)
+      if (pagesOutOfRange(extraCover, extraPages)) {
+        return res.status(400).json({
+          error: `Un livre supplémentaire dépasse le nombre de pages imprimable (${extraPages} pages).`,
+        })
+      }
+      // Port déduit (facturé une seule fois par commande chez Prodigi).
+      trustedPrice += computeAdditionalPrice(extraCover, extraPages)
     }
     if (extraBooks.length > 0) {
       productName = `${extraBooks.length + 1} livres`
