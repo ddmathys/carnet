@@ -20,7 +20,10 @@ plugins {
     id "dev.flutter.flutter-plugin-loader" version "1.0.0"
     id "com.android.application" version "8.9.1" apply false
     id "org.jetbrains.kotlin.android" version "2.1.0" apply false
-    id "com.google.gms.google-services" version "4.4.0" apply false
+    // 4.4.1 minimum : c'est ce qu'exige le plugin Crashlytics 3 juste en
+    // dessous (le build échouait sur « requires Google-Services 4.4.1 and
+    // above », 01.10.26).
+    id "com.google.gms.google-services" version "4.4.2" apply false
     // Rapport de plantage (audit du 01.10.26). Le plugin fait deux choses :
     // il embarque le SDK natif, et il envoie la table de correspondance de
     // R8/ProGuard à chaque build release — sans elle, `minifyEnabled true`
