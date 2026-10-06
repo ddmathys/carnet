@@ -15,7 +15,15 @@
 // (`sizing: 'fillPrintArea'`, voir backend/api/prodigi/[action].ts), donc pas
 // de couple taille/orientation ni de résolution à valider côté app — la
 // résolution du catalogue est gardée ici pour référence uniquement.
-export type PuzzleSize = '30' | '110' | '252' | '500' | '1000'
+// Catalogue resserré le 06.10.26 (positionnement premium) : les tailles 30 et
+// 110 pièces ont été RETIRÉES. Elles tiraient l'étiquette « dès CHF … » vers
+// le bas pour un objet qui n'est pas un cadeau (30 pièces), et contredisaient
+// le discours premium. Aucune donnée à migrer : `isPuzzleSize` refuse
+// désormais '30'/'110', donc une commande historique qui les porterait serait
+// rejetée à la création de session Stripe et à l'envoi Prodigi plutôt que
+// facturée au mauvais tarif — il n'en existe aucune en base au moment du
+// changement (aucune commande puzzle n'a encore été passée).
+export type PuzzleSize = '252' | '500' | '1000'
 
 export interface PuzzleCatalogEntry {
   sku: string
@@ -24,20 +32,60 @@ export interface PuzzleCatalogEntry {
   usdCost: number
   /** Résolution d'impression de la zone "jigsaw" (px), pour référence. */
   printAreaPx: { width: number; height: number }
+  /**
+   * Résolution d'impression de la zone "lid" (couvercle de la boîte métal),
+   * relevée le 06.10.26 dans la fiche produit publique de Prodigi
+   * (prodigi.com/download/product-range/Prodigi Jigsaw puzzles.pdf) :
+   * « Print dimensions for puzzle tin lids are as follows: 30pc/110pc/252pc
+   * tins (869x674px), 500pc/1000pc tins (1724x1169px) ».
+   *
+   * ⚠️ Ce RATIO est ce qui compte : le PDF du couvercle est composé
+   * exactement à ces proportions pour que `sizing: 'fillPrintArea'` n'ait
+   * rien à recadrer — sinon le QR imprimé dessus peut être coupé.
+   */
+  lidPrintAreaPx: { width: number; height: number }
+  /** Taille du puzzle assemblé (mm), même source. Sert aux libellés. */
+  assembledMm: { width: number; height: number }
 }
 
 const CATALOG: Record<PuzzleSize, PuzzleCatalogEntry> = {
-  '30': { sku: 'JIGSAW-PUZZLE-30', pieces: 30, usdCost: 26.32, printAreaPx: { width: 2952, height: 2362 } },
-  '110': { sku: 'JIGSAW-PUZZLE-110', pieces: 110, usdCost: 28.99, printAreaPx: { width: 2952, height: 2362 } },
-  '252': { sku: 'JIGSAW-PUZZLE-252', pieces: 252, usdCost: 30.33, printAreaPx: { width: 4429, height: 3366 } },
-  '500': { sku: 'JIGSAW-PUZZLE-500', pieces: 500, usdCost: 34.34, printAreaPx: { width: 6259, height: 4606 } },
-  '1000': { sku: 'JIGSAW-PUZZLE-1000', pieces: 1000, usdCost: 39.69, printAreaPx: { width: 9035, height: 6200 } },
+  '252': {
+    sku: 'JIGSAW-PUZZLE-252', pieces: 252, usdCost: 30.33,
+    printAreaPx: { width: 4429, height: 3366 },
+    lidPrintAreaPx: { width: 869, height: 674 },
+    assembledMm: { width: 375, height: 285 },
+  },
+  '500': {
+    sku: 'JIGSAW-PUZZLE-500', pieces: 500, usdCost: 34.34,
+    printAreaPx: { width: 6259, height: 4606 },
+    lidPrintAreaPx: { width: 1724, height: 1169 },
+    assembledMm: { width: 530, height: 390 },
+  },
+  '1000': {
+    sku: 'JIGSAW-PUZZLE-1000', pieces: 1000, usdCost: 39.69,
+    printAreaPx: { width: 9035, height: 6200 },
+    lidPrintAreaPx: { width: 1724, height: 1169 },
+    assembledMm: { width: 765, height: 525 },
+  },
 }
 
-// Même taux/marge/arrondi que poster_pricing.ts et lib/pricing.ts — un seul
-// modèle de marge dans toute l'app.
 const USD_TO_CHF = 0.9
-const MARGIN_RATE = 0.4
+
+// ⚠️ SEUL produit à ne PAS être à 40 % comme le livre et le poster : le
+// puzzle est passé à 90 % le 06.10.26 (positionnement premium).
+//
+// Pourquoi : à 40 %, le 1000 pièces sortait à CHF 50.50 livraison comprise,
+// soit MOINS CHER que le leader du marché suisse (ifolor, CHF 49.95 + 5.95 de
+// port = CHF 55.90 livré) — intenable pour un produit vendu comme premium.
+// À 90 % le catalogue donne 52.— / 59.— / 68.—, soit environ +20 % sur ifolor,
+// ce que justifient les deux différenciateurs réels : zéro travail de mise en
+// page (les souvenirs sont déjà dans l'app) et le QR du couvercle, qui fait
+// jouer les vidéos du souvenir — personne d'autre ne le propose.
+//
+// Le taux est volontairement gardé DANS le moteur coût + marge plutôt que
+// remplacé par trois prix en dur : si Prodigi change ses tarifs, le prix
+// client suit au lieu de vendre à perte en silence.
+const MARGIN_RATE = 0.9
 const MARGIN_FLOOR = 10.0
 
 export function puzzleCatalogEntry(size: PuzzleSize): PuzzleCatalogEntry | null {
@@ -62,7 +110,14 @@ export function computePuzzlePrice(size: PuzzleSize): number | null {
 // est donc volontairement PRUDENTE (le port réel vers la Suisse est plus
 // proche de $17). Elle ne sert qu'à déduire le port d'un puzzle supplémentaire
 // groupé : sous-estimer surfacture légèrement le client, surestimer vendrait à
-// perte. À remplacer par le chiffre d'un vrai devis groupé.
+// perte.
+//
+// ⚠️ TOUJOURS À RECALER, mais l'outil existe depuis le 06.10.26 : bouton
+// « Mesurer chez Prodigi » de l'écran puzzle (admin) → POST /api/prodigi/quote
+// avec `copies: 1` puis `copies: 2`. La différence des coûts d'ARTICLES donne
+// l'article sans port, et `prodigiShippingUsd` doit être IDENTIQUE sur les deux
+// devis — s'il double, Prodigi facture par article et tout le modèle de
+// commande groupée est faux.
 const SHIPPING_USD = 12.0
 
 /** Prix d'un puzzle SUPPLÉMENTAIRE dans la même commande : port déduit, que
@@ -76,5 +131,5 @@ export function computeAdditionalPuzzlePrice(size: PuzzleSize): number | null {
 }
 
 export function isPuzzleSize(v: unknown): v is PuzzleSize {
-  return v === '30' || v === '110' || v === '252' || v === '500' || v === '1000'
+  return v === '252' || v === '500' || v === '1000'
 }

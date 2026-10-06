@@ -67,6 +67,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   )
   const price = `CHF ${Number(o.price ?? 0).toFixed(2)}`
 
+  // ── Articles GROUPÉS dans la même commande ────────────────────────────────
+  //
+  // Jusqu'au 06.10.26, cet e-mail ignorait complètement additionalPuzzles /
+  // additionalPosters / additionalBooks : une commande de 2 puzzles 1000
+  // pièces annonçait « Puzzle 1000 pièces — CHF 115.50 », donc un seul article
+  // au double du prix. Le client avait toutes les raisons de croire à une
+  // erreur de facturation (audit du 06.10.26).
+  const extras: Array<Record<string, any>> = [
+    ...(Array.isArray(o.additionalPuzzles) ? o.additionalPuzzles : []),
+    ...(Array.isArray(o.additionalPosters) ? o.additionalPosters : []),
+    ...(Array.isArray(o.additionalBooks) ? o.additionalBooks : []),
+  ]
+
+  /** Libellé d'un article supplémentaire, quel que soit son type de produit. */
+  function extraLabel(e: Record<string, any>): string {
+    if (e?.puzzleSize) return `Puzzle ${escapeHtml(String(e.puzzleSize))} pièces`
+    if (e?.posterSize) {
+      const orient = e.posterOrientation === 'landscape' ? 'paysage' : 'portrait'
+      return `${escapeHtml(posterLabel(String(e.posterSize)))} ${orient}`
+    }
+    if (e?.bookTitle) {
+      const c =
+        e.coverType === 'hard' ? 'rigide' : e.coverType === 'layflat' ? 'layflat' : 'souple'
+      return `${escapeHtml(String(e.bookTitle))} — couverture ${c}`
+    }
+    return 'Article supplémentaire'
+  }
+
+  const totalItems = extras.length + 1
+  // Titre d'en-tête : « 2 puzzles » plutôt que le nom du premier article seul.
+  const groupTitle =
+    totalItems > 1 ? `${totalItems} ${itemLabel.toLowerCase()}s` : bookTitle
+  // Lignes du récapitulatif : le premier article puis chaque supplémentaire,
+  // avec la mention d'une livraison unique (c'est ce qui explique que le prix
+  // des suivants soit plus bas — port déjà compté sur le premier).
+  const itemLines = [
+    `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">${itemEmoji} ${bookTitle}</p>`,
+    ...extras.map(
+      (e) =>
+        `<p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">${itemEmoji} ${extraLabel(e)}</p>`
+    ),
+    totalItems > 1
+      ? `<p style="margin:0 0 6px;font-size:13px;color:#7a6a5a;">📦 ${totalItems} articles · une seule livraison</p>`
+      : '',
+  ]
+    .filter(Boolean)
+    .join('\n        ')
+
   // Coordonnées de paiement — lues depuis l'environnement (jamais en dur dans
   // le code) : IBAN pour virement, numéro pour TWINT, nom du bénéficiaire.
   const payName = process.env.PAYMENT_NAME ?? ''
@@ -91,6 +139,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     ${row('Commande', `<strong>${ref}</strong>`)}
     ${row('Client', `${fullName} · ${escapeHtml(userEmail)}`)}
     ${row(itemLabel, bookTitle)}
+    ${extras.length > 0 ? row('Aussi dans le colis', extras.map(extraLabel).join('<br />')) : ''}
     ${row(detailLabel, cover)}
     ${row('Adresse', address)}
     ${row('Montant', `<strong style="color:#3A6648">${price}</strong>`)}
@@ -99,12 +148,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const userHtml = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">Bonjour ${firstName},</p>
     <p style="margin:0 0 24px;font-size:15px;color:#2d2d2d;line-height:1.6;">
-      Merci pour votre commande ! Nous avons bien reçu votre ${itemWord} <strong>« ${bookTitle} »</strong>.
+      Merci pour votre commande ! Nous avons bien reçu votre ${
+        totalItems > 1 ? `commande de <strong>${groupTitle}</strong>` : `${itemWord} <strong>« ${bookTitle} »</strong>`
+      }.
     </p>
     <table width="100%" style="background:#f5ece0;border-radius:12px;margin-bottom:24px;">
       <tr><td style="padding:20px 24px;">
         <p style="margin:0 0 12px;font-size:13px;color:#7a6a5a;text-transform:uppercase;letter-spacing:1px;">Récapitulatif</p>
-        <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">${itemEmoji} ${bookTitle}</p>
+        ${itemLines}
         <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📦 ${detailLabel} ${isPoster ? cover : cover.toLowerCase()}</p>
         <p style="margin:0 0 6px;font-size:14px;color:#2d2d2d;">📍 ${address}</p>
         <p style="margin:0;font-size:15px;font-weight:bold;color:#3A6648;">${price}</p>
@@ -139,7 +190,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     userEmail
       ? sendEmail({
           to: userEmail,
-          subject: `Commande confirmée — ${isPoster ? posterLabel(String(o.posterSize ?? '')) : String(o.bookTitle ?? '')}`,
+          subject: `Commande confirmée — ${
+            totalItems > 1
+              ? groupTitle
+              : isPoster
+                ? posterLabel(String(o.posterSize ?? ''))
+                : String(o.bookTitle ?? '')
+          }`,
           html: userHtml,
         })
       : Promise.resolve(false),

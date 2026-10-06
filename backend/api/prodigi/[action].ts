@@ -340,13 +340,24 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
     if (!entry) {
       return res.status(400).json({ error: `Aucun SKU pour le puzzle ${o.puzzleSize} pièces` })
     }
+    // Couvercle : depuis le 06.10.26, un PDF composé (photo + titre + QR vers
+    // les vidéos du souvenir) généré aux proportions EXACTES de la zone `lid`
+    // — voir PuzzleLidPdfService. `puzzleLidUrl` absent = commande d'avant ce
+    // changement, ou souvenir sans média : on retombe sur la photo brute,
+    // comportement d'origine.
+    const lidUrl =
+      typeof o.puzzleLidUrl === 'string' &&
+      o.puzzleLidUrl &&
+      assetUrlBelongsTo(o.puzzleLidUrl, assetOwners)
+        ? o.puzzleLidUrl
+        : pdfUrl
     items = [{
       sku: entry.sku,
       copies: 1,
       sizing: 'fillPrintArea',
       assets: [
         { printArea: 'jigsaw', url: pdfUrl },
-        { printArea: 'lid', url: pdfUrl },
+        { printArea: 'lid', url: lidUrl },
       ],
     }]
     trustedPrice = computePuzzlePrice(o.puzzleSize)
@@ -366,13 +377,19 @@ async function handleOrder(req: VercelRequest, res: VercelResponse) {
       if (!assetUrlBelongsTo(extra.pdfUrl, assetOwners)) {
         return res.status(400).json({ error: 'Photo non reconnue sur un puzzle supplémentaire' })
       }
+      const extraLidUrl =
+        typeof extra.puzzleLidUrl === 'string' &&
+        extra.puzzleLidUrl &&
+        assetUrlBelongsTo(extra.puzzleLidUrl, assetOwners)
+          ? extra.puzzleLidUrl
+          : extra.pdfUrl
       items.push({
         sku: extraEntry.sku,
         copies: 1,
         sizing: 'fillPrintArea',
         assets: [
           { printArea: 'jigsaw', url: extra.pdfUrl },
-          { printArea: 'lid', url: extra.pdfUrl },
+          { printArea: 'lid', url: extraLidUrl },
         ],
       })
       // Port déduit : une seule livraison pour toute la commande groupée.
@@ -567,6 +584,8 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     posterSize,
     posterOrientation,
     posterColor,
+    puzzleSize,
+    copies,
   } = (req.body ?? {}) as {
     productType?: string
     coverType?: string
@@ -576,9 +595,24 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     posterSize?: string
     posterOrientation?: string
     posterColor?: string
+    puzzleSize?: string
+    copies?: number
   }
 
   const isPoster = productType === 'poster'
+  const isPuzzleQuote = productType === 'puzzle'
+
+  // `copies` > 1 sert à mesurer le PORT RÉEL d'une commande groupée : Prodigi
+  // ne facture la livraison qu'une fois, donc le devis à 2 exemplaires moins
+  // le devis à 1 donne le coût d'un article SANS port, et par différence le
+  // port lui-même. C'est exactement la valeur estimée en dur dans
+  // `SHIPPING_USD` (puzzle_pricing.ts), jamais confirmée par un devis
+  // jusqu'ici — sous-estimée, elle surfacture le client sur chaque article
+  // supplémentaire.
+  const quoteCopies =
+    Number.isFinite(copies) && (copies as number) >= 1 && (copies as number) <= 5
+      ? Math.round(copies as number)
+      : 1
   let sku: string | undefined
   let localPrintedPages: number | undefined
   let localPriceChf: number | null = null
@@ -586,7 +620,18 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
   // à comparer à prodigiCostUsd pour recaler poster_pricing.
   let localCostUsd: number | null = null
 
-  if (isPoster) {
+  if (isPuzzleQuote) {
+    if (!isPuzzleSize(puzzleSize)) {
+      return res.status(400).json({ error: 'puzzleSize invalide' })
+    }
+    const entry = puzzleCatalogEntry(puzzleSize)
+    if (!entry) {
+      return res.status(400).json({ error: `Aucun SKU puzzle pour ${puzzleSize}` })
+    }
+    sku = entry.sku
+    localCostUsd = entry.usdCost
+    localPriceChf = computePuzzlePrice(puzzleSize)
+  } else if (isPoster) {
     if (!isPosterSize(posterSize) || !isPosterOrientation(posterOrientation)) {
       return res.status(400).json({ error: 'posterSize/posterOrientation invalide' })
     }
@@ -631,17 +676,30 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
     // un vrai changement de tarif Prodigi, pas juste le taux de change.
     currencyCode: 'USD',
     items: [
-      isPoster
+      isPuzzleQuote
         ? {
             sku,
-            copies: 1,
-            attributes: posterItemAttributes(
-              String(posterSize),
-              isPosterHangerColor(posterColor) ? posterColor : 'natural'
-            ),
-            assets: [{ printArea: 'default' }],
+            copies: quoteCopies,
+            // Les deux zones du puzzle, comme pour une vraie commande — un
+            // devis sur la seule zone `default` serait refusé (ce SKU n'en a
+            // pas) ou chiffrerait autre chose que ce qu'on fabrique.
+            assets: [{ printArea: 'jigsaw' }, { printArea: 'lid' }],
           }
-        : { sku, copies: 1, assets: [{ printArea: 'default', pageCount: localPrintedPages }] },
+        : isPoster
+          ? {
+              sku,
+              copies: quoteCopies,
+              attributes: posterItemAttributes(
+                String(posterSize),
+                isPosterHangerColor(posterColor) ? posterColor : 'natural'
+              ),
+              assets: [{ printArea: 'default' }],
+            }
+          : {
+              sku,
+              copies: quoteCopies,
+              assets: [{ printArea: 'default', pageCount: localPrintedPages }],
+            },
     ],
   }
 
@@ -687,10 +745,16 @@ async function handleQuote(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({
       ok: true,
+      sku,
+      copies: quoteCopies,
       localPrintedPages,
       localPriceChf,
       localCostUsd,
       prodigiCostUsd,
+      // Isolé pour pouvoir recaler `SHIPPING_USD` : avec copies=2, c'est le
+      // port d'UNE commande groupée, pas deux fois celui d'un article.
+      prodigiShippingUsd: Number.isFinite(shippingUsd) ? shippingUsd : null,
+      prodigiItemsUsd: Number.isFinite(itemsUsd) ? itemsUsd : null,
       prodigiRaw: data ?? raw.slice(0, 2000),
     })
   } catch (e) {
@@ -789,6 +853,81 @@ async function handlePoll(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: true, checked, errored, shipped })
 }
 
+// GET /api/prodigi/product?sku=… → fiche produit Prodigi brute, dont les
+// dimensions de CHAQUE zone d'impression (`variants[].printAreaSizes`).
+//
+// Pourquoi (06.10.26) : le catalogue puzzle ne conserve que la zone `jigsaw`.
+// Pour imprimer un QR sur le COUVERCLE il faut les dimensions de la zone
+// `lid`, que personne n'a jamais relevées — et les deviner n'est pas une
+// option sur un objet physique payé, parce que `sizing: 'fillPrintArea'`
+// recadre ce qui dépasse et peut couper le QR. Admin uniquement (appel direct
+// à la clé live), lecture seule, ne modifie rien.
+async function handleProduct(req: VercelRequest, res: VercelResponse) {
+  const user = await requireAuth(req, res)
+  if (!user) return
+  if (user.email !== ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Accès refusé' })
+  }
+
+  const apiKey = process.env.PRODIGI_API_KEY
+  if (!apiKey) {
+    return res
+      .status(503)
+      .json({ error: 'Prodigi non configuré (PRODIGI_API_KEY manquante)' })
+  }
+
+  const sku = String(req.query.sku ?? req.body?.sku ?? '').trim()
+  // Liste blanche : uniquement des SKU de NOTRE catalogue, pour que cette
+  // route ne devienne pas un proxy ouvert vers l'API Prodigi.
+  const known = new Set<string>([
+    ...(['252', '500', '1000'] as const).map((s) => puzzleCatalogEntry(s)!.sku),
+  ])
+  if (!known.has(sku)) {
+    return res
+      .status(400)
+      .json({ error: `SKU hors catalogue : « ${sku} »`, allowed: [...known] })
+  }
+
+  try {
+    const r = await fetch(
+      `${PRODIGI_API_URL}/products/${encodeURIComponent(sku)}`,
+      { headers: { 'X-API-Key': apiKey } }
+    )
+    const raw = await r.text()
+    let data: any = null
+    try {
+      data = JSON.parse(raw)
+    } catch {
+      /* non-JSON — gardé brut pour diagnostic */
+    }
+    if (!r.ok) {
+      return res.status(502).json({
+        error: 'Fiche produit refusée par Prodigi',
+        detail: formatProdigiFailures(data, raw).slice(0, 500),
+      })
+    }
+
+    // Extraction lisible : une entrée par variante, avec la taille de chaque
+    // zone d'impression. C'est ce qu'on recopiera dans le catalogue.
+    const variants = Array.isArray(data?.product?.variants)
+      ? data.product.variants
+      : []
+    const printAreas = variants.map((v: any) => ({
+      attributes: v?.attributes ?? null,
+      printAreaSizes: v?.printAreaSizes ?? null,
+    }))
+
+    return res.status(200).json({
+      ok: true,
+      sku,
+      printAreas,
+      prodigiRaw: data ?? raw.slice(0, 2000),
+    })
+  } catch (e) {
+    return res.status(502).json({ error: `Appel Prodigi échoué : ${e}` })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
@@ -796,6 +935,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'status') return handleStatus(req, res)
   if (action === 'poll') return handlePoll(req, res)
   if (action === 'quote') return handleQuote(req, res)
+  if (action === 'product') return handleProduct(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

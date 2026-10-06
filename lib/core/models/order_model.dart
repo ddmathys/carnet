@@ -165,14 +165,21 @@ class OrderModel {
   // puzzle_generate_screen.dart). `pdfUrl` ci-dessus porte l'URL stable de LA
   // photo (même image utilisée pour le puzzle et le couvercle de la boîte).
   final String? puzzleSku;
-  final String? puzzleSize; // '30' | '110' | '252' | '500' | '1000' (pièces)
+  final String? puzzleSize; // '252' | '500' | '1000' (pièces)
   final String? puzzlePhotoKey;
   final String? puzzlePhotoUrl;
+  // PDF du COUVERCLE de la boîte (photo + titre + QR vers les vidéos du
+  // souvenir), composé aux proportions exactes de la zone d'impression `lid`
+  // — voir PuzzleLidPdfService. null = souvenir sans vidéo ni mémo vocal (pas
+  // de QR à imprimer, donc pas de couvercle composé) ou commande d'avant le
+  // 06.10.26 : le backend retombe alors sur la photo brute, comme avant.
+  final String? puzzleLidUrl;
   // Même principe qu'`additionalPosters`/`additionalBooks`, pour des
   // PUZZLES groupés dans la même commande (livraison unique, un seul appel
   // Prodigi avec plusieurs `items`). Le puzzle "principal" reste porté par
   // les champs `puzzle*` ci-dessus ; chaque entrée ici a la forme
-  // (puzzleSku, puzzleSize, price, pdfUrl, puzzlePhotoKey, puzzlePhotoUrl)
+  // (puzzleSku, puzzleSize, price, pdfUrl, puzzleLidUrl, puzzlePhotoKey,
+  // puzzlePhotoUrl)
   // — voir puzzle_generate_screen.dart::_QueuedPuzzle.toMap().
   final List<Map<String, dynamic>>? additionalPuzzles;
 
@@ -222,6 +229,7 @@ class OrderModel {
     this.puzzleSize,
     this.puzzlePhotoKey,
     this.puzzlePhotoUrl,
+    this.puzzleLidUrl,
     this.additionalPuzzles,
   });
 
@@ -395,6 +403,7 @@ class OrderModel {
       puzzleSize: d['puzzleSize'],
       puzzlePhotoKey: d['puzzlePhotoKey'],
       puzzlePhotoUrl: d['puzzlePhotoUrl'],
+      puzzleLidUrl: d['puzzleLidUrl'],
       additionalPuzzles: (d['additionalPuzzles'] as List<dynamic>?)
           ?.whereType<Map<String, dynamic>>()
           .toList(),
@@ -436,6 +445,7 @@ class OrderModel {
     'puzzleSize': puzzleSize,
     'puzzlePhotoKey': puzzlePhotoKey,
     'puzzlePhotoUrl': puzzlePhotoUrl,
+    'puzzleLidUrl': puzzleLidUrl,
     'additionalPuzzles': additionalPuzzles,
   };
 }

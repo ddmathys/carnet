@@ -14,33 +14,68 @@ class PuzzleCatalogEntry {
   final double usdCost;
   final int printAreaPxW;
   final int printAreaPxH;
+
+  /// Zone d'impression du COUVERCLE de la boîte métal, relevée le 06.10.26
+  /// dans la fiche produit publique de Prodigi (« 30pc/110pc/252pc tins
+  /// 869x674px, 500pc/1000pc tins 1724x1169px »). C'est le RATIO qui compte :
+  /// le PDF du couvercle est composé exactement à ces proportions pour que
+  /// `sizing: 'fillPrintArea'` n'ait rien à recadrer — sinon le QR imprimé
+  /// dessus peut être coupé. Miroir de backend/lib/puzzle_pricing.ts.
+  final int lidPrintAreaPxW;
+  final int lidPrintAreaPxH;
+
+  /// Taille du puzzle assemblé (mm), même source — sert aux libellés.
+  final int assembledMmW;
+  final int assembledMmH;
+
   const PuzzleCatalogEntry({
     required this.sku,
     required this.pieces,
     required this.usdCost,
     required this.printAreaPxW,
     required this.printAreaPxH,
+    required this.lidPrintAreaPxW,
+    required this.lidPrintAreaPxH,
+    required this.assembledMmW,
+    required this.assembledMmH,
   });
+
+  /// Proportions du couvercle (largeur / hauteur).
+  double get lidAspect => lidPrintAreaPxW / lidPrintAreaPxH;
 }
 
 class PuzzlePricing {
   static const double _usdToChf = 0.90;
-  static const double marginRate = 0.40;
+
+  /// ⚠️ SEUL produit à ne PAS être à 40 % comme le livre et le poster : passé
+  /// à 90 % le 06.10.26 (positionnement premium). À 40 %, le 1000 pièces
+  /// sortait à CHF 50.50 livré, soit MOINS cher qu'ifolor (CHF 49.95 + 5.95 de
+  /// port) pour un produit vendu comme premium. Justification complète dans
+  /// backend/lib/puzzle_pricing.ts, dont ce fichier est le miroir exact.
+  static const double marginRate = 0.90;
   static const double marginFloor = 10.0;
 
-  static const List<String> sizes = ['30', '110', '252', '500', '1000'];
+  /// Catalogue resserré le 06.10.26 : 30 et 110 pièces retirés (un puzzle de
+  /// 30 pièces n'est pas un cadeau et tirait l'étiquette « dès CHF … » vers le
+  /// bas). Miroir de `PuzzleSize` côté backend.
+  static const List<String> sizes = ['252', '500', '1000'];
 
   static const Map<String, PuzzleCatalogEntry> _catalog = {
-    '30': PuzzleCatalogEntry(
-        sku: 'JIGSAW-PUZZLE-30', pieces: 30, usdCost: 26.32, printAreaPxW: 2952, printAreaPxH: 2362),
-    '110': PuzzleCatalogEntry(
-        sku: 'JIGSAW-PUZZLE-110', pieces: 110, usdCost: 28.99, printAreaPxW: 2952, printAreaPxH: 2362),
     '252': PuzzleCatalogEntry(
-        sku: 'JIGSAW-PUZZLE-252', pieces: 252, usdCost: 30.33, printAreaPxW: 4429, printAreaPxH: 3366),
+        sku: 'JIGSAW-PUZZLE-252', pieces: 252, usdCost: 30.33,
+        printAreaPxW: 4429, printAreaPxH: 3366,
+        lidPrintAreaPxW: 869, lidPrintAreaPxH: 674,
+        assembledMmW: 375, assembledMmH: 285),
     '500': PuzzleCatalogEntry(
-        sku: 'JIGSAW-PUZZLE-500', pieces: 500, usdCost: 34.34, printAreaPxW: 6259, printAreaPxH: 4606),
+        sku: 'JIGSAW-PUZZLE-500', pieces: 500, usdCost: 34.34,
+        printAreaPxW: 6259, printAreaPxH: 4606,
+        lidPrintAreaPxW: 1724, lidPrintAreaPxH: 1169,
+        assembledMmW: 530, assembledMmH: 390),
     '1000': PuzzleCatalogEntry(
-        sku: 'JIGSAW-PUZZLE-1000', pieces: 1000, usdCost: 39.69, printAreaPxW: 9035, printAreaPxH: 6200),
+        sku: 'JIGSAW-PUZZLE-1000', pieces: 1000, usdCost: 39.69,
+        printAreaPxW: 9035, printAreaPxH: 6200,
+        lidPrintAreaPxW: 1724, lidPrintAreaPxH: 1169,
+        assembledMmW: 765, assembledMmH: 525),
   };
 
   static PuzzleCatalogEntry? entryFor(String size) => _catalog[size];
@@ -60,7 +95,9 @@ class PuzzlePricing {
 
   /// Part « livraison » comprise dans `usdCost`. Jamais isolée sur un devis
   /// Prodigi pour les puzzles : volontairement PRUDENTE (le port réel est plus
-  /// proche de $17). Miroir de backend/lib/puzzle_pricing.ts.
+  /// proche de 17 USD). À recaler avec le bouton « Mesurer chez Prodigi » de
+  /// l'écran puzzle (admin, depuis le 06.10.26). Miroir de
+  /// backend/lib/puzzle_pricing.ts.
   static const double _shippingUsd = 12.0;
 
   /// Prix d'un puzzle SUPPLÉMENTAIRE dans la même commande : port déduit.

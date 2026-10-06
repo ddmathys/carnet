@@ -161,6 +161,47 @@ class OrderService {
     return data;
   }
 
+  /// Devis Prodigi réel d'un puzzle — admin uniquement, gratuit, ne commande
+  /// rien. `copies` > 1 sert à mesurer le PORT d'une commande GROUPÉE : le
+  /// devis à 2 exemplaires moins celui à 1 donne le coût d'un article sans
+  /// port, donc le port par différence. C'est la valeur estimée en dur dans
+  /// `PuzzlePricing._shippingUsd` (12 USD), jamais confirmée par un devis —
+  /// sous-estimée, elle surfacture le client sur chaque article supplémentaire.
+  static Future<Map<String, dynamic>> verifyPuzzleQuote({
+    required String size,
+    int copies = 1,
+  }) async {
+    final data = await BackendClient.postJson(
+      '/api/prodigi/quote',
+      {
+        'productType': 'puzzle',
+        'puzzleSize': size,
+        'copies': copies,
+      },
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Échec du devis Prodigi');
+    }
+    return data;
+  }
+
+  /// Fiche produit Prodigi d'un SKU de notre catalogue — admin uniquement,
+  /// lecture seule. Sert à relever les dimensions de CHAQUE zone
+  /// d'impression : le catalogue puzzle ne connaît que la zone `jigsaw`, et
+  /// imprimer un QR sur le couvercle demande celles de la zone `lid`.
+  static Future<Map<String, dynamic>> prodigiProductInfo(String sku) async {
+    final data = await BackendClient.postJson(
+      '/api/prodigi/product',
+      {'sku': sku},
+      timeout: const Duration(seconds: 20),
+    );
+    if (data == null || data['ok'] != true) {
+      throw Exception(data?['error'] ?? data?['detail'] ?? 'Fiche produit indisponible');
+    }
+    return data;
+  }
+
   /// Le client confirme avoir reçu sa commande expédiée ("J'ai bien reçu ma
   /// commande") : passe le statut à 'archived' côté backend (Admin SDK — le
   /// client n'a pas le droit d'écrire `orders` directement, voir

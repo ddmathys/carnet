@@ -615,6 +615,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ── Photo des puzzles (même infra que livres/posters, mais JPG — Prodigi
   // cadre lui-même la photo dans la zone d'impression, pas de PDF composé
   // côté app comme pour le poster) ────────────────────────────────────────
+  // PDF du COUVERCLE de la boîte (photo + titre + QR vers les vidéos du
+  // souvenir) — distinct de `puzzle-upload-url`, qui porte la photo brute du
+  // puzzle lui-même. Ajouté le 06.10.26 avec le QR du couvercle.
+  if (action === 'puzzle-lid-upload-url') {
+    const size = requireSizeBytes(
+      body.sizeBytes,
+      MAX_PDF_BYTES,
+      'PDF du couvercle'
+    )
+    if ('error' in size) return res.status(400).json({ error: size.error })
+    const key = `puzzles/${user.uid}/${randomUUID()}.pdf`
+    try {
+      const uploadUrl = await presignPut(key, 'application/pdf', 3600, size.bytes)
+      return res.status(200).json({
+        uploadUrl,
+        key,
+        contentType: 'application/pdf',
+        url: stablePdfUrl(req, key),
+      })
+    } catch {
+      return res.status(500).json({ error: 'Signature impossible' })
+    }
+  }
+
   if (action === 'puzzle-upload-url') {
     const size = requireSizeBytes(
       body.sizeBytes,

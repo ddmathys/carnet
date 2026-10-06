@@ -16,6 +16,8 @@ import {
 import {
   computePuzzlePrice,
   computeAdditionalPuzzlePrice,
+  puzzleCatalogEntry,
+  isPuzzleSize,
 } from './puzzle_pricing.ts'
 
 // Non-régression du bug corrigé le 15.09.26 : checkout.ts ignorait
@@ -106,10 +108,42 @@ test('deux posters groupés coûtent moins que deux posters séparés', () => {
 })
 
 test('deux puzzles groupés coûtent moins que deux puzzles séparés', () => {
-  const alone = computePuzzlePrice('30')!
-  const extra = computeAdditionalPuzzlePrice('30')!
+  const alone = computePuzzlePrice('252')!
+  const extra = computeAdditionalPuzzlePrice('252')!
   assert.ok(extra < alone)
   assert.ok(alone + extra < alone * 2)
+})
+
+// ── Catalogue puzzle resserré + marge premium (06.10.26) ────────────────────
+
+test('les tailles 30 et 110 ne sont plus commandables', () => {
+  assert.equal(isPuzzleSize('30'), false)
+  assert.equal(isPuzzleSize('110'), false)
+  assert.equal(isPuzzleSize('252'), true)
+  assert.equal(isPuzzleSize('1000'), true)
+  // Une commande historique portant '30' est refusée plutôt que facturée au
+  // mauvais tarif — c'est le comportement voulu.
+  assert.equal(computePuzzlePrice('30' as never), null)
+})
+
+test('le puzzle est au tarif premium, pas à 40 % comme le livre', () => {
+  // Référence marché : ifolor 1000 pièces CHF 49.95 + 5.95 de port = 55.90
+  // livré. Le nôtre doit être AU-DESSUS, sinon le positionnement premium ne
+  // tient pas (audit du 06.10.26).
+  assert.equal(computePuzzlePrice('252'), 52.0)
+  assert.equal(computePuzzlePrice('500'), 59.0)
+  assert.equal(computePuzzlePrice('1000'), 68.0)
+  assert.ok(computePuzzlePrice('1000')! > 55.9)
+})
+
+test('un puzzle supplémentaire reste rentable malgré le port déduit', () => {
+  for (const size of ['252', '500', '1000'] as const) {
+    const entry = puzzleCatalogEntry(size)!
+    const extra = computeAdditionalPuzzlePrice(size)!
+    // Coût réel d'un article sans port : on ne doit jamais vendre en dessous.
+    const costWithoutShipping = (entry.usdCost - 12.0) * 0.9
+    assert.ok(extra > costWithoutShipping, `${size} vendu à perte`)
+  }
 })
 
 test('A0 paysage n’a pas de tarif groupé non plus (absent du catalogue)', () => {

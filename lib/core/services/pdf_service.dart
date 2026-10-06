@@ -35,6 +35,12 @@ class PdfService {
   static Future<PdfUploadResult?> uploadPuzzlePhoto(Uint8List bytes) =>
       _uploadPdf(bytes, action: 'puzzle-upload-url');
 
+  /// PDF du couvercle de la boîte du puzzle (photo + titre + QR) — voir
+  /// PuzzleLidPdfService. Chemin séparé de la photo brute : contentType
+  /// application/pdf et non image/jpeg.
+  static Future<PdfUploadResult?> uploadPuzzleLidPdf(Uint8List bytes) =>
+      _uploadPdf(bytes, action: 'puzzle-lid-upload-url');
+
   static Future<PdfUploadResult?> _uploadPdf(Uint8List bytes,
       {required String action}) async {
     try {
