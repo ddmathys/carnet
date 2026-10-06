@@ -126,14 +126,28 @@ test('les tailles 30 et 110 ne sont plus commandables', () => {
   assert.equal(computePuzzlePrice('30' as never), null)
 })
 
-test('le puzzle est au tarif premium, pas à 40 % comme le livre', () => {
+test('le puzzle vise 40 % du PRIX DE VENTE, pas 40 % de majoration', () => {
   // Référence marché : ifolor 1000 pièces CHF 49.95 + 5.95 de port = 55.90
-  // livré. Le nôtre doit être AU-DESSUS, sinon le positionnement premium ne
-  // tient pas (audit du 06.10.26).
-  assert.equal(computePuzzlePrice('252'), 52.0)
-  assert.equal(computePuzzlePrice('500'), 59.0)
-  assert.equal(computePuzzlePrice('1000'), 68.0)
+  // livré. Le nôtre doit rester AU-DESSUS sur le grand format, sinon le
+  // positionnement premium ne tient pas (audit du 06.10.26).
+  assert.equal(computePuzzlePrice('252'), 45.5)
+  assert.equal(computePuzzlePrice('500'), 52.0)
+  assert.equal(computePuzzlePrice('1000'), 60.0)
   assert.ok(computePuzzlePrice('1000')! > 55.9)
+})
+
+// C'est CE test qui distingue les deux modèles de marge : avec une simple
+// majoration de 40 % (livre, poster), la marge ne vaut que 29 % du prix.
+test('la marge représente bien ~40 % du prix encaissé', () => {
+  for (const size of ['252', '500', '1000'] as const) {
+    const cost = puzzleCatalogEntry(size)!.usdCost * 0.9
+    const price = computePuzzlePrice(size)!
+    const share = (price - cost) / price
+    assert.ok(
+      share >= 0.39 && share <= 0.42,
+      `${size} : marge de ${Math.round(share * 100)} % du prix, attendu ~40 %`
+    )
+  }
 })
 
 test('un puzzle supplémentaire reste rentable malgré le port déduit', () => {

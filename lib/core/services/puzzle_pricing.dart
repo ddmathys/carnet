@@ -47,12 +47,15 @@ class PuzzleCatalogEntry {
 class PuzzlePricing {
   static const double _usdToChf = 0.90;
 
-  /// ⚠️ SEUL produit à ne PAS être à 40 % comme le livre et le poster : passé
-  /// à 90 % le 06.10.26 (positionnement premium). À 40 %, le 1000 pièces
-  /// sortait à CHF 50.50 livré, soit MOINS cher qu'ifolor (CHF 49.95 + 5.95 de
-  /// port) pour un produit vendu comme premium. Justification complète dans
-  /// backend/lib/puzzle_pricing.ts, dont ce fichier est le miroir exact.
-  static const double marginRate = 0.90;
+  /// ⚠️ LE PUZZLE NE SE CALCULE PAS COMME LE LIVRE ET LE POSTER.
+  ///
+  /// `BookPricing` et `PosterPricing` appliquent une MAJORATION de 40 % sur le
+  /// coût (`prix = coût × 1,4`), ce qui ne laisse en réalité que 29 % du prix
+  /// de vente. Le puzzle vise une MARGE de 40 % DU PRIX DE VENTE
+  /// (`prix = coût ÷ 0,60`) — décision de David le 06.10.26. Justification
+  /// complète dans backend/lib/puzzle_pricing.ts, dont ce fichier est le
+  /// miroir exact.
+  static const double marginShare = 0.40;
   static const double marginFloor = 10.0;
 
   /// Catalogue resserré le 06.10.26 : 30 et 110 pièces retirés (un puzzle de
@@ -80,8 +83,13 @@ class PuzzlePricing {
 
   static PuzzleCatalogEntry? entryFor(String size) => _catalog[size];
 
-  static double marginFor(double cost) =>
-      cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
+  /// Marge en francs telle qu'elle représente [marginShare] du PRIX DE VENTE
+  /// et non du coût : `marge = coût × part / (1 − part)`. Le plancher reste un
+  /// filet de sécurité (il ne joue à aucune taille du catalogue actuel).
+  static double marginFor(double cost) {
+    final margin = cost * (marginShare / (1 - marginShare));
+    return margin < marginFloor ? marginFloor : margin;
+  }
 
   /// Prix client = coût Prodigi total (article + livraison, converti) + marge,
   /// arrondi au 0.50 supérieur. null si la taille n'existe pas.

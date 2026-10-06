@@ -66,11 +66,21 @@ void main() {
     // Ces trois valeurs DOIVENT rester identiques à celles asséntées dans
     // backend/lib/pricing.test.ts — c'est tout l'intérêt du miroir : si l'un
     // des deux fichiers de tarif dérive, un des deux jeux de tests casse.
-    test('tarif premium : 52 / 59 / 68', () {
-      expect(PuzzlePricing.price('252'), 52.0);
-      expect(PuzzlePricing.price('500'), 59.0);
-      expect(PuzzlePricing.price('1000'), 68.0);
-      expect(PuzzlePricing.minPrice, 52.0);
+    test('tarif : 45.50 / 52 / 60', () {
+      expect(PuzzlePricing.price('252'), 45.50);
+      expect(PuzzlePricing.price('500'), 52.0);
+      expect(PuzzlePricing.price('1000'), 60.0);
+      expect(PuzzlePricing.minPrice, 45.50);
+    });
+
+    // Distingue les deux modèles : une majoration de 40 % (livre, poster) ne
+    // laisse que 29 % du prix. Le puzzle vise 40 % du prix encaissé.
+    test('la marge représente bien ~40 % du prix encaissé', () {
+      for (final size in PuzzlePricing.sizes) {
+        final cost = PuzzlePricing.entryFor(size)!.usdCost * 0.90;
+        final price = PuzzlePricing.price(size)!;
+        expect((price - cost) / price, closeTo(0.40, 0.02), reason: size);
+      }
     });
 
     test('le 1000 pièces est au-dessus du prix livré d\'ifolor (55.90)', () {

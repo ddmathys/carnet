@@ -71,29 +71,45 @@ const CATALOG: Record<PuzzleSize, PuzzleCatalogEntry> = {
 
 const USD_TO_CHF = 0.9
 
-// ⚠️ SEUL produit à ne PAS être à 40 % comme le livre et le poster : le
-// puzzle est passé à 90 % le 06.10.26 (positionnement premium).
+// ⚠️ LE PUZZLE NE SE CALCULE PAS COMME LE LIVRE ET LE POSTER.
 //
-// Pourquoi : à 40 %, le 1000 pièces sortait à CHF 50.50 livraison comprise,
-// soit MOINS CHER que le leader du marché suisse (ifolor, CHF 49.95 + 5.95 de
-// port = CHF 55.90 livré) — intenable pour un produit vendu comme premium.
-// À 90 % le catalogue donne 52.— / 59.— / 68.—, soit environ +20 % sur ifolor,
-// ce que justifient les deux différenciateurs réels : zéro travail de mise en
-// page (les souvenirs sont déjà dans l'app) et le QR du couvercle, qui fait
-// jouer les vidéos du souvenir — personne d'autre ne le propose.
+// `lib/pricing.ts` et `lib/poster_pricing.ts` appliquent une MAJORATION de
+// 40 % sur le coût (`prix = coût × 1,4`), ce qui ne laisse en réalité que
+// 29 % du prix de vente. Le puzzle, lui, vise une MARGE de 40 % DU PRIX DE
+// VENTE : `prix = coût ÷ 0,60`. Décision de David le 06.10.26, après avoir vu
+// les deux chiffrages côte à côte.
 //
-// Le taux est volontairement gardé DANS le moteur coût + marge plutôt que
-// remplacé par trois prix en dur : si Prodigi change ses tarifs, le prix
-// client suit au lieu de vendre à perte en silence.
-const MARGIN_RATE = 0.9
+// Pourquoi ce produit et pas les autres : à 40 % de majoration, le 1000
+// pièces sortait à CHF 50.50 livraison comprise, soit MOINS CHER que le
+// leader du marché suisse (ifolor, CHF 49.95 + 5.95 de port = CHF 55.90
+// livré) — intenable pour un produit vendu comme premium. Le modèle retenu
+// donne 45.50 / 52.— / 60.—, donc toujours au-dessus d'ifolor sur le grand
+// format, ce que justifient les deux différenciateurs réels : zéro travail de
+// mise en page (les souvenirs sont déjà dans l'app) et le QR du couvercle,
+// qui fait jouer les vidéos du souvenir — personne d'autre ne le propose.
+//
+// Le taux reste DANS le moteur coût + marge plutôt que remplacé par trois
+// prix en dur : si Prodigi change ses tarifs, le prix client suit au lieu de
+// vendre à perte en silence.
+const MARGIN_SHARE = 0.4
 const MARGIN_FLOOR = 10.0
 
 export function puzzleCatalogEntry(size: PuzzleSize): PuzzleCatalogEntry | null {
   return CATALOG[size] ?? null
 }
 
+/**
+ * Marge en francs pour un coût donné, de sorte que la marge représente
+ * `MARGIN_SHARE` du PRIX DE VENTE et non du coût :
+ *
+ *   prix = coût / (1 − part)  ⟺  marge = coût × part / (1 − part)
+ *
+ * Le plancher reste un filet de sécurité (il ne joue à aucune taille du
+ * catalogue actuel, même sur un article supplémentaire port déduit).
+ */
 function marginFor(cost: number): number {
-  return cost * MARGIN_RATE < MARGIN_FLOOR ? MARGIN_FLOOR : cost * MARGIN_RATE
+  const margin = cost * (MARGIN_SHARE / (1 - MARGIN_SHARE))
+  return margin < MARGIN_FLOOR ? MARGIN_FLOOR : margin
 }
 
 /** Prix client CHF = coût Prodigi total (article + livraison, converti) + marge, arrondi au 0.50 supérieur. */
