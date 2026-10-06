@@ -31,6 +31,8 @@ import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../milestones/widgets/growth_curve_chart.dart';
 import '../milestones/widgets/flexible_date_sheet.dart';
 import '../tags/person_avatar.dart';
+import '../../core/models/memory_model.dart';
+import '../tags/person_suggestions.dart';
 import '../tags/person_picker_sheet.dart';
 import '../tags/tag_picker_sheet.dart';
 
@@ -179,6 +181,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   // alimente la liste déroulante du champ lieu. Vide tant que non chargé
   // (le champ reste alors un simple texte libre).
   List<String> _knownLocations = [];
+
+  // Souvenirs déjà enregistrés — chargés UNE fois avec les lieux connus
+  // (_loadKnownLocations), et réutilisés tels quels pour proposer des
+  // personnes (voir _personSuggestions). Aucun chargement de plus.
+  List<MemoryModel> _pastMemories = const [];
+  // Les suggestions se recalculent seulement quand leurs entrées changent :
+  // le calcul balaie tous les souvenirs, et `build` tourne à chaque frappe.
+  String _suggestionsKey = '';
+  List<PersonSuggestion> _suggestionsCache = const [];
   final _textController = TextEditingController();
   final _weightController = TextEditingController();
   final _heightController = TextEditingController();
@@ -231,7 +242,12 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
               ? byCount
               : a.toLowerCase().compareTo(b.toLowerCase());
         });
-      if (mounted) setState(() => _knownLocations = sorted);
+      if (mounted) {
+        setState(() {
+          _knownLocations = sorted;
+          _pastMemories = memories;
+        });
+      }
     } catch (_) {
       // best-effort — le champ reste un simple texte libre si ça échoue
     }
@@ -3007,6 +3023,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// sur « + » pour en ajouter une.
   Widget _buildPersonPastilleRow() {
     final selected = _personLabels.toList()..sort();
+    final suggestions = _personSuggestions;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -3032,8 +3049,58 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             ],
           ),
         ),
+        if (suggestions.isNotEmpty) ...[
+          const SizedBox(height: 6),
+          const Text(
+            "Proposé d'après tes autres souvenirs — appuie pour ajouter",
+            style: TextStyle(color: AppColors.textMedium, fontSize: 11.5),
+          ),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final s in suggestions)
+                _SuggestedPersonChip(
+                  suggestion: s,
+                  onTap: () => _acceptSuggestion(s),
+                ),
+            ],
+          ),
+        ],
       ],
     );
+  }
+
+  /// Personnes proposées pour ce souvenir, d'après les souvenirs déjà
+  /// enregistrés — jamais d'après les photos (voir suggestPeople : aucune
+  /// reconnaissance de visage, rien ne sort du téléphone). Rien n'est posé
+  /// tant que l'utilisateur n'a pas tapé sur la proposition : un tag de
+  /// personne peut être partagé, et le partage se recopie sur le souvenir.
+  List<PersonSuggestion> get _personSuggestions {
+    if (_pastMemories.isEmpty) return const [];
+    final selected = _personLabels;
+    final key = '${_selectedDate.toIso8601String()}|'
+        '${_locationController.text.trim().toLowerCase()}|'
+        '${_pastMemories.length}|${_allTags.length}|'
+        '${(selected.toList()..sort()).join(',')}';
+    if (key == _suggestionsKey) return _suggestionsCache;
+    _suggestionsKey = key;
+    _suggestionsCache = suggestPeople(
+      memories: _pastMemories,
+      people: [for (final t in _allTags) if (_isPersonKind(t.kind)) t],
+      alreadySelected: selected,
+      date: _selectedDate,
+      location: _locationController.text,
+    );
+    return _suggestionsCache;
+  }
+
+  /// Proposition acceptée : la personne rejoint le souvenir par le chemin
+  /// NORMAL (un libellé dans `_tagLabels`, résolu en tag à l'enregistrement),
+  /// exactement comme si elle avait été choisie à la main.
+  void _acceptSuggestion(PersonSuggestion s) {
+    setState(() => _tagLabels.add(s.tag.label));
   }
 
   /// Le tag correspondant à une personne déjà sélectionnée (pour sa photo et
@@ -3716,6 +3783,64 @@ class _EditablePersonPastille extends StatelessWidget {
 }
 
 /// Pastille « + » pour ajouter une personne au souvenir.
+/// Personne PROPOSÉE (voir suggestPeople) : une puce, pas une pastille de la
+/// rangée — elle ne fait pas encore partie du souvenir. La raison est affichée
+/// avec : une suggestion qu'on ne peut pas expliquer ne se valide pas en
+/// confiance, et un tag de personne peut porter un partage.
+class _SuggestedPersonChip extends StatelessWidget {
+  final PersonSuggestion suggestion;
+  final VoidCallback onTap;
+  const _SuggestedPersonChip({required this.suggestion, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final tag = suggestion.tag;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(6, 5, 12, 5),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: AppColors.border, width: 1.2),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            PersonAvatar(
+                label: tag.label,
+                photoKey: tag.photoKey,
+                colorHex: tag.color,
+                size: 28),
+            const SizedBox(width: 8),
+            Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  tag.label,
+                  style: const TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark,
+                  ),
+                ),
+                Text(
+                  suggestion.reason,
+                  style: const TextStyle(
+                      fontSize: 10.5, color: AppColors.textMedium),
+                ),
+              ],
+            ),
+            const SizedBox(width: 8),
+            const Icon(Icons.add, size: 18, color: AppColors.sageDark),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _AddPersonPastille extends StatelessWidget {
   final VoidCallback onTap;
   const _AddPersonPastille({required this.onTap});

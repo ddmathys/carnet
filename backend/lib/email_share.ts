@@ -1,14 +1,17 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, escapeHtml } from '../../lib/verify'
-import { db } from '../../lib/firebase'
-import { sendEmail } from '../../lib/resend'
+import { requireAuth, escapeHtml } from './verify'
+import { db } from './firebase'
+import { sendEmail } from './resend'
 
 const APP_DOWNLOAD_URL =
   process.env.APP_DOWNLOAD_URL ?? 'https://dmathys.dev/download/carnet.apk'
 
 // Envoie l'email d'invitation à un carnet partagé.
+// Servi par api/email/[action].ts (action `share`), d'où POST /api/email/share.
+// Dans lib/ et non api/ : chaque fichier d'api/ compte pour une fonction
+// Vercel (plafond de 12 sur le plan Hobby).
 // Vérifie que l'appelant est bien le propriétaire du carnet.
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function sendShareInvitation(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }

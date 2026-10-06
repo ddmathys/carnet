@@ -18,6 +18,7 @@ import '../../core/services/book_draft_service.dart';
 import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/photo_focus_service.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/pdf_service.dart';
 import 'pdf_viewer_screen.dart';
@@ -227,6 +228,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   late Animation<double> _coverScale;
 
   static const _loadingMessages = [
+    // Le cadrage passe en premier (voir _ensureFocus) : c'est ce qui occupe
+    // les premières secondes quand des photos n'ont jamais été analysées.
+    'Je choisis le cadrage des photos…',
     'Je mets en page tes souvenirs…',
     'Je prépare les photos…',
     'Le livre prend forme…',
@@ -698,6 +702,50 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Generation ─────────────────────────────────────────────────────────────
 
+  /// Identifiant STABLE d'une photo à partir de son URL : la clé R2, ou l'URL
+  /// elle-même pour une photo Firebase héritée (qui, elle, est permanente).
+  /// Même convention que `rawMediaIdsOf`.
+  String? _stableIdOf(String? url) {
+    if (url == null || url.isEmpty) return null;
+    return _keyByUrl[url] ?? url;
+  }
+
+  /// Fait analyser le point de recadrage des photos du livre (le sujet à
+  /// garder quand la photo est rognée pour remplir sa case — toutes le sont).
+  ///
+  /// Une photo n'est analysée QU'UNE fois : le point est stocké sur le
+  /// souvenir, donc l'aperçu retouché, la 2ᵉ génération et la commande ne
+  /// recoûtent rien. En cas d'échec (hors ligne, quota IA du jour atteint), on
+  /// ne bloque rien : le moteur retombe sur son cadrage par défaut.
+  Future<void> _ensureFocus() async {
+    final ids = <String>{};
+    for (final m in _selectedMemories) {
+      for (final id in rawMediaIdsOf(m)) {
+        if (id.isNotEmpty && !_excludedPhotoIds.contains(id)) ids.add(id);
+      }
+    }
+    // La couverture et le dos comptent, même si l'éditeur les a retirés des
+    // pages intérieures.
+    for (final id in [
+      _stableIdOf(_coverPhotoUrl),
+      _stableIdOf(_backCoverPhotoUrl)
+    ]) {
+      if (id != null) ids.add(id);
+    }
+    if (ids.isEmpty) return;
+
+    try {
+      final focus =
+          await PhotoFocusService.ensure(_selectedMemories, onlyIds: ids);
+      if (!mounted) return;
+      // `_selectedMemories` est un getter dérivé de `_memories` : c'est là
+      // qu'on recopie les points pour que le moteur les voie.
+      _memories = PhotoFocusService.applied(_memories, focus);
+    } catch (_) {
+      // Cadrage par défaut : un livre part toujours.
+    }
+  }
+
   // Génère le PDF d'aperçu — mêmes octets que le téléchargement (sans bourrage
   // de pages blanches), pour un aperçu strictement identique au rendu final.
   Future<BookPdfResult> _buildPreviewPdf() async {
@@ -723,6 +771,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       backendUrl: AppConfig.backendUrl,
       coverVideosQrUrl: coverQrUrl,
       growthChildren: _includedGrowthChildren,
+      coverPhotoId: _stableIdOf(_coverPhotoUrl),
+      backCoverPhotoId: _stableIdOf(_backCoverPhotoUrl),
     ).timeout(const Duration(seconds: 180));
   }
 
@@ -754,6 +804,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       // toute tentative de téléchargement — sert de référence pour détecter
       // un échec de téléchargement massif (voir garde-fou ci-dessous).
       final expectedPhotos = _allPhotoUrls.length - _excludedPhotoIds.length;
+      // Avant de rendre quoi que ce soit : le point de recadrage de chaque
+      // photo, pour que l'aperçu montre le VRAI cadrage imprimé.
+      await _ensureFocus();
       final gen = await _buildPreviewPdf();
       if (!mounted) return;
       _progressTimer?.cancel();
@@ -903,7 +956,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       final customTitle =
           _titleCtrl.text.trim().isNotEmpty ? _titleCtrl.text.trim() : null;
 
-      // 1. Générer le PDF en premier
+      // 1. Générer le PDF en premier. Le recadrage est déjà connu si l'aperçu
+      // est passé par là ; sinon (commande lancée directement depuis « Mes
+      // livres »), on l'analyse ici — et dans tous les cas on ne repaie pas
+      // une photo déjà analysée.
+      await _ensureFocus();
       final coverColor = Color(int.parse(
           'FF${_notebook!.coverColor.replaceAll('#', '')}',
           radix: 16));
@@ -923,6 +980,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         padForPrint: true, // pages valides imprimeur (pair, ≥24)
         coverType: _coverType, // largeur exacte de couverture wraparound
         growthChildren: _includedGrowthChildren,
+        coverPhotoId: _stableIdOf(_coverPhotoUrl),
+        backCoverPhotoId: _stableIdOf(_backCoverPhotoUrl),
       );
       final pdfBytes = gen.bytes;
       final pageCount = gen.pageCount;

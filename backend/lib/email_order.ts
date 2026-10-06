@@ -1,14 +1,17 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { requireAuth, escapeHtml } from '../../lib/verify'
-import { db } from '../../lib/firebase'
-import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
-import { posterColorLabel, posterLabel } from '../../lib/poster_pricing'
+import { requireAuth, escapeHtml } from './verify'
+import { db } from './firebase'
+import { sendEmail, ADMIN_EMAIL } from './resend'
+import { posterColorLabel, posterLabel } from './poster_pricing'
 
 // Envoie la notification admin + la confirmation client pour une commande.
-// L'app appelle ce endpoint juste après avoir créé le document orders/{orderId}.
+// Servi par api/email/[action].ts (action `order`) : l'app appelle
+// POST /api/email/order juste après avoir créé le document orders/{orderId}.
+// Ce fichier vit dans lib/ et non dans api/ parce que chaque fichier d'api/
+// compte pour une fonction Vercel (plafond de 12 sur le plan Hobby).
 // Toutes les données viennent de Firestore (pas du body), pour ne rien faire
 // confiance au client à part l'identifiant.
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+export async function sendOrderEmails(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' })
   }

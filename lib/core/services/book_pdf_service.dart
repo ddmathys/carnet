@@ -10,6 +10,7 @@ import '../models/notebook_model.dart';
 import '../models/book_chapter.dart';
 import '../models/milestone_model.dart';
 import '../models/memory_model.dart';
+import '../models/photo_focus.dart';
 import '../models/tag_model.dart';
 import '../data/growth_data.dart';
 import 'heart_qr.dart';
@@ -179,6 +180,12 @@ class BookPdfService {
     // permet plusieurs enfants dans un même livre (ex. "Mes souvenirs" non
     // filtré par tag), chacun avec sa propre page pleine A4 en fin de livre.
     List<TagModel> growthChildren = const [],
+    // Identifiants STABLES (clé R2, ou URL Firebase legacy) des photos de
+    // couverture et de dos — pas leurs URLs, qui sont signées et re-signées à
+    // chaque génération, donc jamais comparables d'un appel à l'autre. Servent
+    // uniquement à retrouver leur point de recadrage (`mediaFocus`).
+    String? coverPhotoId,
+    String? backCoverPhotoId,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -284,6 +291,19 @@ class BookPdfService {
         coverPhotoUrl != null ? bytesByUrl[coverPhotoUrl] : null;
     final backCoverPhotoBytes =
         backCoverPhotoUrl != null ? bytesByUrl[backCoverPhotoUrl] : null;
+
+    // Points de recadrage de la couverture et du dos. On passe par les
+    // identifiants stables (`coverPhotoId`/`backCoverPhotoId`) et non par les
+    // URLs : celles du livre sont re-signées à chaque génération, donc jamais
+    // égales à celles que l'écran a résolues de son côté.
+    final focusById = <String, PhotoFocus>{
+      for (final m in memories)
+        for (final f in m.mediaFocus) f.id: f
+    };
+    final coverPhotoFocus =
+        coverPhotoId != null ? focusById[coverPhotoId] : null;
+    final backCoverPhotoFocus =
+        backCoverPhotoId != null ? focusById[backCoverPhotoId] : null;
     // Photos affichées dans le livre. Option : exclure la photo de couverture
     // (avant/dos) pour ne pas la répéter à l'intérieur.
     final successfulPhotos = photoEntries.where((e) {
@@ -352,6 +372,7 @@ class BookPdfService {
         memoryId: e.memory.id,
         rawId: e.rawId,
         photoText: e.rawId != null ? photoTexts[e.rawId] : null,
+        focus: e.memory.focusFor(e.rawId),
         date: _dateStr(e.memory),
         title: showCaption ? e.memory.title : null,
         caption: showCaption ? e.memory.rawContent : null,
@@ -568,6 +589,7 @@ class BookPdfService {
           pR: playfairR,
           pB: playfairB,
           coverPhotoBytes: coverPhotoBytes,
+          coverPhotoFocus: coverPhotoFocus,
           yearRange: yearRange,
           highlights: highlights,
           customTitle: customTitle,
@@ -649,6 +671,7 @@ class BookPdfService {
           cover: pdfCover,
           pR: playfairR,
           photoBytes: backCoverPhotoBytes,
+          photoFocus: backCoverPhotoFocus,
         ),
       ));
 
@@ -1006,6 +1029,34 @@ class BookPdfService {
           '${m.date.month.toString().padLeft(2, '0')}/'
           '${m.date.year}';
 
+  /// Quelle partie d'une photo rognée reste visible dans sa case.
+  ///
+  /// Toutes les photos du livre sont posées en `BoxFit.cover` : l'image déborde
+  /// de sa case et l'alignement choisit ce qu'on garde. Avec un point de
+  /// recadrage (`mediaFocus`, posé par /api/ai/photo-focus), on garde le sujet.
+  /// Sans, on retombe sur l'ancien pari — haut-centré pour une verticale (le
+  /// visage est souvent en haut), centré pour une horizontale — pour qu'un
+  /// livre dont les photos n'ont pas été analysées rende EXACTEMENT comme avant.
+  ///
+  /// L'axe vertical du paquet `pdf` monte (`Alignment.topCenter` vaut y=+1),
+  /// à l'inverse de celui de PhotoFocus : d'où le `-`.
+  static pw.Alignment _cropAlignment(PhotoFocus? focus,
+      {required bool isPortrait}) {
+    if (focus != null) return pw.Alignment(focus.alignX, -focus.alignY);
+    return isPortrait ? pw.Alignment.topCenter : pw.Alignment.center;
+  }
+
+  /// Même principe pour les photos de COUVERTURE et de DOS, à une réserve
+  /// près : un bandeau de 38 mm (titre + QR) est posé par-dessus le bas de la
+  /// photo. Suivre un sujet situé dans la moitié basse le ferait atterrir
+  /// DERRIÈRE ce bandeau — on ne descend donc jamais sous le centre. Le
+  /// recadrage horizontal, lui, suit le sujet sans réserve.
+  static pw.Alignment _coverCropAlignment(PhotoFocus? focus) {
+    if (focus == null) return pw.Alignment.center;
+    final y = focus.alignY < 0 ? -focus.alignY : 0.0;
+    return pw.Alignment(focus.alignX, y);
+  }
+
   static pw.Widget _photoPage({
     required List<_PhotoPageEntry> entries,
     required PdfColor cover,
@@ -1111,7 +1162,8 @@ class BookPdfService {
     // ── Rendu des templates ──────────────────────────────────────────────────
     // Géométrie des cases : `_cellRects` (partagée avec le plan de l'éditeur
     // d'aperçu). Chaque photo remplit sa case en `cover` (ratio conservé,
-    // léger recadrage), comme demandé dans la spec.
+    // léger recadrage), comme demandé dans la spec — et c'est son ALIGNEMENT
+    // qui décide de la partie sacrifiée (voir _cropAlignment).
     final rects = _cellRects(tpl, entries.length);
     final photos = <pw.Widget>[
       for (var i = 0; i < rects.length; i++)
@@ -1123,9 +1175,8 @@ class BookPdfService {
                 height: rects[i].h,
                 child: pw.Image(pw.MemoryImage(entries[i].bytes),
                     fit: pw.BoxFit.cover,
-                    alignment: entries[i].isPortrait
-                        ? pw.Alignment.topCenter
-                        : pw.Alignment.center))),
+                    alignment: _cropAlignment(entries[i].focus,
+                        isPortrait: entries[i].isPortrait)))),
     ];
 
     // QR média : une seule entrée le porte (dernière page du souvenir).
@@ -1198,6 +1249,7 @@ class BookPdfService {
     required pw.Font pR,
     required pw.Font pB,
     Uint8List? coverPhotoBytes,
+    PhotoFocus? coverPhotoFocus,
     required String yearRange,
     List<String> highlights = const [],
     String? customTitle,
@@ -1266,8 +1318,9 @@ class BookPdfService {
           pw.SizedBox(
             width: w,
             height: h,
-            child:
-                pw.Image(pw.MemoryImage(coverPhotoBytes), fit: pw.BoxFit.cover),
+            child: pw.Image(pw.MemoryImage(coverPhotoBytes),
+                fit: pw.BoxFit.cover,
+                alignment: _coverCropAlignment(coverPhotoFocus)),
           ),
           pw.Positioned(
               top: _safe + 20, right: _safe + 22, child: folioTag()),
@@ -1463,6 +1516,7 @@ class BookPdfService {
     required PdfColor cover,
     required pw.Font pR,
     Uint8List? photoBytes,
+    PhotoFocus? photoFocus,
   }) {
     const w = _a4W;
     const h = _a4H;
@@ -1493,7 +1547,9 @@ class BookPdfService {
           pw.SizedBox(
             width: w,
             height: h,
-            child: pw.Image(pw.MemoryImage(photoBytes), fit: pw.BoxFit.cover),
+            child: pw.Image(pw.MemoryImage(photoBytes),
+                fit: pw.BoxFit.cover,
+                alignment: _coverCropAlignment(photoFocus)),
           ),
           pw.Positioned(
             bottom: _safe + 14,
@@ -2149,6 +2205,10 @@ class _PhotoPageEntry {
   // non éditable dans l'aperçu (alignement clés/URLs impossible).
   final String? rawId;
   final BookPhotoText? photoText;
+  // Point de recadrage de CETTE photo (voir PhotoFocus) — null tant qu'elle
+  // n'a pas été analysée : le rognage retombe alors sur l'ancien pari
+  // (haut-centré en vertical, centré en horizontal).
+  final PhotoFocus? focus;
   final String date;
   final String? title;
   final String? caption;
@@ -2165,6 +2225,7 @@ class _PhotoPageEntry {
       required this.memoryId,
       this.rawId,
       this.photoText,
+      this.focus,
       required this.date,
       this.title,
       this.caption,

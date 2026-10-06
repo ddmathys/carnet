@@ -5,7 +5,7 @@ import { auth, db } from '../../lib/firebase'
 import { deleteObject, presignGet } from '../../lib/r2'
 import { sendEmail, ADMIN_EMAIL } from '../../lib/resend'
 import { posterLabel } from '../../lib/poster_pricing'
-import { row, wrap } from '../email/order'
+import { row, wrap } from '../../lib/email_order'
 
 // URLs :
 //   GET  /api/notify/orders-pending → rappel admin quotidien (mail) : commandes

@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import 'photo_focus.dart';
+
 class MemoryModel {
   final String id;
   final String notebookId;
@@ -57,6 +59,12 @@ class MemoryModel {
   final int bookHorizontalDensity;
   final List<String> bookFeaturedMedia;
 
+  // Point de recadrage par photo, posé par `/api/ai/photo-focus` et jamais
+  // recalculé pour une photo déjà analysée. Vide = recadrage par défaut
+  // (centré, ou haut-centré pour une verticale) : un souvenir sans ce champ
+  // rend EXACTEMENT comme avant.
+  final List<PhotoFocus> mediaFocus;
+
   /// Vrai si [uid] est le PROPRIÉTAIRE du souvenir (et pas seulement un
   /// collaborateur arrivé par un tag partagé). Depuis le 01.10.26, seules les
   /// actions destructrices du propriétaire sont autorisées par
@@ -96,7 +104,18 @@ class MemoryModel {
     this.bookVerticalDensity = 4,
     this.bookHorizontalDensity = 2,
     this.bookFeaturedMedia = const [],
+    this.mediaFocus = const [],
   });
+
+  /// Point de recadrage de la photo d'identifiant stable [rawId] (clé R2 ou
+  /// URL Firebase historique), ou null si elle n'a pas encore été analysée.
+  PhotoFocus? focusFor(String? rawId) {
+    if (rawId == null || rawId.isEmpty) return null;
+    for (final f in mediaFocus) {
+      if (f.id == rawId) return f;
+    }
+    return null;
+  }
 
   factory MemoryModel.fromFirestore(DocumentSnapshot doc) {
     final d = doc.data() as Map<String, dynamic>;
@@ -135,6 +154,7 @@ class MemoryModel {
       bookHorizontalDensity:
           (d['bookHorizontalDensity'] as num?)?.toInt() ?? 2,
       bookFeaturedMedia: List<String>.from(d['bookFeaturedMedia'] ?? []),
+      mediaFocus: PhotoFocus.listFrom(d['mediaFocus']),
     );
   }
 
@@ -191,6 +211,7 @@ class MemoryModel {
         'bookVerticalDensity': bookVerticalDensity,
         'bookHorizontalDensity': bookHorizontalDensity,
         'bookFeaturedMedia': bookFeaturedMedia,
+        'mediaFocus': [for (final f in mediaFocus) f.toMap()],
       };
 
   MemoryModel copyWith({
@@ -198,6 +219,7 @@ class MemoryModel {
     int? bookHorizontalDensity,
     List<String>? bookFeaturedMedia,
     List<String>? mediaKeys,
+    List<PhotoFocus>? mediaFocus,
   }) =>
       MemoryModel(
         id: id,
@@ -231,5 +253,6 @@ class MemoryModel {
         bookHorizontalDensity:
             bookHorizontalDensity ?? this.bookHorizontalDensity,
         bookFeaturedMedia: bookFeaturedMedia ?? this.bookFeaturedMedia,
+        mediaFocus: mediaFocus ?? this.mediaFocus,
       );
 }
