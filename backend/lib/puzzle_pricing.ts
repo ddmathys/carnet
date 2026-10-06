@@ -91,7 +91,7 @@ const USD_TO_CHF = 0.9
 // Le taux reste DANS le moteur coût + marge plutôt que remplacé par trois
 // prix en dur : si Prodigi change ses tarifs, le prix client suit au lieu de
 // vendre à perte en silence.
-const MARGIN_SHARE = 0.4
+const MARGIN_SHARE = 0.5
 const MARGIN_FLOOR = 10.0
 
 export function puzzleCatalogEntry(size: PuzzleSize): PuzzleCatalogEntry | null {

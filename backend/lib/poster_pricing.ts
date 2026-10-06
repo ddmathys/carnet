@@ -135,10 +135,11 @@ export function posterColorLabel(size: string, color: string): string {
   return labels[color] ?? color
 }
 
-// Même taux/marge/arrondi que lib/pricing.ts, pour rester cohérent visuellement
-// avec le prix des livres (un seul modèle de marge dans toute l'app).
+// Même modèle de marge que lib/pricing.ts et lib/puzzle_pricing.ts — voir
+// l'explication complète dans lib/pricing.ts (part du PRIX DE VENTE, pas
+// majoration du coût).
 const USD_TO_CHF = 0.9
-const MARGIN_RATE = 0.4
+const MARGIN_SHARE = 0.5
 const MARGIN_FLOOR = 10.0
 
 export function posterCatalogEntry(
@@ -148,8 +149,13 @@ export function posterCatalogEntry(
   return CATALOG[size]?.[orientation] ?? wallCatalogEntry(size, orientation)
 }
 
+/**
+ * Marge en francs telle qu'elle représente `MARGIN_SHARE` du PRIX DE VENTE :
+ *   prix = coût / (1 − part)  ⟺  marge = coût × part / (1 − part)
+ */
 function marginFor(cost: number): number {
-  return cost * MARGIN_RATE < MARGIN_FLOOR ? MARGIN_FLOOR : cost * MARGIN_RATE
+  const margin = cost * (MARGIN_SHARE / (1 - MARGIN_SHARE))
+  return margin < MARGIN_FLOOR ? MARGIN_FLOOR : margin
 }
 
 /** Prix client CHF = coût Prodigi total (article + livraison, converti) + marge, arrondi au 0.50 supérieur. */

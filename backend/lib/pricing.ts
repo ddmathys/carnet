@@ -29,7 +29,23 @@ const BASE_PRICE_USD: Record<CoverType, number> = { soft: 10.97, hard: 13.48, la
 const EXTRA_PAGE_USD: Record<CoverType, number> = { soft: 0.3, hard: 0.25, layflat: 0.49 }
 const SHIPPING_USD: Record<CoverType, number> = { soft: 18.71, hard: 17.49, layflat: 18.75 }
 
-const MARGIN_RATE = 0.4
+// ── MODÈLE DE MARGE COMMUN AUX TROIS PRODUITS (06.10.26) ────────────────────
+//
+// `MARGIN_SHARE` est la part du PRIX DE VENTE qui reste à Carnet, PAS une
+// majoration appliquée au coût. Les deux se confondent facilement et ne
+// donnent pas du tout la même chose :
+//
+//   majoration de 40 % : prix = coût × 1,4  → il ne reste que 29 % du prix
+//   marge de 50 %      : prix = coût ÷ 0,50 → il reste bien 50 % du prix
+//
+// Jusqu'au 06.10.26 le code appliquait une majoration de 40 % en l'appelant
+// « marge 40 % », donc tout le catalogue ne rapportait en réalité que 29 %.
+// Décision de David : 50 % du prix encaissé sur les livres, les tirages et
+// les puzzles.
+//
+// Le plancher reste un filet de sécurité : il ne joue sur aucune référence du
+// catalogue actuel.
+const MARGIN_SHARE = 0.5
 const MARGIN_FLOOR = 10.0
 
 export type CoverType = 'hard' | 'soft' | 'layflat'
@@ -67,8 +83,13 @@ function printCost(coverType: CoverType, pages: number): number {
   return usd * USD_TO_CHF
 }
 
+/**
+ * Marge en francs telle qu'elle représente `MARGIN_SHARE` du PRIX DE VENTE :
+ *   prix = coût / (1 − part)  ⟺  marge = coût × part / (1 − part)
+ */
 function marginFor(cost: number): number {
-  return cost * MARGIN_RATE < MARGIN_FLOOR ? MARGIN_FLOOR : cost * MARGIN_RATE
+  const margin = cost * (MARGIN_SHARE / (1 - MARGIN_SHARE))
+  return margin < MARGIN_FLOOR ? MARGIN_FLOOR : margin
 }
 
 // Prix client = coût impression + marge, arrondi au 0.50 supérieur.

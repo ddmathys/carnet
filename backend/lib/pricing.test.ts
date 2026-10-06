@@ -88,9 +88,14 @@ test('un article supplémentaire coûte moins cher que le premier (port déduit)
   const first = computePrice('soft', 40)
   const extra = computeAdditionalPrice('soft', 40)
   assert.ok(extra < first, `extra (${extra}) devrait être < premier (${first})`)
-  // L'économie correspond au port (≈ CHF 16.84 pour le soft), à l'arrondi et
-  // à la marge près — jamais plus que le port lui-même.
-  assert.ok(first - extra <= 18.71 * 0.9 * 1.4 + 0.5)
+  // L'économie correspond au port, marge comprise : le prix étant
+  // `coût / (1 − part)`, retirer le port du coût retire `port / (1 − part)`
+  // du prix. À part = 0,50, c'est deux fois le port — et non 1,4 fois comme
+  // au temps de la majoration de 40 % (changement du 06.10.26). Borne
+  // exprimée depuis le modèle plutôt qu'en constante magique, pour qu'elle
+  // suive si la part change encore.
+  const shippingChf = 18.71 * 0.9
+  assert.ok(first - extra <= shippingChf / (1 - 0.5) + 0.5)
 })
 
 test('un article supplémentaire rapporte toujours au moins la marge plancher', () => {
@@ -126,26 +131,26 @@ test('les tailles 30 et 110 ne sont plus commandables', () => {
   assert.equal(computePuzzlePrice('30' as never), null)
 })
 
-test('le puzzle vise 40 % du PRIX DE VENTE, pas 40 % de majoration', () => {
+test('le puzzle vise 50 % du PRIX DE VENTE, pas 50 % de majoration', () => {
   // Référence marché : ifolor 1000 pièces CHF 49.95 + 5.95 de port = 55.90
   // livré. Le nôtre doit rester AU-DESSUS sur le grand format, sinon le
   // positionnement premium ne tient pas (audit du 06.10.26).
-  assert.equal(computePuzzlePrice('252'), 45.5)
-  assert.equal(computePuzzlePrice('500'), 52.0)
-  assert.equal(computePuzzlePrice('1000'), 60.0)
+  assert.equal(computePuzzlePrice('252'), 55.0)
+  assert.equal(computePuzzlePrice('500'), 62.0)
+  assert.equal(computePuzzlePrice('1000'), 71.5)
   assert.ok(computePuzzlePrice('1000')! > 55.9)
 })
 
 // C'est CE test qui distingue les deux modèles de marge : avec une simple
 // majoration de 40 % (livre, poster), la marge ne vaut que 29 % du prix.
-test('la marge représente bien ~40 % du prix encaissé', () => {
+test('la marge puzzle représente bien ~50 % du prix encaissé', () => {
   for (const size of ['252', '500', '1000'] as const) {
     const cost = puzzleCatalogEntry(size)!.usdCost * 0.9
     const price = computePuzzlePrice(size)!
     const share = (price - cost) / price
     assert.ok(
-      share >= 0.39 && share <= 0.42,
-      `${size} : marge de ${Math.round(share * 100)} % du prix, attendu ~40 %`
+      share >= 0.49 && share <= 0.52,
+      `${size} : marge de ${Math.round(share * 100)} % du prix, attendu ~50 %`
     )
   }
 })
@@ -181,6 +186,22 @@ test('un livre dans les bornes n’est jamais refusé', () => {
 
 // ── Prix plancher affiché au catalogue (écran « Créer un souvenir imprimé ») ─
 
-test('le livre le moins cher possible coûte bien 37.50 et pas 29', () => {
-  assert.equal(computePrice('soft', 20), 37.5)
+test('le livre le moins cher possible coûte bien 53.50', () => {
+  assert.equal(computePrice('soft', 20), 53.5)
+})
+
+// Le test qui distingue les deux modèles de marge : une majoration de 50 %
+// laisserait 33 % du prix, une PART de 50 % en laisse bien la moitié. Vaut
+// pour les trois produits depuis le 06.10.26.
+test('la marge vaut la moitié du prix encaissé, sur les trois produits', () => {
+  const half = (price: number, cost: number) => (price - cost) / price
+  // Livre souple 60 p. : coût = (10.97 + 0.30 × 40 + 18.71) × 0.9
+  const bookCost = (10.97 + 0.3 * 40 + 18.71) * 0.9
+  assert.ok(Math.abs(half(computePrice('soft', 60), bookCost) - 0.5) < 0.02)
+
+  const posterCost = posterCatalogEntry('A2', 'portrait')!.usdCost * 0.9
+  assert.ok(Math.abs(half(computePosterPrice('A2', 'portrait')!, posterCost) - 0.5) < 0.02)
+
+  const puzzleCost = puzzleCatalogEntry('1000')!.usdCost * 0.9
+  assert.ok(Math.abs(half(computePuzzlePrice('1000')!, puzzleCost) - 0.5) < 0.02)
 })

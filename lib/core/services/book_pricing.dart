@@ -34,12 +34,22 @@ class BookPricing {
   };
 
   // ── Marge visée ──────────────────────────────────────────────────────────
-  // 40% du coût, avec un PLANCHER absolu de 10 CHF : sur un petit livre (peu
-  // de pages), 40% ne représenterait que quelques francs — insuffisant pour
-  // couvrir le suivi de la commande et les frais annexes. Le plancher protège
-  // ces petites commandes ; au-delà, c'est le pourcentage qui prend le relais
-  // (gros livres = marge plus élevée).
-  static const double marginRate = 0.40;
+  // [marginShare] est la part du PRIX DE VENTE qui reste à Carnet, PAS une
+  // majoration appliquée au coût. Les deux se confondent facilement :
+  //
+  //   majoration de 40 % : prix = coût × 1,4  → il ne reste que 29 % du prix
+  //   marge de 50 %      : prix = coût ÷ 0,50 → il reste bien 50 % du prix
+  //
+  // Jusqu'au 06.10.26 le code appliquait une majoration de 40 % en l'appelant
+  // « marge 40 % » : tout le catalogue ne rapportait donc que 29 %. Décision
+  // de David : 50 % du prix encaissé sur les livres, les tirages et les
+  // puzzles. Explication complète dans backend/lib/pricing.ts, dont ce
+  // fichier est le miroir.
+  //
+  // Le plancher de 10 CHF reste un filet de sécurité pour les toutes petites
+  // commandes (suivi, frais annexes) ; il ne joue sur aucune référence du
+  // catalogue actuel.
+  static const double marginShare = 0.50;
   static const double marginFloor = 10.0;
 
   /// Coût d'impression estimé (impression + livraison) pour une couverture et
@@ -53,9 +63,12 @@ class BookPricing {
     return usd * _usdToChf;
   }
 
-  /// Marge appliquée sur un coût donné : max(40% du coût, plancher 10 CHF).
-  static double marginFor(double cost) =>
-      cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
+  /// Marge en francs telle qu'elle représente [marginShare] du PRIX DE VENTE :
+  /// `prix = coût / (1 − part)` ⟺ `marge = coût × part / (1 − part)`.
+  static double marginFor(double cost) {
+    final margin = cost * (marginShare / (1 - marginShare));
+    return margin < marginFloor ? marginFloor : margin;
+  }
 
   /// Prix client = coût d'impression + marge, arrondi au 0.50 supérieur (le
   /// coût reste toujours couvert).
@@ -130,7 +143,7 @@ class BookPricing {
 
   /// Prix du livre le MOINS cher possible : couverture souple au minimum de
   /// pages. Sert l'étiquette « dès … » du catalogue, qui annonçait 29 CHF en
-  /// dur alors que le vrai plancher est 37.50 (audit du 01.10.26).
+  /// dur alors que le vrai plancher est calculé (53.50 au tarif du 06.10.26).
   static double get minPrice =>
       price(coverType: 'soft', pages: _minPages['soft']!);
 

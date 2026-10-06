@@ -11,9 +11,9 @@ import 'package:bloom/core/services/puzzle_quality_service.dart';
 /// doivent échouer dès que l'un des deux côtés bouge sans l'autre.
 void main() {
   group('BookPricing', () {
-    test('le livre le moins cher coûte 37.50, pas 29', () {
-      expect(BookPricing.price(coverType: 'soft', pages: 20), 37.5);
-      expect(BookPricing.minPrice, 37.5);
+    test('le livre le moins cher coûte 53.50', () {
+      expect(BookPricing.price(coverType: 'soft', pages: 20), 53.5);
+      expect(BookPricing.minPrice, 53.5);
     });
 
     test('les minimums de pages sont comblés, pas facturés en dessous', () {
@@ -43,9 +43,9 @@ void main() {
   });
 
   group('PosterPricing', () {
-    test('le tirage le moins cher du catalogue public coûte 31', () {
-      expect(PosterPricing.minPrice, 31.0);
-      expect(PosterPricing.price('A4', 'portrait'), 31.0);
+    test('le tirage le moins cher du catalogue public coûte 41.50', () {
+      expect(PosterPricing.minPrice, 41.5);
+      expect(PosterPricing.price('A4', 'portrait'), 41.5);
     });
 
     test('un tirage supplémentaire coûte moins cher que le premier', () {
@@ -66,20 +66,20 @@ void main() {
     // Ces trois valeurs DOIVENT rester identiques à celles asséntées dans
     // backend/lib/pricing.test.ts — c'est tout l'intérêt du miroir : si l'un
     // des deux fichiers de tarif dérive, un des deux jeux de tests casse.
-    test('tarif : 45.50 / 52 / 60', () {
-      expect(PuzzlePricing.price('252'), 45.50);
-      expect(PuzzlePricing.price('500'), 52.0);
-      expect(PuzzlePricing.price('1000'), 60.0);
-      expect(PuzzlePricing.minPrice, 45.50);
+    test('tarif : 55 / 62 / 71.50', () {
+      expect(PuzzlePricing.price('252'), 55.0);
+      expect(PuzzlePricing.price('500'), 62.0);
+      expect(PuzzlePricing.price('1000'), 71.50);
+      expect(PuzzlePricing.minPrice, 55.0);
     });
 
     // Distingue les deux modèles : une majoration de 40 % (livre, poster) ne
     // laisse que 29 % du prix. Le puzzle vise 40 % du prix encaissé.
-    test('la marge représente bien ~40 % du prix encaissé', () {
+    test('la marge représente bien ~50 % du prix encaissé', () {
       for (final size in PuzzlePricing.sizes) {
         final cost = PuzzlePricing.entryFor(size)!.usdCost * 0.90;
         final price = PuzzlePricing.price(size)!;
-        expect((price - cost) / price, closeTo(0.40, 0.02), reason: size);
+        expect((price - cost) / price, closeTo(0.50, 0.02), reason: size);
       }
     });
 

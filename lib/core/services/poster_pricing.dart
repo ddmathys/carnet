@@ -31,7 +31,9 @@ class PosterCatalogEntry {
 
 class PosterPricing {
   static const double _usdToChf = 0.90;
-  static const double marginRate = 0.40;
+  /// Part du PRIX DE VENTE qui reste à Carnet — voir BookPricing.marginShare
+  /// pour la distinction avec une majoration du coût.
+  static const double marginShare = 0.50;
   static const double marginFloor = 10.0;
 
   static const Map<String, Map<String, PosterCatalogEntry>> _catalog = {
@@ -200,8 +202,12 @@ class PosterPricing {
   /// supplémentaire groupé.
   static const double _shippingUsd = 17.67;
 
-  static double marginFor(double cost) =>
-      cost * marginRate < marginFloor ? marginFloor : cost * marginRate;
+  /// Marge en francs telle qu'elle représente [marginShare] du PRIX DE VENTE :
+  /// `prix = coût / (1 − part)` ⟺ `marge = coût × part / (1 − part)`.
+  static double marginFor(double cost) {
+    final margin = cost * (marginShare / (1 - marginShare));
+    return margin < marginFloor ? marginFloor : margin;
+  }
 
   /// Prix client = coût Prodigi total (article + livraison, converti) + marge,
   /// arrondi au 0.50 supérieur. null si la combinaison taille/orientation

@@ -34,7 +34,7 @@ class ProductFormatScreen extends StatelessWidget {
 
   /// « dès 37 CHF » — CALCULÉ depuis la table de prix, jamais écrit en dur :
   /// l'écran annonçait « dès 29 CHF » pour le livre alors que le plancher
-  /// réel est CHF 37.50, écart découvert seulement au moment de payer (audit
+  /// réel vient de la table de prix, écart découvert seulement au moment de payer (audit
   /// du 01.10.26). Arrondi à l'entier INFÉRIEUR interdit — on arrondit au
   /// franc supérieur pour ne jamais annoncer moins que ce qui sera facturé.
   static String _from(double price) => 'dès ${price.ceil()} CHF';

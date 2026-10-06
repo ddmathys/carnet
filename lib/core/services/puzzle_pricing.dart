@@ -55,7 +55,7 @@ class PuzzlePricing {
   /// (`prix = coût ÷ 0,60`) — décision de David le 06.10.26. Justification
   /// complète dans backend/lib/puzzle_pricing.ts, dont ce fichier est le
   /// miroir exact.
-  static const double marginShare = 0.40;
+  static const double marginShare = 0.50;
   static const double marginFloor = 10.0;
 
   /// Catalogue resserré le 06.10.26 : 30 et 110 pièces retirés (un puzzle de
