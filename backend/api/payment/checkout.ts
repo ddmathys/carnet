@@ -20,7 +20,8 @@ import {
   isPuzzleSize,
 } from '../../lib/puzzle_pricing'
 
-// Crée une session Stripe Checkout pour payer une commande (TWINT + carte).
+// Crée une session Stripe Checkout pour payer une commande (moyens de paiement
+// activés dans le dashboard Stripe : carte, TWINT…).
 // Le montant est RECALCULÉ ici depuis coverType + pageCount (lib/pricing.ts) —
 // order.price vient du client à la création et ne doit jamais être facturé tel
 // quel. CHF requis pour TWINT. Renvoie l'URL de paiement hébergée par Stripe.
@@ -183,8 +184,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const params = new URLSearchParams()
   params.set('mode', 'payment')
-  params.append('payment_method_types[0]', 'twint')
-  params.append('payment_method_types[1]', 'card')
+  // Aucun payment_method_types en dur : Stripe compose lui-même la liste à
+  // partir de la config du dashboard (Paramètres → Moyens de paiement).
+  // Avant, [twint, card] était imposé ici, et un moyen non encore approuvé
+  // faisait rejeter la session ENTIÈRE — au passage en live du 02.10.26, TWINT
+  // était « en attente d'approbation », ce qui bloquait TOUS les paiements, y
+  // compris par carte. Avec la liste dynamique, TWINT réapparaît de lui-même
+  // dès que Stripe l'approuve, sans redéploiement ni nouvelle version de l'app.
   params.set('line_items[0][quantity]', '1')
   params.set('line_items[0][price_data][currency]', 'chf')
   params.set('line_items[0][price_data][unit_amount]', String(amount))

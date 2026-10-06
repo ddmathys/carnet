@@ -100,7 +100,24 @@
       line-height: 1.6;
     }
     .steps b { color: #3A6648; }
-    .foot { color: #c3b4a4; font-size: 12px; margin-top: 24px; }
+    /* Souvenirs imprimés : la seule partie payante du service — prix en CHF
+       affichés sur le site, exigence Stripe/TWINT (voir terms.html). */
+    .prints { margin-top: 34px; }
+    .print-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .print-card {
+      background: #f5ece0; border-radius: 14px; padding: 14px 10px;
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      text-align: center;
+    }
+    .print-card .emoji { font-size: 22px; }
+    .print-card .label { font-size: 12.5px; font-weight: 700; color: #3A6648; }
+    .print-card .price { font-size: 11.5px; color: #7a6a5a; }
+    .prints .detail {
+      text-align: left; color: #7a6a5a; font-size: 12.5px; line-height: 1.55;
+      margin: 12px 0 0;
+    }
+    .foot { color: #c3b4a4; font-size: 12px; margin-top: 24px; line-height: 1.8; }
+    .foot a { color: #b0a090; }
   </style>
 </head>
 <body>
@@ -113,7 +130,7 @@
     </p>
 
     <a class="btn" href="/download/carnet.apk">Télécharger l'app</a>
-    <p class="platform">Android · ~95 Mo · 100 % gratuit</p>
+    <p class="platform">Android · ~95 Mo · app gratuite</p>
 
     <div class="onboarding-preview">
       <p class="section-label">Ce qui t'attend à l'ouverture</p>
@@ -204,6 +221,33 @@
       </div>
     </div>
 
+    <div class="prints">
+      <p class="section-label">Et pour sortir tes souvenirs de l'écran</p>
+      <div class="print-grid">
+        <div class="print-card">
+          <span class="emoji">📖</span>
+          <span class="label">Livre photo</span>
+          <span class="price">dès CHF 37.50</span>
+        </div>
+        <div class="print-card">
+          <span class="emoji">🖼️</span>
+          <span class="label">Tirage encadré</span>
+          <span class="price">dès CHF 31.—</span>
+        </div>
+        <div class="print-card">
+          <span class="emoji">🧩</span>
+          <span class="label">Puzzle</span>
+          <span class="price">dès CHF 43.50</span>
+        </div>
+      </div>
+      <p class="detail">
+        Fabriqués à la demande d'après les souvenirs que tu choisis, livrés en
+        Suisse, livraison comprise dans le prix. Paiement par carte ou TWINT au
+        moment de la commande — tout le détail dans les
+        <a href="/terms.html">conditions de vente</a>.
+      </p>
+    </div>
+
     <div class="steps">
       <p style="margin:0 0 8px"><b>Installation en 3 étapes</b></p>
       1. Touche « Télécharger l'app » → « Télécharger quand même ».<br />
@@ -212,7 +256,11 @@
       pour rejoindre le carnet partagé.
     </div>
 
-    <p class="foot">© Carnet · dmathys.dev</p>
+    <p class="foot">
+      © Carnet · dmathys.dev<br />
+      <a href="/terms.html">Mentions légales et conditions de vente</a> ·
+      <a href="/privacy.html">Confidentialité</a>
+    </p>
   </div>
 </body>
 </html>
