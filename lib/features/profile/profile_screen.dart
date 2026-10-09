@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/theme/app_theme.dart';
@@ -365,6 +367,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
               const SizedBox(height: 8),
             ],
 
+            // Partage de l'app : le lien d'installation, copiable d'un geste.
+            // Il sert AUSSI aux mises à jour (Carnet n'est pas sur le Play
+            // Store) : c'est la même adresse qui renvoie toujours la dernière
+            // version, donc un ami comme un proche déjà équipé peut l'utiliser.
+            const _ShareAppCard(),
+            const SizedBox(height: 16),
+
             // Divider
             Divider(color: AppColors.border),
             const SizedBox(height: 16),
@@ -709,4 +718,133 @@ class _ProfileTile extends StatelessWidget {
       ),
     ),
   );
+}
+
+
+/// Carte « Partager Carnet » du profil : le lien de téléchargement affiché en
+/// clair, copiable d'un geste, plus le partage natif (WhatsApp, SMS…).
+///
+/// Pourquoi le lien est VISIBLE et pas seulement derrière un bouton : c'est
+/// aussi le lien de MISE À JOUR (l'app n'est pas sur le Play Store), donc on
+/// le colle aussi bien à un ami qu'à quelqu'un qui a déjà Carnet. Le message
+/// pré-rempli le dit, pour éviter le « c'est quoi ce fichier ? ».
+class _ShareAppCard extends StatelessWidget {
+  const _ShareAppCard();
+
+  static const _link = AppConfig.appDownloadUrl;
+
+  static const _message =
+      "Je te partage Carnet, l'app pour garder les souvenirs de famille "
+      "(et en faire des livres photo).\n\n"
+      "Télécharger ou mettre à jour :\n$_link\n\n"
+      "Android : ouvre le lien depuis ton téléphone, lance le fichier, et "
+      "accepte l'installation depuis cette source. Si tu as déjà Carnet, ça "
+      "se met à jour par-dessus sans rien perdre.";
+
+  void _copy(BuildContext context) {
+    Clipboard.setData(const ClipboardData(text: _link));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Lien copié')),
+    );
+  }
+
+  void _copyMessage(BuildContext context) {
+    Clipboard.setData(const ClipboardData(text: _message));
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Message copié — colle-le dans WhatsApp')),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.ios_share, size: 18, color: AppColors.sageDark),
+              const SizedBox(width: 8),
+              const Text('Partager Carnet',
+                  style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.textDark)),
+            ],
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            "Le même lien sert à installer l'app et à la mettre à jour.",
+            style: TextStyle(fontSize: 12, color: AppColors.textMedium),
+          ),
+          const SizedBox(height: 10),
+          InkWell(
+            onTap: () => _copy(context),
+            borderRadius: BorderRadius.circular(8),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.cream,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      _link,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: 12.5, color: AppColors.textDark),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  const Icon(Icons.copy_rounded,
+                      size: 16, color: AppColors.sageDark),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => Share.share(_message,
+                      subject: 'Découvre Carnet 📖'),
+                  icon: const Icon(Icons.share_outlined, size: 17),
+                  label: const Text('Partager', style: TextStyle(fontSize: 13)),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size(0, 42),
+                    backgroundColor: AppColors.sageDark,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: () => _copyMessage(context),
+                  icon: const Icon(Icons.content_paste_rounded, size: 17),
+                  label: const Text('Copier le message',
+                      style: TextStyle(fontSize: 13)),
+                  style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(0, 42),
+                    foregroundColor: AppColors.sageDark,
+                    side: const BorderSide(color: AppColors.sageDark),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
