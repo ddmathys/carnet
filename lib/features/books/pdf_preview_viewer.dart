@@ -253,8 +253,9 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
           const Padding(
             padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
             child: Text(
-              'Touche une photo pour y écrire un texte, la mettre en grand '
-              'ou la retirer du livre.',
+              "Touche une photo : elle s'ouvre en grand pour y écrire un "
+              'commentaire (police, taille, couleur), la mettre en grand ou '
+              'la retirer du livre.',
               textAlign: TextAlign.center,
               style: TextStyle(color: AppColors.softGray, fontSize: 12),
             ),

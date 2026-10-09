@@ -135,19 +135,19 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
 
-      - name: Publier l'AAB (artefact GitHub Actions, 30 jours)
+      - name: Publier l'AAB (artefact GitHub Actions, 7 jours)
         uses: actions/upload-artifact@v4
         with:
           name: carnet-aab
           path: build/app/outputs/bundle/release/app-release.aab
-          retention-days: 30
+          retention-days: 7
 
-      - name: Publier l'APK (artefact GitHub Actions, 30 jours)
+      - name: Publier l'APK (artefact GitHub Actions, 7 jours)
         uses: actions/upload-artifact@v4
         with:
           name: carnet-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          retention-days: 30
+          retention-days: 7
 
       # Publie aussi l'APK sur dmathys.dev/download/carnet.apk (rewrite Vercel
       # vers ce fichier sur Firebase Storage, voir landing/vercel.json) — sans

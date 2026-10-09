@@ -25,7 +25,7 @@ import 'pdf_viewer_screen.dart';
 import 'pdf_preview_viewer.dart';
 import 'memory_selection_sheet.dart';
 import 'featured_photos.dart';
-import 'photo_edit_sheet.dart';
+import 'photo_edit_screen.dart';
 import '../memories/widgets/growth_chart_card.dart';
 import 'book_generate_widgets.dart';
 import '../../core/services/memory_query_service.dart';
@@ -166,8 +166,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   String? _lastSavedSig;
   // Brouillon repris : bandeau récapitulatif sur l'écran de départ.
   BookDraft? _resumedDraft;
-  // Couleur proposée pour le prochain texte : la dernière choisie.
+  // Réglages proposés pour le prochain texte : les derniers choisis (un livre
+  // écrit d'une seule main a presque toujours la même police et la même
+  // taille d'un bout à l'autre).
   String _lastTextColor = '#2D2416';
+  String _lastTextFont = BookPhotoText.fontSerif;
+  double _lastTextScale = 1;
 
   bool get _draftsEnabled => !widget.queueMode && widget.editOrderId == null;
 
@@ -1590,9 +1594,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     final i = _memories.indexWhere((m) => m.id == slot.memoryId);
     final memory = i == -1 ? null : _memories[i];
     final featured = memory?.bookFeaturedMedia.contains(id) ?? false;
-    final res = await PhotoEditSheet.open(context,
+    final res = await PhotoEditScreen.open(context,
         slot: slot,
         defaultColor: _lastTextColor,
+        defaultFont: _lastTextFont,
+        defaultScale: _lastTextScale,
         initial: _photoTexts[id],
         featured: featured);
     if (res == null || !mounted) return;
@@ -1604,6 +1610,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
           } else {
             _photoTexts[id] = text;
             _lastTextColor = text.color;
+            _lastTextFont = text.font;
+            _lastTextScale = text.scale;
           }
         });
       case PhotoRemoved():
@@ -1773,7 +1781,10 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         ..clear()
         ..addAll(draft.photoTexts);
       if (draft.photoTexts.isNotEmpty) {
-        _lastTextColor = draft.photoTexts.values.last.color;
+        final last = draft.photoTexts.values.last;
+        _lastTextColor = last.color;
+        _lastTextFont = last.font;
+        _lastTextScale = last.scale;
       }
       _resumedDraft = draft;
     });

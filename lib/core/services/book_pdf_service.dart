@@ -194,6 +194,16 @@ class BookPdfService {
     final dmSans =
         pw.Font.ttf(await rootBundle.load('assets/fonts/DMSans-Regular.ttf'));
 
+    // Polices des textes posés sur les photos (éditeur d'aperçu) : le MÊME
+    // fichier .ttf que la famille Flutter utilisée à l'écran, pour que le
+    // texte imprimé soit exactement celui que l'utilisateur a placé. Chargées
+    // seulement si ce livre porte au moins un texte.
+    final photoTextFonts = <String, pw.Font>{
+      if (photoTexts.isNotEmpty)
+        for (final f in BookPhotoText.fonts)
+          f: pw.Font.ttf(await rootBundle.load(BookPhotoText.assetOf(f))),
+    };
+
     String? svgString;
     if (notebook.type == 'enfant' && notebook.companion != null) {
       try {
@@ -208,7 +218,8 @@ class BookPdfService {
     final photoEntries = <_PhotoEntry>[];
     final sorted = [...memories]..sort((a, b) => a.date.compareTo(b.date));
     var resolved = await _runBounded(
-        sorted, (m) => PhotoService.resolvePhotoUrls(m), concurrency: 8);
+        sorted, (m) => PhotoService.resolvePhotoUrls(m),
+        concurrency: 8);
     // Un souvenir avec des clés média mais 0 URL résolue signale presque
     // toujours un échec réseau ponctuel de resolvePhotoUrls (timeout, pic de
     // charge) plutôt qu'un souvenir réellement sans photo — on retente une
@@ -218,8 +229,7 @@ class BookPdfService {
         if (resolved[i].isEmpty && sorted[i].mediaKeys.isNotEmpty) i
     ];
     if (toRetry.isNotEmpty) {
-      final retried = await _runBounded(
-          toRetry.map((i) => sorted[i]).toList(),
+      final retried = await _runBounded(toRetry.map((i) => sorted[i]).toList(),
           (m) => PhotoService.resolvePhotoUrls(m),
           concurrency: 8);
       for (var k = 0; k < toRetry.length; k++) {
@@ -271,6 +281,7 @@ class BookPdfService {
         if (bytes != null) bytesByUrl[urls.elementAt(i)] = bytes;
       }
     }
+
     await fetchAll(urlsToFetch);
     // Les échecs de téléchargement restants après retry sont tolérés pour
     // l'aperçu (la photo est simplement omise, et ça se voit). Pour
@@ -411,12 +422,10 @@ class BookPdfService {
       final featuredIds = memory.bookFeaturedMedia;
       final featured = featuredIds.isEmpty
           ? const <int>[]
-          : group
-              .where((j) {
-                final rawId = successfulPhotos[j].rawId;
-                return rawId != null && featuredIds.contains(rawId);
-              })
-              .toList();
+          : group.where((j) {
+              final rawId = successfulPhotos[j].rawId;
+              return rawId != null && featuredIds.contains(rawId);
+            }).toList();
       final rest = group.where((j) => !featured.contains(j)).toList();
       final verticals = rest.where(isPortraitAt).toList();
       final horizontals = rest.where((j) => !isPortraitAt(j)).toList();
@@ -482,8 +491,7 @@ class BookPdfService {
         switch (horizontals.length - h) {
           case 3:
             photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
-            photoPages
-                .add(pageFor(horizontals.sublist(h + 2, h + 3), _Tpl.h1));
+            photoPages.add(pageFor(horizontals.sublist(h + 2, h + 3), _Tpl.h1));
             break;
           case 2:
             photoPages.add(pageFor(horizontals.sublist(h, h + 2), _Tpl.h2));
@@ -517,7 +525,8 @@ class BookPdfService {
     // les mesures taille/poids (identifiées par son tagId dans `tagIds`)
     // atteignent 2 — placées à la fin du livre (réf. OMS), une pleine page
     // A4 chacune.
-    final growthChapters = <({ChildModel child, List<MilestoneModel> milestones})>[];
+    final growthChapters =
+        <({ChildModel child, List<MilestoneModel> milestones})>[];
     for (final childTag in growthChildren) {
       final milestones = sorted
           .where((m) =>
@@ -554,10 +563,8 @@ class BookPdfService {
     // Couverture avant + contenu — SANS le dos, qui se pose toujours en toute
     // dernière page (voir plus bas) : c'est aussi le dénominateur affiché sur
     // chaque page ("3 / totalPages"), inchangé par l'ajout du dos.
-    final totalPages = 1 +
-        photoPages.length +
-        textOnlyMemories.length +
-        growthChapters.length;
+    final totalPages =
+        1 + photoPages.length + textOnlyMemories.length + growthChapters.length;
     // + 1 dos : avant ce +1, la dernière page du PDF (donc du DOS imprimé
     // chez Prodigi, cf. generateForNotebook) était soit une page de bourrage
     // crème, soit — pire, quand aucun bourrage n'était nécessaire — une vraie
@@ -613,6 +620,7 @@ class BookPdfService {
             dm: dmSans,
             pageNum: pageNum,
             total: totalPages,
+            photoTextFonts: photoTextFonts,
           ),
         ));
       }
@@ -705,6 +713,7 @@ class BookPdfService {
           rawId: e.rawId,
           bytes: e.bytes,
           isPortrait: e.isPortrait,
+          focus: e.focus,
           widthPt: r.w,
           heightPt: r.h,
           left: r.x / _a4W,
@@ -738,10 +747,14 @@ class BookPdfService {
   // 150gsm gloss only, non géré ici par simplicité). Doit rester identique à
   // BookPricing.printablePages.
   static const Map<String, int> _minValidPages = {
-    'soft': 20, 'hard': 24, 'layflat': 18,
+    'soft': 20,
+    'hard': 24,
+    'layflat': 18,
   };
   static const Map<String, int> _maxValidPages = {
-    'soft': 300, 'hard': 300, 'layflat': 122,
+    'soft': 300,
+    'hard': 300,
+    'layflat': 122,
   };
 
   static int _validPageCount(String coverType, int n) {
@@ -758,7 +771,8 @@ class BookPdfService {
   // package. Extrait dans utils/image_dims.dart (réutilisé par
   // PosterQualityService pour le contrôle qualité DPI) ; wrapper conservé ici
   // pour ne pas toucher tous les appels internes de ce fichier.
-  static ({int w, int h})? _imgDims(Uint8List bytes) => img_dims.imageDims(bytes);
+  static ({int w, int h})? _imgDims(Uint8List bytes) =>
+      img_dims.imageDims(bytes);
 
   // ── Contrôle qualité DPI (ajouté le 15.09.26) ────────────────────────────
 
@@ -864,10 +878,12 @@ class BookPdfService {
   static pw.Widget? _photoTextBox({
     required ({double x, double y, double w, double h}) rect,
     required BookPhotoText text,
-    required pw.Font font,
+    required Map<String, pw.Font> fonts,
+    required pw.Font fallback,
     required bool captionOnPage,
     required double qrHeight,
   }) {
+    final font = fonts[BookPhotoText.normalizeFont(text.font)] ?? fallback;
     // Position libre (encadré déplaçable de l'éditeur) : l'encadré est
     // aligné dans la case moins la zone de sécurité, donc toujours entier et
     // jamais rogné, sans avoir à mesurer le texte. Même calcul que
@@ -882,11 +898,11 @@ class BookPdfService {
           width: w,
           height: h,
           child: pw.Align(
-            alignment: pw.Alignment(
-                text.x!.clamp(0.0, 1.0) * 2 - 1, text.y!.clamp(0.0, 1.0) * 2 - 1),
+            alignment: pw.Alignment(text.x!.clamp(0.0, 1.0) * 2 - 1,
+                text.y!.clamp(0.0, 1.0) * 2 - 1),
             child: pw.ConstrainedBox(
               constraints: pw.BoxConstraints(maxWidth: w * photoTextMaxWidth),
-              child: _photoTextLabel(text, font),
+              child: _photoTextLabel(text, font, availableHeight: h),
             ),
           ),
         ),
@@ -925,7 +941,8 @@ class BookPdfService {
       bottom = _a4H - (rect.y + rect.h) + reserve;
     }
 
-    final label = _photoTextLabel(text, font);
+    final label =
+        _photoTextLabel(text, font, availableHeight: rect.h - 2 * _safe);
     return pw.Positioned(
       left: left,
       top: top,
@@ -947,21 +964,29 @@ class BookPdfService {
   /// texte lui-même est très clair, pour qu'il reste lisible), ou texte seul.
   /// Tailles en points — l'éditeur (PhotoEditSheet) applique les mêmes,
   /// mises à l'échelle de l'écran.
-  static pw.Widget _photoTextLabel(BookPhotoText text, pw.Font font) {
+  static pw.Widget _photoTextLabel(BookPhotoText text, pw.Font font,
+      {required double availableHeight}) {
     final color = _hexToPdf(text.color);
     final bg = color.luminance > 0.8 ? _textDark : PdfColors.white;
     return pw.Container(
       padding: text.background
-          ? const pw.EdgeInsets.symmetric(
-              horizontal: photoTextPadH, vertical: photoTextPadV)
+          ? pw.EdgeInsets.symmetric(
+              horizontal: photoTextPadH * text.padFactor,
+              vertical: photoTextPadV * text.padFactor)
           : pw.EdgeInsets.zero,
       color: text.background ? bg : null,
       child: pw.Text(
         text.text.trim(),
         textAlign: pw.TextAlign.center,
-        maxLines: 4,
+        maxLines: text.lineCapacity(
+            availableHeight: availableHeight,
+            baseFontSize: photoTextFontSize,
+            basePadV: photoTextPadV),
         style: pw.TextStyle(
-            font: font, fontSize: photoTextFontSize, color: color, lineSpacing: 2),
+            font: font,
+            fontSize: photoTextFontSize * text.sizeFactor,
+            color: color,
+            lineSpacing: 2),
       ),
     );
   }
@@ -969,6 +994,7 @@ class BookPdfService {
   static const double photoTextFontSize = 14;
   static const double photoTextPadH = 10;
   static const double photoTextPadV = 6;
+
   /// Zone de sécurité (points) — l'éditeur en a besoin pour placer l'encadré
   /// exactement comme le PDF.
   static const double safeMarginPt = _safe;
@@ -979,7 +1005,8 @@ class BookPdfService {
   /// standard avant l'audit du 15.09.26. Purement informatif : n'empêche
   /// jamais la génération, sert seulement à prévenir l'utilisateur AVANT
   /// l'achat plutôt que de le laisser découvrir une photo floue à réception.
-  static List<String> _photoPageQualityWarnings(List<_BookPhotoPage> photoPages) {
+  static List<String> _photoPageQualityWarnings(
+      List<_BookPhotoPage> photoPages) {
     final warnings = <String>[];
     for (final page in photoPages) {
       final fractions = _cellFractions(page.tpl);
@@ -1066,6 +1093,9 @@ class BookPdfService {
     required int pageNum,
     required int total,
     _Tpl tpl = _Tpl.h1,
+    // Polices proposées pour les textes posés sur les photos, par clé
+    // BookPhotoText.font — chargées depuis le MÊME .ttf que l'éditeur.
+    Map<String, pw.Font> photoTextFonts = const {},
   }) {
     if (entries.isEmpty) return pw.Container();
 
@@ -1203,7 +1233,8 @@ class BookPdfService {
       final placed = _photoTextBox(
         rect: rects[i],
         text: t,
-        font: pR,
+        fonts: photoTextFonts,
+        fallback: pR,
         captionOnPage: hasCaption,
         qrHeight: qrHeight,
       );
@@ -1322,8 +1353,7 @@ class BookPdfService {
                 fit: pw.BoxFit.cover,
                 alignment: _coverCropAlignment(coverPhotoFocus)),
           ),
-          pw.Positioned(
-              top: _safe + 20, right: _safe + 22, child: folioTag()),
+          pw.Positioned(top: _safe + 20, right: _safe + 22, child: folioTag()),
           pw.Positioned(
             bottom: 0,
             left: 0,
@@ -1909,8 +1939,7 @@ class BookPdfService {
                 dm: dm,
               ),
             ),
-          if (heights.isNotEmpty && weights.isNotEmpty)
-            pw.SizedBox(height: 16),
+          if (heights.isNotEmpty && weights.isNotEmpty) pw.SizedBox(height: 16),
           if (weights.isNotEmpty)
             pw.Expanded(
               child: _measureBlock(
@@ -1955,13 +1984,12 @@ class BookPdfService {
     final refData = getGrowthData(gender: gender, isWeight: isWeight);
 
     final childPoints = measures.map((m) {
-          final ageM = ((m.date.year - birth.year) * 12 +
-                  m.date.month -
-                  birth.month)
+      final ageM =
+          ((m.date.year - birth.year) * 12 + m.date.month - birth.month)
               .toDouble()
               .clamp(0.0, double.infinity);
-          return pw.PointChartValue(ageM, getValue(m));
-        }).toList()
+      return pw.PointChartValue(ageM, getValue(m));
+    }).toList()
       ..sort((a, b) => a.x.compareTo(b.x));
 
     final maxChildAge =
@@ -1999,7 +2027,9 @@ class BookPdfService {
     pw.LineDataSet ref(List<GrowthPoint> pts, double Function(GrowthPoint) y,
             {required PdfColor color, required double width}) =>
         pw.LineDataSet(
-          data: pts.map((p) => pw.PointChartValue(p.month.toDouble(), y(p))).toList(),
+          data: pts
+              .map((p) => pw.PointChartValue(p.month.toDouble(), y(p)))
+              .toList(),
           color: color,
           drawPoints: false,
           lineWidth: width,
@@ -2269,6 +2299,10 @@ class BookPhotoSlot {
   final Uint8List? bytes;
   final bool isPortrait;
 
+  /// Point de recadrage de la photo (`mediaFocus`) — l'éditeur s'en sert pour
+  /// rogner EXACTEMENT comme le PDF (cf. _cropAlignment).
+  final PhotoFocus? focus;
+
   /// Taille de la case en points PDF (pour mettre le texte à l'échelle).
   final double widthPt, heightPt;
 
@@ -2278,6 +2312,7 @@ class BookPhotoSlot {
     required this.rawId,
     this.bytes,
     this.isPortrait = true,
+    this.focus,
     this.widthPt = 0,
     this.heightPt = 0,
     required this.left,
