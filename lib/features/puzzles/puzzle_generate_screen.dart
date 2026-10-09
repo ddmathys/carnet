@@ -29,6 +29,18 @@ import '../books/book_generate_widgets.dart' show AddressField;
 class PuzzleGenerateScreen extends StatefulWidget {
   final String memoryId;
   final int photoIndex;
+
+  /// Photo choisie DIRECTEMENT dans la galerie du téléphone (PuzzleSelectScreen
+  /// → « Une photo de mon téléphone »), en pleine résolution. Quand elle est
+  /// fournie, il n'y a pas de souvenir derrière le puzzle : `memoryId` est
+  /// vide, le couvercle n'a pas de QR (aucune vidéo à pointer) et ces octets
+  /// sont à la fois l'aperçu et le fichier d'impression.
+  ///
+  /// C'est le chemin à privilégier pour un grand puzzle : les photos
+  /// enregistrées dans un souvenir sont compressées à 2048 px (assez pour un
+  /// livre, pas pour un puzzle), alors que l'originale du téléphone fait
+  /// couramment 4000 px et plus.
+  final Uint8List? galleryBytes;
   /// true pour un puzzle ajouté via "+ Ajouter un autre puzzle à cette
   /// commande" depuis une commande déjà en cours (voir _buildOrderStep du
   /// parent) : même étape taille, mais l'étape finale envoie juste la photo
@@ -40,6 +52,7 @@ class PuzzleGenerateScreen extends StatefulWidget {
     required this.memoryId,
     required this.photoIndex,
     this.queueMode = false,
+    this.galleryBytes,
   });
 
   @override
@@ -189,6 +202,22 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
   }
 
   Future<void> _loadData() async {
+    // Photo venue de la galerie : rien à aller chercher, ces octets SONT la
+    // photo d'impression (et l'aperçu). Aucun souvenir, donc pas de QR sur le
+    // couvercle — on n'imprime jamais un code qui ne mène nulle part.
+    final gallery = widget.galleryBytes;
+    if (gallery != null) {
+      final dims = imageDims(gallery);
+      setState(() {
+        _photoBytes = gallery;
+        _photoDims = dims;
+        _usingOriginal = true;
+        _size = PuzzleQualityService.largestOrderable(dims) ??
+            PuzzlePricing.sizes.first;
+        _loading = false;
+      });
+      return;
+    }
     try {
       final visible = await MemoryQueryService.visible()
           .first
@@ -317,7 +346,10 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
             price: PuzzlePricing.priceAdditional(_size) ?? 0,
             pdfUrl: uploaded.url,
             photoKey: _photoKey,
-            photoUrl: _photoKey == null ? _photoUrl : null,
+            // Sans souvenir derrière (photo de la galerie), la photo envoyée
+            // sert aussi de vignette : sinon la commande s'afficherait sans
+            // image dans « Mes commandes » et dans la console admin.
+            photoUrl: _photoKey == null ? (_photoUrl ?? uploaded.url) : null,
           ),
         );
         return;
@@ -347,7 +379,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
         puzzleSku: entry?.sku,
         puzzleSize: _size,
         puzzlePhotoKey: _photoKey,
-        puzzlePhotoUrl: _photoKey == null ? _photoUrl : null,
+        puzzlePhotoUrl: _photoKey == null ? (_photoUrl ?? uploaded.url) : null,
         puzzleLidUrl: lidUrl,
         additionalPuzzles: _extraPuzzles.isEmpty
             ? null
@@ -549,7 +581,19 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
       children: [
-        if (_photoUrl != null)
+        // Toujours la photo qui sera RÉELLEMENT imprimée : dès qu'on prend
+        // l'originale de la galerie, c'est elle qu'on montre (avant, l'aperçu
+        // restait sur la photo du souvenir et on croyait que le choix n'avait
+        // pas été pris en compte).
+        if (_usingOriginal && _photoBytes != null)
+          Center(
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Image.memory(_photoBytes!,
+                  width: 180, height: 180, fit: BoxFit.cover),
+            ),
+          )
+        else if (_photoUrl != null)
           Center(
             child: ClipRRect(
               borderRadius: BorderRadius.circular(14),
@@ -601,27 +645,35 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
                     style: const TextStyle(
                         fontSize: 12.5, color: AppColors.textDark, height: 1.4)),
                 // Le vrai remède : l'originale de l'appareil, que l'app n'a
-                // jamais stockée en pleine résolution.
-                if (!_usingOriginal) ...[
-                  const SizedBox(height: 10),
-                  SizedBox(
-                    width: double.infinity,
-                    child: OutlinedButton.icon(
-                      onPressed: _useOriginalPhoto,
-                      icon: const Icon(Icons.photo_library_outlined, size: 18),
-                      label: const Text('Choisir la photo originale',
-                          style: TextStyle(fontSize: 13)),
-                    ),
+                // jamais stockée en pleine résolution. Proposé AUSSI quand la
+                // photo vient déjà de la galerie : celle-ci peut être trop
+                // petite elle aussi (capture d'écran, image reçue par
+                // messagerie), et sans ce bouton on resterait coincé.
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    onPressed: _useOriginalPhoto,
+                    icon: const Icon(Icons.photo_library_outlined, size: 18),
+                    label: Text(
+                        _usingOriginal
+                            ? 'Choisir une autre photo'
+                            : 'Choisir la photo originale',
+                        style: const TextStyle(fontSize: 13)),
                   ),
-                  const SizedBox(height: 4),
-                  const Text(
-                    'Carnet garde une version allégée de tes photos pour que '
-                    'l\'app reste rapide. Pour un grand puzzle, va rechercher '
-                    'l\'originale dans ta galerie.',
-                    style: TextStyle(
-                        fontSize: 11.5, color: AppColors.textMedium, height: 1.35),
-                  ),
-                ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _usingOriginal
+                      ? "Cette photo n'a pas assez de pixels pour les tailles "
+                          "grisées. Une photo prise avec l'appareil du téléphone "
+                          "passe presque toujours."
+                      : "Carnet garde une version allégée de tes photos pour "
+                          "que l'app reste rapide. Pour un grand puzzle, va "
+                          "rechercher l'originale dans ta galerie.",
+                  style: const TextStyle(
+                      fontSize: 11.5, color: AppColors.textMedium, height: 1.35),
+                ),
               ],
             ),
           ),

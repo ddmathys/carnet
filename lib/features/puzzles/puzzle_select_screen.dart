@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
@@ -31,6 +32,7 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
   bool _loading = true;
   String? _selectedMemoryId;
   int? _selectedPhotoIndex;
+  bool _pickingPhone = false;
 
   @override
   void initState() {
@@ -84,6 +86,37 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
     }
   }
 
+  /// Puzzle fait à partir d'une photo du TÉLÉPHONE, sans passer par un
+  /// souvenir : c'est le chemin à privilégier pour un grand puzzle. Les
+  /// photos enregistrées dans un souvenir sont compressées à 2048 px (assez
+  /// pour un livre, pas pour un puzzle), alors que l'originale de la galerie
+  /// fait couramment 4000 px et plus — d'où les tailles grisées quand on part
+  /// d'un souvenir.
+  Future<void> _pickFromGallery() async {
+    if (_pickingPhone) return;
+    setState(() => _pickingPhone = true);
+    try {
+      final picked = await ImagePicker()
+          .pickImage(source: ImageSource.gallery, imageQuality: 100);
+      if (picked == null || !mounted) return;
+      final bytes = await picked.readAsBytes();
+      if (!mounted) return;
+      final queue = widget.queueMode ? '?queue=1' : '';
+      final result =
+          await context.push('/puzzle/new$queue', extra: bytes);
+      // Même relais qu'en sortie de souvenir : en queueMode, le puzzle prêt
+      // remonte au parent au lieu de s'arrêter ici.
+      if (widget.queueMode && mounted) Navigator.pop(context, result);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Choix de la photo impossible — réessaie.')));
+      }
+    } finally {
+      if (mounted) setState(() => _pickingPhone = false);
+    }
+  }
+
   Future<void> _continue() async {
     if (_selectedMemoryId == null || _selectedPhotoIndex == null) return;
     final queue = widget.queueMode ? '&queue=1' : '';
@@ -134,13 +167,74 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
                         fontSize: 11.5, color: AppColors.textMedium, height: 1.3),
                   ),
                 ),
+                // Entrée directe par la galerie, mise EN PREMIER : une photo de
+                // souvenir est stockée compressée (2048 px) et bloque les
+                // grandes tailles, alors que l'originale du téléphone passe.
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
+                  child: InkWell(
+                    onTap: _pickingPhone ? null : _pickFromGallery,
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: AppColors.sageTint.withOpacity(0.5),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: AppColors.sageDark),
+                      ),
+                      child: Row(
+                        children: [
+                          _pickingPhone
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child:
+                                      CircularProgressIndicator(strokeWidth: 2))
+                              : const Icon(Icons.photo_library_outlined,
+                                  color: AppColors.sageDark, size: 24),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Une photo de mon téléphone',
+                                    style: TextStyle(
+                                        fontSize: 14.5,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.textDark)),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Pleine résolution, sans passer par un souvenir — '
+                                  'recommandé pour les grands puzzles.',
+                                  style: TextStyle(
+                                      fontSize: 11.5,
+                                      color: AppColors.textMedium,
+                                      height: 1.3),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(Icons.chevron_right,
+                              color: AppColors.sageDark),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
+                  child: Text('ou une photo déjà dans un souvenir',
+                      style: TextStyle(
+                          fontSize: 12, color: AppColors.textMedium)),
+                ),
                 Expanded(
                   child: visible.isEmpty
                       ? const Center(
                           child: Padding(
                             padding: EdgeInsets.all(32),
                             child: Text(
-                              'Aucune photo ici. Importe des médias d\'abord.',
+                              "Aucune photo dans tes souvenirs — utilise "
+                              "« Une photo de mon téléphone » juste au-dessus.",
                               textAlign: TextAlign.center,
                               style: TextStyle(
                                   color: AppColors.textMedium, height: 1.5),

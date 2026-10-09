@@ -219,6 +219,9 @@ final _router = GoRouter(
         memoryId: state.uri.queryParameters['memory'] ?? '',
         photoIndex: int.tryParse(state.uri.queryParameters['photo'] ?? '') ?? 0,
         queueMode: state.uri.queryParameters['queue'] == '1',
+        // Photo choisie directement dans la galerie (PuzzleSelectScreen) :
+        // elle ne peut pas passer par l'URL, elle arrive en `extra`.
+        galleryBytes: state.extra is Uint8List ? state.extra as Uint8List : null,
       ),
     ),
 
