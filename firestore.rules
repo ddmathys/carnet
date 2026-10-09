@@ -157,6 +157,16 @@ service cloud.firestore {
         && request.resource.data.userId == request.auth.uid;
     }
 
+    // Puzzles commencés mais pas commandés (voir PuzzleDraftService) — mêmes
+    // règles que les brouillons de livres : le propriétaire, et lui seul.
+    match /puzzleDrafts/{draftId} {
+      allow create: if isAuth() && request.resource.data.userId == request.auth.uid;
+      allow read, delete: if isAuth() && resource.data.userId == request.auth.uid;
+      allow update: if isAuth()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.userId == request.auth.uid;
+    }
+
     // ── Users (profil + abonnement) ─────────────────────────────────────────
     match /users/{userId} {
       // Resserré (28.08.26) : avant, tout utilisateur connecté pouvait lire

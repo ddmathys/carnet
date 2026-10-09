@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -8,9 +9,11 @@ import '../../core/config/app_config.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
+import '../../core/models/puzzle_draft.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/pdf_service.dart';
+import '../../core/services/puzzle_draft_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/poster_pdf_service.dart' show PosterPdfService;
 import '../../core/services/backend_client.dart';
@@ -41,6 +44,11 @@ class PuzzleGenerateScreen extends StatefulWidget {
   /// livre, pas pour un puzzle), alors que l'originale du téléphone fait
   /// couramment 4000 px et plus.
   final Uint8List? galleryBytes;
+
+  /// Brouillon à reprendre (`/puzzle/new?draft=ID`, carte « PUZZLE EN COURS »
+  /// du dashboard) : la photo a déjà été envoyée, on la retélécharge et on
+  /// remet la taille choisie.
+  final String? draftId;
   /// true pour un puzzle ajouté via "+ Ajouter un autre puzzle à cette
   /// commande" depuis une commande déjà en cours (voir _buildOrderStep du
   /// parent) : même étape taille, mais l'étape finale envoie juste la photo
@@ -53,6 +61,7 @@ class PuzzleGenerateScreen extends StatefulWidget {
     required this.photoIndex,
     this.queueMode = false,
     this.galleryBytes,
+    this.draftId,
   });
 
   @override
@@ -124,6 +133,18 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
   /// l'appareil. Elle n'est utilisée que comme fichier d'impression : la
   /// vignette de la commande reste celle du souvenir.
   bool _usingOriginal = false;
+
+  /// Brouillon de CE puzzle (collection `puzzleDrafts`) : créé dès que la
+  /// photo est envoyée, pour qu'un puzzle commencé ne se perde jamais et se
+  /// reprenne depuis le dashboard. Jamais en `queueMode` (le puzzle y est un
+  /// article d'une commande en cours, pas un puzzle à lui tout seul).
+  String? _draftId;
+
+  /// URL permanente de la photo d'impression, une fois envoyée. Elle sert au
+  /// brouillon ET à la commande : la photo n'est donc envoyée QU'UNE FOIS,
+  /// même si on règle la taille trois jours plus tard.
+  String? _printUrl;
+  bool _savingDraft = false;
 
   /// true si le souvenir a au moins une vidéo ou un mémo vocal, donc si le
   /// couvercle recevra un QR (voir [_buildLid]).
@@ -202,6 +223,13 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
   }
 
   Future<void> _loadData() async {
+    // Reprise d'un brouillon : la photo est déjà chez nous, on la
+    // retélécharge telle quelle (c'est le fichier qui partira à l'impression).
+    if (widget.draftId != null) {
+      await _resumeDraft(widget.draftId!);
+      return;
+    }
+
     // Photo venue de la galerie : rien à aller chercher, ces octets SONT la
     // photo d'impression (et l'aperçu). Aucun souvenir, donc pas de QR sur le
     // couvercle — on n'imprime jamais un code qui ne mène nulle part.
@@ -216,6 +244,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
             PuzzlePricing.sizes.first;
         _loading = false;
       });
+      unawaited(_ensureDraft());
       return;
     }
     try {
@@ -287,6 +316,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
             PuzzlePricing.sizes.first;
         _loading = false;
       });
+      unawaited(_ensureDraft());
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -295,6 +325,139 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
         });
       }
     }
+  }
+
+  // ── Brouillon ─────────────────────────────────────────────────────────────
+
+  /// Envoie la photo (si ce n'est pas déjà fait) et enregistre le brouillon.
+  /// Lancé dès que la photo est connue, pas au moment de commander : c'est ce
+  /// qui permet de quitter l'app sans rien perdre, et ça rend la commande
+  /// quasi instantanée puisque le gros fichier est déjà parti.
+  Future<void> _ensureDraft() async {
+    if (widget.queueMode) return; // article d'une commande en cours
+    final bytes = _photoBytes;
+    final user = FirebaseAuth.instance.currentUser;
+    if (bytes == null || user == null || _savingDraft) return;
+    _savingDraft = true;
+    try {
+      var url = _printUrl;
+      if (url == null) {
+        final uploaded = await PdfService.uploadPuzzlePhoto(bytes);
+        if (uploaded == null) return; // réessayé au prochain changement
+        url = uploaded.url;
+        if (!mounted) return;
+        setState(() => _printUrl = url);
+      }
+      final id = _draftId ?? PuzzleDraftService.newId();
+      await PuzzleDraftService.save(PuzzleDraft(
+        id: id,
+        userId: user.uid,
+        photoUrl: url,
+        size: _size,
+        photoW: _photoDims?.w ?? 0,
+        photoH: _photoDims?.h ?? 0,
+        memoryId: _memory?.id,
+        photoIndex: _memory == null ? null : widget.photoIndex,
+        updatedAt: DateTime.now(),
+      ));
+      if (mounted && _draftId != id) setState(() => _draftId = id);
+    } catch (_) {
+      // Un brouillon raté ne doit jamais empêcher de commander : on réessaie
+      // silencieusement à la prochaine modification.
+    } finally {
+      _savingDraft = false;
+    }
+  }
+
+  /// Reprend un puzzle laissé en plan : la photo est retéléchargée depuis
+  /// l'URL déjà envoyée, donc identique au fichier qui sera imprimé.
+  Future<void> _resumeDraft(String id) async {
+    try {
+      final draft = await PuzzleDraftService.get(id);
+      if (draft == null || draft.photoUrl.isEmpty) {
+        setState(() {
+          _loadError = "Ce puzzle n'existe plus.";
+          _loading = false;
+        });
+        return;
+      }
+      final bytesList =
+          await PosterPdfService.downloadPhotoBytes([draft.photoUrl]);
+      if (bytesList.isEmpty) {
+        setState(() {
+          _loadError = 'Impossible de recharger la photo — réessaie.';
+          _loading = false;
+        });
+        return;
+      }
+      // Souvenir d'origine, s'il y en a un : c'est lui qui porte le titre et
+      // les vidéos du couvercle.
+      MemoryModel? memory;
+      if (draft.fromMemory) {
+        final visible = await MemoryQueryService.visible()
+            .first
+            .timeout(const Duration(seconds: 20));
+        for (final m in visible) {
+          if (m.id == draft.memoryId) memory = m;
+        }
+      }
+      final bytes = bytesList.first;
+      final dims = imageDims(bytes) ?? draft.dims;
+      if (!mounted) return;
+      setState(() {
+        _draftId = draft.id;
+        _memory = memory;
+        _printUrl = draft.photoUrl;
+        _photoUrl = draft.photoUrl;
+        _photoBytes = bytes;
+        _photoDims = dims;
+        _usingOriginal = !draft.fromMemory;
+        // La taille enregistrée, sauf si elle n'est plus commandable.
+        final saved = draft.size;
+        _size = (PuzzleQualityService.evaluateAll(dims)[saved]?.isOrderable ??
+                false)
+            ? saved
+            : (PuzzleQualityService.largestOrderable(dims) ??
+                PuzzlePricing.sizes.first);
+        _loading = false;
+      });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _loadError = 'Erreur de chargement — réessaie.';
+          _loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _deleteDraft() async {
+    final id = _draftId;
+    if (id == null) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Supprimer ce puzzle ?'),
+        content: const Text(
+            'Le puzzle en cours disparaîtra du dashboard. La photo de ta '
+            'galerie, elle, ne bouge pas.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('Supprimer'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await PuzzleDraftService.delete(id);
+    } catch (_) {}
+    if (mounted) context.go('/home');
   }
 
   Future<void> _placeOrder() async {
@@ -313,8 +476,11 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
       _orderMessage = 'Envoi de la photo…';
     });
     try {
-      final uploaded = await PdfService.uploadPuzzlePhoto(_photoBytes!);
-      if (uploaded == null) {
+      // Photo déjà envoyée au moment du brouillon : on réutilise l'URL plutôt
+      // que de renvoyer plusieurs mégaoctets une seconde fois.
+      final uploadedUrl = _printUrl ??
+          (await PdfService.uploadPuzzlePhoto(_photoBytes!))?.url;
+      if (uploadedUrl == null) {
         throw Exception('Envoi de la photo impossible — réessaie dans un instant.');
       }
 
@@ -326,7 +492,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
       // le poster. Sans média dans le souvenir, pas de QR et pas de couvercle
       // composé : le backend retombe sur la photo brute, et on n'imprime
       // jamais un code qui ne mène nulle part.
-      final lidUrl = await _buildLid(uploadedPhotoFallback: uploaded.url);
+      final lidUrl = await _buildLid(uploadedPhotoFallback: uploadedUrl);
 
       if (!mounted) return;
 
@@ -344,12 +510,12 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
             // compter sur chaque article surfacturait le client (audit du
             // 01.10.26). Le backend recalcule à l'identique.
             price: PuzzlePricing.priceAdditional(_size) ?? 0,
-            pdfUrl: uploaded.url,
+            pdfUrl: uploadedUrl,
             photoKey: _photoKey,
             // Sans souvenir derrière (photo de la galerie), la photo envoyée
             // sert aussi de vignette : sinon la commande s'afficherait sans
             // image dans « Mes commandes » et dans la console admin.
-            photoUrl: _photoKey == null ? (_photoUrl ?? uploaded.url) : null,
+            photoUrl: _photoKey == null ? (_photoUrl ?? uploadedUrl) : null,
           ),
         );
         return;
@@ -374,18 +540,27 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
         createdAt: DateTime.now(),
         notebookId: '',
         memoryCount: 1,
-        pdfUrl: uploaded.url,
+        pdfUrl: uploadedUrl,
         productType: 'puzzle',
         puzzleSku: entry?.sku,
         puzzleSize: _size,
         puzzlePhotoKey: _photoKey,
-        puzzlePhotoUrl: _photoKey == null ? (_photoUrl ?? uploaded.url) : null,
+        puzzlePhotoUrl: _photoKey == null ? (_photoUrl ?? uploadedUrl) : null,
         puzzleLidUrl: lidUrl,
         additionalPuzzles: _extraPuzzles.isEmpty
             ? null
             : _extraPuzzles.map((p) => p.toMap()).toList(),
       );
       final orderId = await OrderService.createOrder(order);
+
+      // Le puzzle est commandé : son brouillon quitte le dashboard (gardé en
+      // 'ordered' plutôt que supprimé, comme pour les livres).
+      final draftId = _draftId;
+      if (draftId != null) {
+        try {
+          await PuzzleDraftService.markOrdered(draftId);
+        } catch (_) {}
+      }
 
       if (!mounted) return;
       context.go('/order-confirmation/$orderId');
@@ -514,6 +689,9 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
         _photoBytes = bytes;
         _photoDims = dims;
         _usingOriginal = true;
+        // Nouvelle photo = nouveau fichier d'impression : l'ancien envoi ne
+        // vaut plus rien, le brouillon repart sur celui-ci.
+        _printUrl = null;
         // La taille choisie peut être redevenue possible — ou l'originale
         // peut être elle aussi trop petite. On réaligne sur ce qui est
         // réellement commandable, sans jamais garder une taille bloquée.
@@ -522,6 +700,7 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
               PuzzlePricing.sizes.first;
         }
       });
+      unawaited(_ensureDraft());
     } catch (_) {
       if (mounted) _showSnack('Choix de la photo impossible — réessaie.');
     }
@@ -561,6 +740,15 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
           onPressed: () =>
               _step == 1 ? setState(() => _step = 0) : context.pop(),
         ),
+        actions: [
+          if (_draftId != null)
+            IconButton(
+              tooltip: 'Supprimer ce puzzle en cours',
+              icon: const Icon(Icons.delete_outline,
+                  color: AppColors.textMedium),
+              onPressed: _ordering ? null : _deleteDraft,
+            ),
+        ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
@@ -627,7 +815,10 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
             size: size,
             selected: _size == size,
             quality: _quality[size],
-            onTap: () => setState(() => _size = size),
+            onTap: () {
+              setState(() => _size = size);
+              unawaited(_ensureDraft());
+            },
           ),
         if (_blockedExplanation != null) ...[
           const SizedBox(height: 4),
@@ -676,6 +867,23 @@ class _PuzzleGenerateScreenState extends State<PuzzleGenerateScreen> {
                 ),
               ],
             ),
+          ),
+        ],
+        if (_draftId != null) ...[
+          const SizedBox(height: 6),
+          Row(
+            children: [
+              const Icon(Icons.bookmark_added_outlined,
+                  size: 15, color: AppColors.sageDark),
+              const SizedBox(width: 6),
+              const Expanded(
+                child: Text(
+                  "Puzzle gardé en cours — tu peux quitter et le reprendre "
+                  "depuis l'accueil.",
+                  style: TextStyle(fontSize: 11.5, color: AppColors.sageDark),
+                ),
+              ),
+            ],
           ),
         ],
         if (_usingOriginal && _photoDims != null) ...[

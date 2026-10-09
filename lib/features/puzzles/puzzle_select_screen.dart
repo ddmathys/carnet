@@ -34,6 +34,13 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
   int? _selectedPhotoIndex;
   bool _pickingPhone = false;
 
+  /// Un puzzle part de la GALERIE, pas d'un souvenir : les photos de souvenir
+  /// sont stockées compressées à 2048 px et ne peuvent remplir aucune taille
+  /// de puzzle (voir PuzzleQualityService). La galerie s'ouvre donc d'office,
+  /// et la liste des souvenirs n'apparaît que si on la demande explicitement
+  /// (elle reste le seul moyen d'avoir le QR vidéo sur le couvercle).
+  bool _showMemories = false;
+
   @override
   void initState() {
     super.initState();
@@ -43,6 +50,9 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
         _all = memories;
         _loading = false;
       });
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _pickFromGallery();
     });
   }
 
@@ -155,125 +165,158 @@ class _PuzzleSelectScreenState extends State<PuzzleSelectScreen> {
           onPressed: () => context.go('/home'),
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 10, 16, 6),
-                  child: Text(
-                    'Une seule photo par puzzle — Prodigi la recadre lui-même pour remplir le puzzle et le couvercle de la boîte.',
-                    style: TextStyle(
-                        fontSize: 11.5, color: AppColors.textMedium, height: 1.3),
+      body: _showMemories
+          ? (_loading
+              ? const Center(child: CircularProgressIndicator())
+              : _memoriesBody(visible))
+          : _galleryBody(),
+      // Le bouton de validation n'a de sens qu'avec la liste des souvenirs :
+      // depuis la galerie, choisir la photo enchaîne directement.
+      bottomNavigationBar: !_showMemories
+          ? null
+          : SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: ElevatedButton(
+                  onPressed: _selectedMemoryId == null ? null : _continue,
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                    backgroundColor: AppColors.sageDark,
+                    disabledBackgroundColor:
+                        AppColors.softGray.withOpacity(0.3),
                   ),
+                  child: Text(_selectedMemoryId == null
+                      ? 'Choisis une photo'
+                      : 'Composer le puzzle'),
                 ),
-                // Entrée directe par la galerie, mise EN PREMIER : une photo de
-                // souvenir est stockée compressée (2048 px) et bloque les
-                // grandes tailles, alors que l'originale du téléphone passe.
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 2, 16, 10),
-                  child: InkWell(
-                    onTap: _pickingPhone ? null : _pickFromGallery,
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.all(14),
-                      decoration: BoxDecoration(
-                        color: AppColors.sageTint.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: AppColors.sageDark),
-                      ),
-                      child: Row(
-                        children: [
-                          _pickingPhone
-                              ? const SizedBox(
-                                  width: 22,
-                                  height: 22,
-                                  child:
-                                      CircularProgressIndicator(strokeWidth: 2))
-                              : const Icon(Icons.photo_library_outlined,
-                                  color: AppColors.sageDark, size: 24),
-                          const SizedBox(width: 12),
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text('Une photo de mon téléphone',
-                                    style: TextStyle(
-                                        fontSize: 14.5,
-                                        fontWeight: FontWeight.w600,
-                                        color: AppColors.textDark)),
-                                SizedBox(height: 2),
-                                Text(
-                                  'Pleine résolution, sans passer par un souvenir — '
-                                  'recommandé pour les grands puzzles.',
-                                  style: TextStyle(
-                                      fontSize: 11.5,
-                                      color: AppColors.textMedium,
-                                      height: 1.3),
-                                ),
-                              ],
-                            ),
-                          ),
-                          const Icon(Icons.chevron_right,
-                              color: AppColors.sageDark),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 6),
-                  child: Text('ou une photo déjà dans un souvenir',
-                      style: TextStyle(
-                          fontSize: 12, color: AppColors.textMedium)),
-                ),
-                Expanded(
-                  child: visible.isEmpty
-                      ? const Center(
-                          child: Padding(
-                            padding: EdgeInsets.all(32),
-                            child: Text(
-                              "Aucune photo dans tes souvenirs — utilise "
-                              "« Une photo de mon téléphone » juste au-dessus.",
-                              textAlign: TextAlign.center,
-                              style: TextStyle(
-                                  color: AppColors.textMedium, height: 1.5),
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 110),
-                          itemCount: visible.length,
-                          itemBuilder: (_, i) {
-                            final m = visible[i];
-                            return _PhotoMemoryRow(
-                              memory: m,
-                              selected: _selectedMemoryId == m.id,
-                              onTap: () => _onRowTap(m),
-                            );
-                          },
-                        ),
-                ),
-              ],
+              ),
             ),
-      bottomNavigationBar: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
-          child: ElevatedButton(
-            onPressed: _selectedMemoryId == null ? null : _continue,
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size.fromHeight(52),
-              backgroundColor: AppColors.sageDark,
-              disabledBackgroundColor: AppColors.softGray.withOpacity(0.3),
-            ),
-            child: Text(_selectedMemoryId == null
-                ? 'Choisis une photo'
-                : 'Composer le puzzle'),
-          ),
-        ),
-      ),
     );
   }
+
+  /// Écran par défaut : la galerie du téléphone, rien d'autre. Elle s'ouvre
+  /// déjà d'elle-même à l'arrivée ; cet écran est ce qu'on voit si on
+  /// l'annule.
+  Widget _galleryBody() => Center(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(28, 0, 28, 40),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.extension_outlined,
+                  size: 48, color: AppColors.sageDark),
+              const SizedBox(height: 16),
+              const Text(
+                'Une photo de ton téléphone',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontFamily: 'Fraunces',
+                    fontSize: 19,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textDark),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Un puzzle réclame beaucoup plus de pixels qu\'une page de '
+                'livre. Les photos rangées dans tes souvenirs sont '
+                'enregistrées allégées : on prend donc l\'originale, dans ta '
+                'galerie.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                    fontSize: 13, color: AppColors.textMedium, height: 1.45),
+              ),
+              const SizedBox(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _pickingPhone ? null : _pickFromGallery,
+                  icon: _pickingPhone
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: Colors.white))
+                      : const Icon(Icons.photo_library_outlined, size: 20),
+                  label: const Text('Choisir une photo'),
+                  style: ElevatedButton.styleFrom(
+                    minimumSize: const Size.fromHeight(52),
+                    backgroundColor: AppColors.sageDark,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 6),
+              // Seul moyen d'avoir le QR vidéo sur le couvercle : il faut un
+              // souvenir derrière. Gardé, mais jamais imposé.
+              TextButton(
+                onPressed: () => setState(() => _showMemories = true),
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.textMedium),
+                child: const Text(
+                  'Partir plutôt d\'un souvenir (QR vidéo sur le couvercle)',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 12.5),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  Widget _memoriesBody(List<MemoryModel> visible) => Column(
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 10, 16, 6),
+            child: Text(
+              'Une seule photo par puzzle — Prodigi la recadre lui-même pour '
+              'remplir le puzzle et le couvercle de la boîte. Attention : une '
+              'photo de souvenir est enregistrée allégée, les grandes tailles '
+              'seront souvent grisées.',
+              style: TextStyle(
+                  fontSize: 11.5, color: AppColors.textMedium, height: 1.3),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+              child: TextButton.icon(
+                onPressed: _pickingPhone ? null : _pickFromGallery,
+                icon: const Icon(Icons.photo_library_outlined, size: 17),
+                label: const Text('Revenir à une photo du téléphone',
+                    style: TextStyle(fontSize: 12.5)),
+                style: TextButton.styleFrom(
+                    foregroundColor: AppColors.sageDark),
+              ),
+            ),
+          ),
+          Expanded(
+            child: visible.isEmpty
+                ? const Center(
+                    child: Padding(
+                      padding: EdgeInsets.all(32),
+                      child: Text(
+                        'Aucune photo dans tes souvenirs.',
+                        textAlign: TextAlign.center,
+                        style:
+                            TextStyle(color: AppColors.textMedium, height: 1.5),
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 110),
+                    itemCount: visible.length,
+                    itemBuilder: (_, i) {
+                      final m = visible[i];
+                      return _PhotoMemoryRow(
+                        memory: m,
+                        selected: _selectedMemoryId == m.id,
+                        onTap: () => _onRowTap(m),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      );
 }
 
 class _PhotoMemoryRow extends StatelessWidget {

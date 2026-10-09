@@ -222,6 +222,8 @@ final _router = GoRouter(
         // Photo choisie directement dans la galerie (PuzzleSelectScreen) :
         // elle ne peut pas passer par l'URL, elle arrive en `extra`.
         galleryBytes: state.extra is Uint8List ? state.extra as Uint8List : null,
+        // Puzzle laissé en plan, repris depuis le dashboard.
+        draftId: state.uri.queryParameters['draft'],
       ),
     ),
 

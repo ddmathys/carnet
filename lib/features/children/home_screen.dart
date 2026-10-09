@@ -8,6 +8,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/book_draft.dart';
+import '../../core/models/puzzle_draft.dart';
 import '../../core/models/memory_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/models/tag_model.dart';
@@ -16,6 +17,7 @@ import '../../core/models/memory_activity_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/poster_pricing.dart';
 import '../../core/services/book_draft_service.dart';
+import '../../core/services/puzzle_draft_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/memory_activity_service.dart';
 import '../books/pdf_viewer_screen.dart';
@@ -229,6 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Livres commencés mais pas commandés (brouillons sauvegardés
         // automatiquement) : on les reprend en un geste.
         const SliverToBoxAdapter(child: _BookDraftsStrip()),
+        const SliverToBoxAdapter(child: _PuzzleDraftsStrip()),
         SliverToBoxAdapter(child: _printedSection(context)),
 
         // Espace pour que le bouton flottant ne recouvre pas le bas du
@@ -1457,6 +1460,105 @@ class _BookDraftsStrip extends StatelessWidget {
                                       if (d.pageCount > 0) '${d.pageCount} pages',
                                       'modifié le ${DateFormat('d MMM, HH:mm', 'fr').format(d.updatedAt)}',
                                     ].join(' · '),
+                                    style: const TextStyle(
+                                        color: AppColors.textMedium,
+                                        fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Text('Reprendre →',
+                                style: TextStyle(
+                                    color: AppColors.sageDark,
+                                    fontSize: 12.5,
+                                    fontWeight: FontWeight.w600)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+
+/// Puzzles commencés mais pas commandés — même carte que les livres en cours
+/// (voir _BookDraftsStrip). Sans elle, un puzzle interrompu n'avait aucun
+/// chemin de retour : il fallait tout recommencer, photo comprise.
+class _PuzzleDraftsStrip extends StatelessWidget {
+  const _PuzzleDraftsStrip();
+
+  @override
+  Widget build(BuildContext context) {
+    return StreamBuilder<List<PuzzleDraft>>(
+      stream: PuzzleDraftService.streamMine(),
+      builder: (context, snap) {
+        final drafts = snap.data ?? const <PuzzleDraft>[];
+        if (drafts.isEmpty) return const SizedBox.shrink();
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('PUZZLE EN COURS',
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.textMedium,
+                      letterSpacing: 1.2)),
+              const SizedBox(height: 8),
+              for (final d in drafts.take(3))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Material(
+                    color: AppColors.surface,
+                    borderRadius: BorderRadius.circular(14),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => context.push('/puzzle/new?draft=${d.id}'),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 10, 12, 10),
+                        child: Row(
+                          children: [
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(10),
+                              child: CachedNetworkImage(
+                                imageUrl: d.photoUrl,
+                                width: 44,
+                                height: 44,
+                                fit: BoxFit.cover,
+                                placeholder: (_, __) => Container(
+                                    width: 44,
+                                    height: 44,
+                                    color: AppColors.sageTint),
+                                errorWidget: (_, __, ___) => Container(
+                                    width: 44,
+                                    height: 44,
+                                    color: AppColors.sageTint),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    d.size.isEmpty
+                                        ? 'Puzzle'
+                                        : 'Puzzle ${PuzzlePricing.label(d.size)}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                        color: AppColors.textDark,
+                                        fontWeight: FontWeight.w600),
+                                  ),
+                                  Text(
+                                    'modifié le ${DateFormat('d MMM, HH:mm', 'fr').format(d.updatedAt)}',
                                     style: const TextStyle(
                                         color: AppColors.textMedium,
                                         fontSize: 12),

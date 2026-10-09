@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pdf/widgets.dart' as pw;
 
 import 'package:bloom/core/models/book_draft.dart';
+import 'package:bloom/core/services/book_pdf_service.dart';
 
 /// Commentaires posés sur les photos d'un livre : le rendu à l'écran
 /// (PhotoEditScreen) et le rendu imprimé (BookPdfService) lisent les MÊMES
@@ -113,6 +114,41 @@ void main() {
       expect(n, greaterThanOrEqualTo(1));
       expect(
           n * (baseFontSize * t.sizeFactor * 1.25 + 2), lessThanOrEqualTo(198));
+    });
+  });
+
+  group("Placement de l'encadré dans la case (PDF)", () {
+    // L'axe Y du paquet `pdf` est INVERSÉ par rapport à Flutter :
+    // Alignment(0, 1) y vaut topCenter. Sans conversion, un commentaire posé
+    // en haut s'imprimait en bas.
+    test("le haut de l'éditeur est le haut de la page", () {
+      final a = BookPdfService.photoTextAlignment(0.5, 0);
+      expect(a.y, 1);
+      expect(a.y, pw.Alignment.topCenter.y);
+    });
+
+    test("le bas de l'éditeur est le bas de la page", () {
+      final a = BookPdfService.photoTextAlignment(0.5, 1);
+      expect(a.y, -1);
+      expect(a.y, pw.Alignment.bottomCenter.y);
+    });
+
+    test('la position par défaut (en bas) reste en bas', () {
+      final a = BookPdfService.photoTextAlignment(
+          BookPhotoText.defaultX, BookPhotoText.defaultY);
+      expect(a.x, 0);
+      expect(a.y, lessThan(-0.5));
+    });
+
+    test('gauche et droite ne sont pas inversées', () {
+      expect(BookPdfService.photoTextAlignment(0, 0.5).x, -1);
+      expect(BookPdfService.photoTextAlignment(1, 0.5).x, 1);
+    });
+
+    test('une position aberrante est ramenée dans la case', () {
+      final a = BookPdfService.photoTextAlignment(5, -3);
+      expect(a.x, 1);
+      expect(a.y, 1);
     });
   });
 

@@ -898,8 +898,7 @@ class BookPdfService {
           width: w,
           height: h,
           child: pw.Align(
-            alignment: pw.Alignment(text.x!.clamp(0.0, 1.0) * 2 - 1,
-                text.y!.clamp(0.0, 1.0) * 2 - 1),
+            alignment: photoTextAlignment(text.x!, text.y!),
             child: pw.ConstrainedBox(
               constraints: pw.BoxConstraints(maxWidth: w * photoTextMaxWidth),
               child: _photoTextLabel(text, font, availableHeight: h),
@@ -959,6 +958,21 @@ class BookPdfService {
 
   /// Largeur max de l'encadré, en fraction de la zone utile de la case.
   static const double photoTextMaxWidth = 0.8;
+
+  /// Où poser l'encadré dans sa case, à partir de la position (x, y) laissée
+  /// par l'éditeur — 0..1, origine en HAUT à gauche, convention Flutter.
+  ///
+  /// ⚠️ **L'axe Y du paquet `pdf` est inversé** : `Alignment(0, 1)` y vaut
+  /// `topCenter`, alors que `Alignment(0, 1)` vaut `bottomCenter` en Flutter
+  /// (même piège que `_cropAlignment`, où il était déjà traité). Sans ce
+  /// `1 - 2y`, un commentaire posé en HAUT de la photo s'imprimait en BAS, et
+  /// réciproquement — l'aperçu disait vrai, le livre non (signalé le 09.10.26
+  /// par David : « je mets le commentaire en haut à droite, ça me le met pas
+  /// à l'endroit exact »).
+  static pw.Alignment photoTextAlignment(double x, double y) => pw.Alignment(
+        x.clamp(0.0, 1.0) * 2 - 1,
+        1 - y.clamp(0.0, 1.0) * 2,
+      );
 
   /// Encadré du texte posé sur une photo : blanc par défaut (encre si le
   /// texte lui-même est très clair, pour qu'il reste lisible), ou texte seul.
