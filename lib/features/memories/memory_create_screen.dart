@@ -163,6 +163,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   final List<int> _existingVideoDurations = []; // parallèle à _existingVideoKeys
   final List<String> _removedVideoKeys = []; // clés existantes supprimées
   bool _preparingVideo = false; // sélection/contrôle de durée en cours
+  // Import de photos en cours (`_pickPhotos`) — le pendant de
+  // `_preparingVideo`, qui ne couvrait que l'import unifié et les vidéos.
+  bool _importingPhotos = false;
+  // Ce que l'écran est en train de faire, affiché à côté du spinner.
+  String? _importNote;
   // Durée max par clip. Chargée en async au démarrage.
   int _videoDurationCapSec = QuotaService.videoDurationSec;
   // Nombre max de vidéos par souvenir, chargé en async au démarrage.
@@ -652,6 +657,92 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     ];
   }
 
+  /// Un import de médias est en cours : sélecteur ouvert, fichiers en cours
+  /// de décompression par image_picker (plusieurs secondes pour 40 photos),
+  /// quota et EXIF. Pendant tout ce temps les photos choisies ne sont PAS
+  /// encore dans `_localPhotos` : enregistrer maintenant écrirait le souvenir
+  /// SANS elles, et l'écran refermé, `_ingestMedia` ne trouve plus de widget
+  /// monté — les photos seraient perdues pour de bon (bug signalé par David
+  /// le 09.10.26 : « je peux directement appuyer sur enregistrer mais ça les
+  /// prend pas en compte »). D'où : Enregistrer et Continuer bloqués, avec un
+  /// spinner et `_importLabel` qui disent pourquoi.
+  bool get _importing => _preparingVideo || _importingPhotos;
+
+  String get _importLabel => _importNote ?? 'Import des médias en cours…';
+
+  /// Démarre l'attente d'import (photos). `_endImport` est appelé dans un
+  /// `finally` : aucun chemin de sortie ne doit laisser le bouton grisé.
+  void _beginPhotoImport(String note) {
+    if (!mounted) return;
+    setState(() {
+      _importingPhotos = true;
+      _importNote = note;
+    });
+  }
+
+  /// Met à jour le libellé seul (l'attente, elle, est portée par
+  /// `_importingPhotos` ou `_preparingVideo` selon le chemin d'import).
+  void _noteImport(String note) {
+    if (!mounted) return;
+    setState(() => _importNote = note);
+  }
+
+  void _endImport() {
+    if (!mounted) return;
+    setState(() {
+      _importingPhotos = false;
+      _importNote = null;
+    });
+  }
+
+  String _preparingNote(int count) =>
+      count > 1 ? 'Préparation de $count médias…' : 'Préparation du média…';
+
+  /// Bandeau d'attente pendant un import : dit ce qui se passe ET pourquoi
+  /// « Enregistrer » est grisé. Sans lui, l'écran semblait figé quelques
+  /// secondes et on tapait sur un bouton qui partait sans les photos.
+  Widget _importBanner() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border, width: 0.8),
+      ),
+      child: Row(
+        children: [
+          const SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+                strokeWidth: 2, color: AppColors.sage),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(_importLabel,
+                    style: const TextStyle(
+                        fontFamily: 'Outfit',
+                        fontWeight: FontWeight.w700,
+                        fontSize: 12.5,
+                        color: AppColors.textDark)),
+                const SizedBox(height: 2),
+                const Text(
+                  "Attends que les photos s'affichent : « Enregistrer » se "
+                  'débloque tout seul.',
+                  style: TextStyle(fontSize: 11.5, color: AppColors.textMedium),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _pickPhotos(ImageSource source) async {
     // Quota photos : on bloque à la limite réelle (compte les photos déjà en
     // cours d'ajout).
@@ -664,11 +755,15 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         return;
       }
     }
+    _beginPhotoImport(source == ImageSource.gallery
+        ? 'Import de tes photos en cours…'
+        : 'Préparation de la photo…');
     try {
       if (source == ImageSource.gallery) {
         final picked = await _picker.pickMultiImage(
             imageQuality: 80, maxWidth: 1920);
         if (picked.isNotEmpty && mounted) {
+          _noteImport(_preparingNote(picked.length));
           final files = picked.map((x) => File(x.path)).toList();
           final tickets = _startPhotoUploads(files);
           setState(() {
@@ -693,6 +788,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       }
     } catch (_) {
       _showSnack('Impossible d\'accéder à la photo');
+    } finally {
+      _endImport();
     }
   }
 
@@ -873,6 +970,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       }
     }
     setState(() => _preparingVideo = true);
+    _noteImport('Préparation de la vidéo…');
     try {
       final picked = await _picker.pickVideo(
         source: source,
@@ -1012,9 +1110,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   /// enregistrement : chaque média garde son flux d'origine.
   Future<void> _pickMediaFromGallery() async {
     setState(() => _preparingVideo = true);
+    _noteImport('Import de tes médias en cours…');
     try {
       final picked =
           await _picker.pickMultipleMedia(imageQuality: 80, maxWidth: 1920);
+      if (picked.isNotEmpty) _noteImport(_preparingNote(picked.length));
       if (picked.isEmpty) {
         if (mounted) setState(() => _preparingVideo = false);
         return;
@@ -1032,6 +1132,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     } catch (_) {
       if (mounted) _showSnack('Impossible d\'accéder aux médias');
     } finally {
+      _endImport();
       if (mounted) setState(() => _preparingVideo = false);
     }
   }
@@ -1079,6 +1180,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     if (shared.isEmpty) return;
 
     setState(() => _preparingVideo = true);
+    _noteImport('Récupération des médias partagés…');
     try {
       final photoFiles = <File>[];
       final videoPaths = <String>[];
@@ -1095,6 +1197,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     } catch (_) {
       if (mounted) _showSnack('Impossible de récupérer les médias partagés');
     } finally {
+      _endImport();
       if (mounted) setState(() => _preparingVideo = false);
     }
   }
@@ -1290,6 +1393,8 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
 
 
   String? get _missingFieldsHint {
+    // L'import passe devant : ce n'est pas un champ manquant mais une attente.
+    if (_importing) return _importLabel;
     final missing = <String>[];
     // Une mesure de croissance n'affiche ni titre ni lieu (voir le parcours
     // en étapes plus bas) : les exiger n'aurait aucun champ visible à
@@ -1340,6 +1445,9 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       );
 
   bool get _saveEnabled {
+    // Médias encore en cours d'import : voir `_importing`. Enregistrer ici
+    // perdrait les photos qu'on vient de choisir.
+    if (_importing) return false;
     if (_dateNeedsConfirmation) return false;
     switch (_selectedCategory) {
       case 'parole':
@@ -1387,12 +1495,11 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   bool get _stepValid {
     switch (_currentStepId) {
       case 'media':
-        // Import (sélection + lecture EXIF) encore en cours : `_preparingVideo`
-        // pilote déjà le spinner de `_buildVideoSection` (photos ET vidéos,
-        // voir son commentaire) — Continuer ne doit pas être cliquable tant
-        // qu'il tourne, sinon on peut avancer avant que le média soit même
-        // ajouté à la liste.
-        return !_preparingVideo;
+        // Import (sélection, décompression, EXIF) encore en cours : Continuer
+        // ne doit pas être cliquable tant qu'il tourne, sinon on avance — et
+        // on enregistre — avant que les médias soient même ajoutés à la liste
+        // (voir `_importing`).
+        return !_importing;
       case 'title':
         return !_titleRequiredEmpty;
       case 'tags':
@@ -1409,7 +1516,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
   String? get _stepHint {
     switch (_currentStepId) {
       case 'media':
-        return _preparingVideo ? 'Import des médias en cours…' : null;
+        return _importing ? _importLabel : null;
       case 'title':
         return _titleRequiredEmpty ? 'Un titre est nécessaire pour continuer' : null;
       case 'tags':
@@ -1906,7 +2013,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 12),
-            child: _loading
+            child: (_loading || _importing)
                 ? const Center(
                     child: SizedBox(
                         width: 20,
@@ -2209,7 +2316,13 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         const Text('Touche ＋ pour ajouter, ✕ pour retirer.',
             style: TextStyle(fontSize: 11.5, color: AppColors.textMedium)),
         const SizedBox(height: 14),
-        if (specs.isEmpty && !(creation && _preparingVideo))
+        // Import en cours (y compris en MODIFICATION, où il n'y avait aucun
+        // signe d'attente et où « Enregistrer » restait cliquable).
+        if (_importing) ...[
+          _importBanner(),
+          const SizedBox(height: 14),
+        ],
+        if (specs.isEmpty && !(creation && _importing))
           GestureDetector(
             onTap: _showMediaSourceSheet,
             child: Container(
@@ -2257,7 +2370,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
             children: [
               _editAddTile(),
               for (final s in specs.skip(1)) _editTile(s, radius: 16),
-              if (creation && _preparingVideo)
+              if (creation && _importing)
                 Container(
                   decoration: BoxDecoration(
                     color: AppColors.surface,
@@ -2486,6 +2599,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
+              busy: _importing,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -2553,6 +2667,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           _SaveButton(
               enabled: _saveEnabled,
               loading: _loading,
+              busy: _importing,
               label:
                   _isEditing ? 'Mettre à jour' : 'Enregistrer ce souvenir',
               hint: _missingFieldsHint,
@@ -2667,6 +2782,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           canGoBack: _step > 0,
           enabled: _stepValid,
           loading: _loading,
+          busy: _importing,
           label: switch (_currentStepId) {
             'voice' => 'Enregistrer ce souvenir',
             'growth' => 'Enregistrer',
@@ -3195,6 +3311,10 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        if (_importing) ...[
+          _importBanner(),
+          const SizedBox(height: 12),
+        ],
         if (totalCount > 0) ...[
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -4047,6 +4167,9 @@ class _StepActionBar extends StatelessWidget {
   final String? hint;
   final VoidCallback onBack;
   final VoidCallback onPrimary;
+  // Bouton grisé parce qu'on ATTEND (import de médias), pas parce qu'il manque
+  // un champ : spinner et couleur d'accent au lieu du rouge d'erreur.
+  final bool busy;
 
   const _StepActionBar({
     required this.canGoBack,
@@ -4056,6 +4179,7 @@ class _StepActionBar extends StatelessWidget {
     required this.onBack,
     required this.onPrimary,
     this.hint,
+    this.busy = false,
   });
 
   @override
@@ -4077,17 +4201,25 @@ class _StepActionBar extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline,
-                        size: 14, color: AppColors.error),
+                    if (busy)
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(
+                            strokeWidth: 2, color: AppColors.sage),
+                      )
+                    else
+                      const Icon(Icons.error_outline,
+                          size: 14, color: AppColors.error),
                     const SizedBox(width: 5),
                     Flexible(
                       child: Text(
                         hint!,
                         textAlign: TextAlign.center,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
-                          color: AppColors.error,
+                          color: busy ? AppColors.sage : AppColors.error,
                         ),
                       ),
                     ),
@@ -4135,6 +4267,9 @@ class _SaveButton extends StatelessWidget {
   final String label;
   final String? hint;
   final VoidCallback onPressed;
+  // Grisé par attente (import de médias) et non par champ manquant — même
+  // distinction que `_StepActionBar.busy`.
+  final bool busy;
 
   const _SaveButton({
     required this.enabled,
@@ -4142,6 +4277,7 @@ class _SaveButton extends StatelessWidget {
     required this.label,
     required this.onPressed,
     this.hint,
+    this.busy = false,
   });
 
   @override
@@ -4163,17 +4299,25 @@ class _SaveButton extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.error_outline,
-                  size: 14, color: AppColors.error),
+              if (busy)
+                const SizedBox(
+                  width: 14,
+                  height: 14,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.sage),
+                )
+              else
+                const Icon(Icons.error_outline,
+                    size: 14, color: AppColors.error),
               const SizedBox(width: 5),
               Flexible(
                 child: Text(
                   hint!,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
-                    color: AppColors.error,
+                    color: busy ? AppColors.sage : AppColors.error,
                   ),
                 ),
               ),
