@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
+import admin from 'firebase-admin'
 import { FieldValue } from 'firebase-admin/firestore'
 import { requireAuth } from '../../lib/verify'
 import { auth, db } from '../../lib/firebase'
@@ -42,9 +43,20 @@ import { row, wrap } from '../../lib/email_order'
 //                                    famille, collègues) — console admin,
 //                                    bouton "Partager l'app". Réservé à
 //                                    ADMIN_EMAIL comme prodigi/video.
+//   POST /api/notify/stats        → tableau de bord ADMIN : inscriptions,
+//                                    souvenirs, entonnoir d'achat et chiffre
+//                                    d'affaires. Lu par l'écran
+//                                    `/admin/dashboard` de l'app.
+//                                    Volontairement servi par le backend
+//                                    (Admin SDK) plutôt que lu depuis l'app :
+//                                    les règles Firestore interdisent — à
+//                                    raison — de lister `users` ou `memories`,
+//                                    et les agrégats `count()` ne facturent
+//                                    pas une lecture par document.
 //
 // Regroupé en route dynamique comme prodigi/tag/video : le plan Hobby de Vercel
-// plafonne à 12 fonctions serverless.
+// plafonne à 12 fonctions serverless — on est À ce plafond (12/12), donc toute
+// nouvelle URL doit venir se greffer sur une route existante comme celle-ci.
 
 function authorized(req: VercelRequest): boolean {
   const secret = process.env.CRON_SECRET
@@ -369,6 +381,146 @@ async function handleShareApk(req: VercelRequest, res: VercelResponse) {
   return res.status(200).json({ ok: failed.length === 0, sent, failed })
 }
 
+/** Nombre de documents d'une requête, via l'agrégat `count()` : un seul
+ *  aller-retour, facturé bien moins qu'une lecture par document. */
+async function countOf(query: admin.firestore.Query): Promise<number> {
+  const snap = await query.count().get()
+  return snap.data().count
+}
+
+/** Tableau de bord admin (`/admin/dashboard`).
+ *
+ *  Deux sources, chacune pour ce qu'elle sait :
+ *   - Firebase Auth pour les INSCRIPTIONS : les documents `users` ne portent
+ *     qu'un `updatedAt` (voir UserService.saveProfile), donc impossible d'y
+ *     lire une date de création. `metadata.creationTime` d'Auth, lui, est
+ *     exact.
+ *   - Firestore pour le reste (souvenirs, commandes, brouillons).
+ *
+ *  Le chiffre d'affaires vient des commandes réellement passées à « payé »
+ *  (statut posé par le webhook Stripe, jamais par le client — voir les règles
+ *  Firestore sur `orders`). C'est la vérité comptable, contrairement à
+ *  Analytics qui sous-compte par construction. */
+async function handleStats(req: VercelRequest, res: VercelResponse) {
+  const user = await requireAuth(req, res)
+  if (!user) return
+  if (user.email !== ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Accès refusé' })
+  }
+
+  const now = Date.now()
+  const since = (days: number) => new Date(now - days * 24 * 60 * 60 * 1000)
+  const d7 = since(7)
+  const d30 = since(30)
+
+  // ── Inscriptions (Firebase Auth) ─────────────────────────────────
+  // listUsers pagine par 1000. On boucle pour rester juste même après la
+  // croissance, avec une borne dure pour ne pas tourner indéfiniment.
+  let signupsTotal = 0
+  let signups7 = 0
+  let signups30 = 0
+  let pageToken: string | undefined
+  let pages = 0
+  do {
+    const page = await auth.listUsers(1000, pageToken)
+    for (const u of page.users) {
+      signupsTotal++
+      const created = u.metadata?.creationTime
+        ? new Date(u.metadata.creationTime)
+        : null
+      if (!created) continue
+      if (created >= d7) signups7++
+      if (created >= d30) signups30++
+    }
+    pageToken = page.pageToken
+    pages++
+  } while (pageToken && pages < 20)
+
+  // ── Souvenirs ────────────────────────────────────────────
+  const memories = db.collection('memories')
+  const [memoriesTotal, memories7, memories30] = await Promise.all([
+    countOf(memories),
+    countOf(memories.where('createdAt', '>=', d7)),
+    countOf(memories.where('createdAt', '>=', d30)),
+  ])
+
+  // ── Entonnoir d'achat ────────────────────────────────────
+  // `bookDrafts` / `puzzleDrafts` = produits commencés mais pas commandés : la
+  // cible exacte d'une relance « ton livre t'attend ». Leur nombre est une
+  // opportunité, pas une perte.
+  const orders = db.collection('orders')
+  const [ordersTotal, ordersReceived, bookDrafts, puzzleDrafts] =
+    await Promise.all([
+      countOf(orders),
+      countOf(orders.where('status', '==', 'received')),
+      countOf(db.collection('bookDrafts')),
+      countOf(db.collection('puzzleDrafts')),
+    ])
+
+  // Commandes payées : on lit les documents (et pas seulement leur nombre)
+  // parce qu'il faut sommer les prix et ventiler par produit. Volume faible
+  // par nature — ce sont les ventes.
+  const paidSnap = await orders
+    .where('status', 'in', ['paid', 'shipped', 'archived'])
+    .get()
+  let revenueTotal = 0
+  let revenue30 = 0
+  let paid30 = 0
+  const byProduct: Record<string, { count: number; revenue: number }> = {}
+  for (const doc of paidSnap.docs) {
+    const d = doc.data()
+    const price = typeof d.price === 'number' ? d.price : 0
+    const product = (d.productType as string) ?? 'book'
+    revenueTotal += price
+    const paidAt = toDate(d.paidAt) ?? toDate(d.createdAt)
+    if (paidAt && paidAt >= d30) {
+      revenue30 += price
+      paid30++
+    }
+    const slot = byProduct[product] ?? { count: 0, revenue: 0 }
+    slot.count++
+    slot.revenue += price
+    byProduct[product] = slot
+  }
+  const paidTotal = paidSnap.size
+
+  // Marge brute : la moitié du prix de vente, par construction du catalogue
+  // (book_pricing.dart::marginShare = 0.50 — le prix client vaut deux fois le
+  // coût d'impression). Approximation assumée : le plancher `marginFloor`
+  // relève légèrement la marge des petits articles.
+  const MARGIN_SHARE = 0.5
+
+  return res.status(200).json({
+    ok: true,
+    generatedAt: new Date().toISOString(),
+    signups: { total: signupsTotal, last7: signups7, last30: signups30 },
+    memories: { total: memoriesTotal, last7: memories7, last30: memories30 },
+    funnel: {
+      drafts: bookDrafts + puzzleDrafts,
+      ordersTotal,
+      ordersPending: ordersReceived,
+      paidTotal,
+      paid30,
+      // Part des inscrits qui ont déjà payé au moins une commande : la seule
+      // mesure qui dise si la communication amène des CLIENTS ou des curieux.
+      conversionPct:
+        signupsTotal > 0
+          ? Number(((paidTotal / signupsTotal) * 100).toFixed(1))
+          : 0,
+    },
+    revenue: {
+      total: Number(revenueTotal.toFixed(2)),
+      last30: Number(revenue30.toFixed(2)),
+      marginTotal: Number((revenueTotal * MARGIN_SHARE).toFixed(2)),
+      margin30: Number((revenue30 * MARGIN_SHARE).toFixed(2)),
+      averageOrder:
+        paidTotal > 0 ? Number((revenueTotal / paidTotal).toFixed(2)) : 0,
+      currency: 'CHF',
+    },
+    byProduct,
+  })
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
@@ -377,6 +529,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (action === 'reset-password') return handleResetPassword(req, res)
   if (action === 'order-cancel') return handleOrderCancel(req, res)
   if (action === 'share-apk') return handleShareApk(req, res)
+  if (action === 'stats') return handleStats(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

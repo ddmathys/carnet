@@ -12,6 +12,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/models/generated_book_model.dart';
 import '../../core/models/order_model.dart';
 import '../../core/services/book_history_service.dart';
+import '../../core/services/analytics_service.dart';
 import '../../core/services/order_service.dart';
 import '../../core/services/photo_service.dart';
 
@@ -1033,6 +1034,34 @@ class _PayButton extends StatefulWidget {
 class _PayButtonState extends State<_PayButton> {
   bool _loading = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _reportIfPaid();
+  }
+
+  @override
+  void didUpdateWidget(covariant _PayButton old) {
+    super.didUpdateWidget(old);
+    // L'écran de suivi est alimenté par un flux Firestore : quand le webhook
+    // Stripe passe la commande à « payé », ce widget est reconstruit avec le
+    // nouveau statut. C'est notre seul signal côté app, le paiement lui-même
+    // s'étant déroulé dans le navigateur.
+    if (old.order.status != widget.order.status) _reportIfPaid();
+  }
+
+  /// Mesure : commande payée. `logOrderPaid` ne compte chaque commande qu'une
+  /// fois (garde-fou sur l'appareil), donc appeler cette méthode à chaque
+  /// reconstruction est sans danger.
+  void _reportIfPaid() {
+    if (widget.order.status != 'paid') return;
+    AnalyticsService.logOrderPaid(
+      orderId: widget.order.id,
+      productType: widget.order.productType,
+      value: widget.order.price,
+    );
+  }
+
   Future<void> _pay() async {
     setState(() => _loading = true);
     try {
@@ -1042,6 +1071,13 @@ class _PayButtonState extends State<_PayButton> {
         _snack('Paiement indisponible pour le moment.');
         return;
       }
+      // Mesure : la page de paiement s'ouvre vraiment (session Stripe obtenue).
+      // Logué ici et pas au clic : un clic qui échoue côté backend n'est pas un
+      // paiement entamé, et le compter faussserait le taux d'abandon.
+      AnalyticsService.logCheckoutStarted(
+        productType: widget.order.productType,
+        value: widget.order.price,
+      );
       final ok =
           await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       if (!ok && mounted) _snack('Impossible d\'ouvrir le paiement.');

@@ -8,11 +8,11 @@ class QuotaService {
   static const int photoLimit = 15000;
   static const int photoHardLimit = 15000;
 
-  // Vidéos souvenir : 300 clips de 3 min max chacun.
-  // Estimation stockage : 300 clips × jusqu'à 3 min (~27 Mo) ≈ 8 Go max
+  // Vidéos souvenir : 400 clips de 3 min max chacun.
+  // Estimation stockage : 400 clips × jusqu'à 3 min (~27 Mo) ≈ 11 Go max
   // par utilisateur — le plafond reste invisible tant qu'il n'est pas atteint
   // (voir _GaugeRow dans home_screen.dart).
-  static const int videoLimit = 300;
+  static const int videoLimit = 400;
   static const int videoDurationSec = 180; // 3 min
   // Pas de plafond propre par souvenir : borné par le quota global ci-dessus.
   static const int maxVideosPerMemory = videoLimit;

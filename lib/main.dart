@@ -12,6 +12,7 @@ import 'package:app_links/app_links.dart';
 import 'package:intl/date_symbol_data_local.dart';
 import 'package:image_picker_android/image_picker_android.dart';
 import 'package:image_picker_platform_interface/image_picker_platform_interface.dart';
+import 'core/services/analytics_service.dart';
 import 'core/services/app_messenger.dart';
 import 'core/services/shared_media_service.dart';
 import 'core/services/tag_service.dart';
@@ -40,6 +41,7 @@ import 'features/retro/retro_view_screen.dart';
 import 'features/retro/retro_data.dart';
 import 'features/orders/order_tracking_screen.dart';
 import 'features/orders/order_confirmation_screen.dart';
+import 'features/admin/admin_dashboard_screen.dart';
 import 'features/admin/admin_orders_screen.dart';
 
 void main() async {
@@ -67,6 +69,13 @@ void main() async {
     return true;
   };
 
+  // ── Mesure d'usage ────────────────────────────────────────────────────────
+  // Posé le 11.10.26 : il n'existait aucune mesure de l'entonnoir
+  // (installation → souvenir → aperçu de livre → paiement), donc aucun moyen
+  // de savoir quel canal de communication rapporte. Comme pour Crashlytics,
+  // rien n'est envoyé depuis un build de debug.
+  await AnalyticsService.init();
+
   await initializeDateFormatting('fr', null);
 
   // Android : bascule sur le Photo Picker système (Android 13+, rétroporté via
@@ -88,6 +97,9 @@ void main() async {
 
 final _router = GoRouter(
   initialLocation: '/',
+  // `screen_view` à chaque navigation, sans une ligne par écran : c'est ce qui
+  // dit quels écrans sont réellement vus et où le parcours s'arrête.
+  observers: [AnalyticsService.observer],
   routes: [
     GoRoute(path: '/', builder: (_, __) => const SplashScreen()),
     GoRoute(path: '/welcome', builder: (_, __) => const WelcomeScreen()),
@@ -269,6 +281,9 @@ final _router = GoRouter(
 
     // ── Admin ──
     GoRoute(path: '/admin/orders', builder: (_, __) => const AdminOrdersScreen()),
+    // Suivi (inscriptions, entonnoir, chiffre d'affaires) — voir
+    // admin_dashboard_screen.dart. Admin uniquement, comme /admin/orders.
+    GoRoute(path: '/admin/dashboard', builder: (_, __) => const AdminDashboardScreen()),
   ],
 );
 

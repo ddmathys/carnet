@@ -19,6 +19,7 @@ import '../../core/services/book_pdf_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/photo_service.dart';
 import '../../core/services/photo_focus_service.dart';
+import '../../core/services/analytics_service.dart';
 import '../../core/services/book_pricing.dart';
 import '../../core/services/pdf_service.dart';
 import 'pdf_viewer_screen.dart';
@@ -835,6 +836,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _generating = false;
         _showPreview = true;
       });
+
+      // Mesure : l'aperçu s'affiche POUR DE BON — on est après le garde-fou
+      // « échec massif de téléchargement » ci-dessus, donc ce n'est pas une
+      // simple demande d'aperçu mais un livre réellement montré. C'est la
+      // première vraie marque d'intention d'achat de l'entonnoir.
+      AnalyticsService.logBookPreviewOpened(
+        pageCount: gen.pageCount,
+        photoCount: gen.photoCount,
+        memoryCount: _selectedMemories.length,
+      );
 
       // Prévient AVANT l'achat plutôt que de laisser découvrir une photo
       // floue à réception — jamais bloquant, l'utilisateur reste libre de

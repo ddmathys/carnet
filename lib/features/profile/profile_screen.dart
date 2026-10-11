@@ -365,6 +365,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 onTap: () => context.push('/admin/orders'),
               ),
               const SizedBox(height: 8),
+              _ProfileTile(
+                icon: Icons.insights_outlined,
+                label: 'Suivi',
+                color: AppColors.sageDark,
+                onTap: () => context.push('/admin/dashboard'),
+              ),
+              const SizedBox(height: 8),
             ],
 
             // Partage de l'app : le lien d'installation, copiable d'un geste.

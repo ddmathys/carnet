@@ -18,6 +18,7 @@ import '../../core/services/media_upload_queue.dart';
 import '../../core/services/memory_activity_service.dart';
 import '../../core/services/memory_query_service.dart';
 import '../../core/services/photo_service.dart';
+import '../../core/services/analytics_service.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/shared_media_service.dart';
 import '../../core/services/space_service.dart';
@@ -1764,6 +1765,20 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
           'aiNarration': null,
           'createdAt': FieldValue.serverTimestamp(),
         });
+        // Mesure : souvenir CRÉÉ (jamais sur une modification — on est dans la
+        // seule branche qui fait naître un document). Les compteurs incluent
+        // les médias encore en vol (`stillPending…`) : ils appartiennent bien
+        // à ce souvenir, même si leur upload se termine après.
+        AnalyticsService.logMemoryCreated(
+          type: category,
+          photoCount: keptLegacyUrls.length +
+              allNewPhotoKeys.length +
+              stillPendingPhotos.length,
+          videoCount: allVideoKeys.length + stillPendingVideoPaths.length,
+          hasAudio: knownAudioKey != null ||
+              knownAudioUrl != null ||
+              _localAudioPath != null,
+        );
       }
 
       // Trace de dernière activité sur l'espace (best-effort : un collaborateur
