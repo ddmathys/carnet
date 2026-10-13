@@ -309,6 +309,13 @@ class OrderModel {
   /// Le client a confirmé avoir reçu son colis.
   bool get isDelivered => status == 'archived';
 
+  /// Commande réglée : tout statut au-delà de « received » (payée, expédiée,
+  /// archivée). Ne PAS tester `status == 'paid'` pour savoir si le client a
+  /// payé — une commande expédiée l'a été aussi, et l'écran de suivi lui
+  /// reproposait « Payer avec TWINT » (retour du 13.10.26, puzzle payé par
+  /// carte puis expédié).
+  bool get isPaid => status != 'received';
+
   bool get prodigiHasError => prodigiStatus == 'error';
   int get prodigiRetriesLeft => (3 - prodigiRetryCount).clamp(0, 3);
   bool get canRetryPrint => prodigiHasError && prodigiRetriesLeft > 0;

@@ -137,6 +137,39 @@ export async function sendOrderEmails(req: VercelRequest, res: VercelResponse) {
     payLine('📱', 'TWINT', payPhone),
   ].join('')
 
+  // Paiement en ligne actif (Stripe configuré) : le client paie dans l'app
+  // (TWINT ou carte) depuis le suivi de commande. Ne PAS lui envoyer en plus
+  // l'IBAN / le numéro TWINT manuel — il croirait devoir payer une seconde
+  // fois (retour du 13.10.26 sur une commande déjà réglée par carte).
+  const onlinePayment = Boolean(process.env.STRIPE_SECRET_KEY)
+  const paymentHtml = onlinePayment
+    ? `
+    <table width="100%" style="background:#fff7e6;border:1px solid #f0d9a0;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:20px 24px;">
+        <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
+        <p style="margin:0;font-size:14px;color:#2d2d2d;line-height:1.6;">
+          Le paiement de <strong>${price}</strong> se fait directement dans l'application
+          (TWINT ou carte), depuis le suivi de votre commande. Si c'est déjà fait,
+          vous n'avez rien d'autre à faire : la commande passera « Payée » automatiquement.
+        </p>
+      </td></tr>
+    </table>`
+    : `
+    <table width="100%" style="background:#fff7e6;border:1px solid #f0d9a0;border-radius:12px;margin-bottom:24px;">
+      <tr><td style="padding:20px 24px;">
+        <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
+        <p style="margin:0 0 14px;font-size:14px;color:#2d2d2d;line-height:1.6;">
+          Le paiement déclenche la fabrication de votre ${itemWord}. Merci de régler <strong>${price}</strong> :
+        </p>
+        ${paymentRows}
+        <p style="margin:14px 0 0;font-size:14px;color:#2d2d2d;">🔖 Référence à indiquer : <strong>${ref}</strong></p>
+        <p style="margin:14px 0 0;font-size:13px;color:#6b5d4f;line-height:1.6;">
+          Vous préférez un autre moyen de paiement ? Écrivez-nous à
+          <a href="mailto:${ADMIN_EMAIL}" style="color:#3A6648;">${ADMIN_EMAIL}</a> et on s'arrange ensemble.
+        </p>
+      </td></tr>
+    </table>`
+
   const adminHtml = wrap(`
     <p style="margin:0 0 20px;font-size:16px;color:#2d2d2d;">🎉 Nouvelle commande reçue</p>
     ${row('Commande', `<strong>${ref}</strong>`)}
@@ -164,20 +197,7 @@ export async function sendOrderEmails(req: VercelRequest, res: VercelResponse) {
         <p style="margin:0;font-size:15px;font-weight:bold;color:#3A6648;">${price}</p>
       </td></tr>
     </table>
-    <table width="100%" style="background:#fff7e6;border:1px solid #f0d9a0;border-radius:12px;margin-bottom:24px;">
-      <tr><td style="padding:20px 24px;">
-        <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
-        <p style="margin:0 0 14px;font-size:14px;color:#2d2d2d;line-height:1.6;">
-          Le paiement déclenche la fabrication de votre ${itemWord}. Merci de régler <strong>${price}</strong> :
-        </p>
-        ${paymentRows}
-        <p style="margin:14px 0 0;font-size:14px;color:#2d2d2d;">🔖 Référence à indiquer : <strong>${ref}</strong></p>
-        <p style="margin:14px 0 0;font-size:13px;color:#6b5d4f;line-height:1.6;">
-          Vous préférez un autre moyen de paiement ? Écrivez-nous à
-          <a href="mailto:${ADMIN_EMAIL}" style="color:#3A6648;">${ADMIN_EMAIL}</a> et on s'arrange ensemble.
-        </p>
-      </td></tr>
-    </table>
+    ${paymentHtml}
     <p style="margin:0;font-size:14px;color:#888;line-height:1.6;">
       Dès réception de votre paiement, nous lançons l'impression (délai estimé : 5 à 7 jours ouvrés).
       Vous pouvez suivre votre commande à tout moment dans l'application Carnet.

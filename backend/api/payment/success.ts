@@ -115,7 +115,9 @@ async function markOrderPaid(orderId: string, stripeSessionId: string) {
   const o = snap.data() as Record<string, any>
   // Idempotent : déjà marquée par le retour navigateur OU un webhook
   // précédent (Stripe peut renvoyer le même événement plusieurs fois).
-  if (o.status === 'paid') return
+  // Seule une commande encore « received » passe à « paid » : un événement
+  // rejoué après l'expédition ne doit pas faire reculer « shipped »/« archived ».
+  if (o.status !== 'received') return
   await ref.update({
     status: 'paid',
     paidAt: FieldValue.serverTimestamp(),

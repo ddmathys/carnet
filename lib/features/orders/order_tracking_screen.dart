@@ -1054,7 +1054,7 @@ class _PayButtonState extends State<_PayButton> {
   /// fois (garde-fou sur l'appareil), donc appeler cette méthode à chaque
   /// reconstruction est sans danger.
   void _reportIfPaid() {
-    if (widget.order.status != 'paid') return;
+    if (!widget.order.isPaid) return;
     AnalyticsService.logOrderPaid(
       orderId: widget.order.id,
       productType: widget.order.productType,
@@ -1093,7 +1093,7 @@ class _PayButtonState extends State<_PayButton> {
 
   @override
   Widget build(BuildContext context) {
-    if (widget.order.status == 'paid') {
+    if (widget.order.isPaid) {
       return Container(
         width: double.infinity,
         margin: const EdgeInsets.only(bottom: 12),
@@ -1155,7 +1155,7 @@ class _PayButtonState extends State<_PayButton> {
                   child: CircularProgressIndicator(
                       strokeWidth: 2, color: Colors.white))
               : const Icon(Icons.account_balance_wallet_outlined),
-          label: const Text('Payer avec TWINT'),
+          label: const Text('Payer (TWINT ou carte)'),
           style: ElevatedButton.styleFrom(
             backgroundColor: AppColors.amber,
             foregroundColor: AppColors.onAccent,
