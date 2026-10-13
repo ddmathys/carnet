@@ -148,8 +148,8 @@ export async function sendOrderEmails(req: VercelRequest, res: VercelResponse) {
       <tr><td style="padding:20px 24px;">
         <p style="margin:0 0 12px;font-size:13px;color:#a07a30;text-transform:uppercase;letter-spacing:1px;">Paiement</p>
         <p style="margin:0;font-size:14px;color:#2d2d2d;line-height:1.6;">
-          Le paiement de <strong>${price}</strong> se fait directement dans l'application
-          (TWINT ou carte), depuis le suivi de votre commande. Si c'est déjà fait,
+          Le paiement de <strong>${price}</strong> se fait directement dans l'application,
+          en ligne et sécurisé, depuis le suivi de votre commande. Si c'est déjà fait,
           vous n'avez rien d'autre à faire : la commande passera « Payée » automatiquement.
         </p>
       </td></tr>

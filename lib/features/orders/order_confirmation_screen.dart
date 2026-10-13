@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/config/app_config.dart';
+import '../../core/models/order_model.dart';
+import '../../core/services/order_service.dart';
 import '../../core/theme/app_theme.dart';
+import 'order_tracking_screen.dart' show OrderPayButton;
 
 class OrderConfirmationScreen extends StatelessWidget {
   final String orderId;
@@ -49,38 +53,69 @@ class OrderConfirmationScreen extends StatelessWidget {
                   textAlign: TextAlign.center,
                 ),
                 const SizedBox(height: 12),
-                const Text(
-                  'Le paiement déclenchera la commande de ton livre.',
-                  style: TextStyle(
-                      fontSize: 15, color: AppColors.textMedium, height: 1.6),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.amber.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: AppColors.amber.withOpacity(0.4)),
-                  ),
-                  child: const Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('🧾', style: TextStyle(fontSize: 18)),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          'L\'équipe Carnet te contactera rapidement pour les '
-                          'instructions de paiement.',
-                          style: TextStyle(
-                              fontSize: 13,
-                              color: AppColors.textDark,
-                              height: 1.5),
+                // Paiement en ligne actif : on propose de payer TOUT DE SUITE,
+                // au lieu de « l'équipe te contactera pour les instructions de
+                // paiement » (texte de l'époque du paiement par facture), qui
+                // laissait croire qu'il n'y avait rien à faire et cachait le
+                // bouton « Payer » dans le suivi de commande (retour 13.10.26).
+                if (AppConfig.paymentEnabled)
+                  StreamBuilder<OrderModel?>(
+                    stream: OrderService.orderStream(orderId),
+                    builder: (context, snap) {
+                      final order = snap.data;
+                      final paid = order?.isPaid ?? false;
+                      return Column(children: [
+                        Text(
+                          paid
+                              ? 'Paiement reçu, merci ! On lance la fabrication.'
+                              : 'Dernière étape : le paiement. La fabrication '
+                                  'démarre dès qu\'il est réglé.',
+                          style: const TextStyle(
+                              fontSize: 15,
+                              color: AppColors.textMedium,
+                              height: 1.6),
+                          textAlign: TextAlign.center,
                         ),
-                      ),
-                    ],
+                        const SizedBox(height: 20),
+                        if (order != null) OrderPayButton(order: order),
+                      ]);
+                    },
+                  )
+                else ...[
+                  const Text(
+                    'Le paiement déclenchera la fabrication de ta commande.',
+                    style: TextStyle(
+                        fontSize: 15, color: AppColors.textMedium, height: 1.6),
+                    textAlign: TextAlign.center,
                   ),
-                ),
+                  const SizedBox(height: 20),
+                  Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: AppColors.amber.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(12),
+                      border:
+                          Border.all(color: AppColors.amber.withOpacity(0.4)),
+                    ),
+                    child: const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('🧾', style: TextStyle(fontSize: 18)),
+                        SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            'L\'équipe Carnet te contactera rapidement pour les '
+                            'instructions de paiement.',
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: AppColors.textDark,
+                                height: 1.5),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 const SizedBox(height: 32),
                 OutlinedButton.icon(
                   onPressed: () => context.go('/orders/$orderId'),

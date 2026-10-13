@@ -259,6 +259,15 @@ class OrderService {
 
   // ── Streams ────────────────────────────────────────────────────────────────
 
+  /// Une commande en direct (null si supprimée) — l'écran de confirmation
+  /// bascule ainsi sur « Payé » dès que Stripe a confirmé.
+  static Stream<OrderModel?> orderStream(String orderId) => FirebaseFirestore
+      .instance
+      .collection('orders')
+      .doc(orderId)
+      .snapshots()
+      .map((d) => d.exists ? OrderModel.fromFirestore(d) : null);
+
   // Tri client-side — pas besoin d'index composite Firestore
   static Stream<List<OrderModel>> userOrdersStream(String userId) =>
       FirebaseFirestore.instance

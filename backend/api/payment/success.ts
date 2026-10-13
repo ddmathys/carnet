@@ -33,7 +33,8 @@ async function handleBrowserReturn(req: VercelRequest, res: VercelResponse) {
 
   if (req.query.canceled === '1') {
     return res.status(200).send(page('Paiement annulé',
-      '<p>Le paiement a été annulé. Tu peux réessayer depuis l’app.</p>'))
+      '<p>Le paiement a été annulé. Tu peux réessayer depuis l’app.</p>' +
+        backToApp()))
   }
 
   const sessionId = (req.query.session_id ?? '') as string
@@ -58,11 +59,13 @@ async function handleBrowserReturn(req: VercelRequest, res: VercelResponse) {
     if (paid && orderId) {
       await markOrderPaid(orderId, sessionId)
       return res.status(200).send(page('Paiement reçu 🎉',
-        '<p>Merci ! Ton paiement est confirmé. Tu peux revenir dans l’app.</p>'))
+        '<p>Merci ! Ton paiement est confirmé, on lance la fabrication.</p>' +
+          backToApp(orderId)))
     }
 
     return res.status(200).send(page('Paiement en attente',
-      '<p>Le paiement n’est pas encore confirmé. Si tu as payé, patiente un instant.</p>'))
+      '<p>Le paiement n’est pas encore confirmé. Si tu as payé, patiente un instant.</p>' +
+        backToApp(orderId)))
   } catch {
     return res.status(502).send(page('Erreur', '<p>Une erreur est survenue.</p>'))
   }
@@ -156,6 +159,17 @@ function verifyStripeSignature(rawBody: Buffer, header: string, secret: string):
   return expectedBuf.length === gotBuf.length && timingSafeEqual(expectedBuf, gotBuf)
 }
 
+// Bouton « Revenir dans Carnet » : le paiement se fait dans le navigateur, et
+// sans lien le client restait sur cette page sans savoir quoi faire.
+// carnet://orders?id=… est déclaré dans AndroidManifest.xml et routé par
+// _handleUri (lib/main.dart) vers le suivi de la commande.
+function backToApp(orderId?: string): string {
+  const href = orderId
+    ? `carnet://orders?id=${encodeURIComponent(orderId)}`
+    : 'carnet://orders'
+  return `<a class="btn" href="${escapeHtml(href)}">Revenir dans Carnet</a>`
+}
+
 function page(titleText: string, body: string): string {
   return `<!DOCTYPE html><html lang="fr"><head>
 <meta charset="UTF-8"/>
@@ -171,6 +185,8 @@ ${NOINDEX_META}
   .brand{color:#3A6648;font-style:italic;font-weight:bold;font-size:20px;margin-bottom:20px;}
   h1{font-size:22px;color:#2d2d2d;margin:0 0 12px;}
   p{color:#7a6a5a;}
+  .btn{display:inline-block;margin-top:16px;background:#3A6648;color:#fff;text-decoration:none;
+    padding:12px 22px;border-radius:12px;font-weight:600;}
 </style></head>
 <body><div class="card"><div class="brand">carnet</div><h1>${escapeHtml(titleText)}</h1>${body}</div></body></html>`
 }

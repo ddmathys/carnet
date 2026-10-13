@@ -43,6 +43,13 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="carnet" android:host="join"/>
             </intent-filter>
+            <!-- Retour après paiement Stripe : carnet://orders?id=… -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="carnet" android:host="orders"/>
+            </intent-filter>
 
             <!-- Partage entrant, UN média : depuis Google Photos ou la galerie,
                  « Partager » propose Carnet, qui ouvre le formulaire de souvenir

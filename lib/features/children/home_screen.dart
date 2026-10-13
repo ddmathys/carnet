@@ -1341,7 +1341,10 @@ class _ActivityCard extends StatelessWidget {
 // 'archived' = le client a confirmé avoir reçu son colis (voir
 // order_tracking_screen.dart, bouton "J'ai bien reçu ma commande") — sans ça,
 // une commande 'shipped' restait "en cours" indéfiniment, même reçue.
-const _activeOrderDoneStatuses = {'paid', 'archived'};
+// 'paid' n'en fait PAS partie : une commande payée est en fabrication, donc
+// bien « en cours » — elle disparaissait du bandeau entre le paiement et
+// l'expédition (constaté le 13.10.26).
+const _activeOrderDoneStatuses = {'archived'};
 
 /// Carte « N commande(s) en cours », affichée sous le titre « Souvenirs
 /// imprimés » (voir `_printedSection`) — regroupée là plutôt qu'en bandeau

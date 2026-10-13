@@ -341,7 +341,15 @@ class _BloomAppState extends State<BloomApp> {
   }
 
   // Gère carnet://join?token=… → rejoint le TAG partagé puis affiche ses souvenirs.
+  // Gère aussi carnet://orders?id=… (bouton « Revenir dans Carnet » de la page
+  // de retour Stripe, backend/api/payment/success.ts) → suivi de la commande.
   Future<void> _handleUri(Uri uri) async {
+    if (uri.scheme == 'carnet' && uri.host == 'orders') {
+      if (FirebaseAuth.instance.currentUser == null) return;
+      final id = uri.queryParameters['id'];
+      _router.go(id != null && id.isNotEmpty ? '/orders/$id' : '/orders');
+      return;
+    }
     final isJoin = uri.host == 'join' || uri.path.contains('join');
     if (!isJoin) return;
     final token = uri.queryParameters['token'];

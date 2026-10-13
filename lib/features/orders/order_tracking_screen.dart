@@ -162,7 +162,7 @@ class OrderDetailScreen extends StatelessWidget {
                 const SizedBox(height: 16),
                 _OrderDetailsCard(order: order),
                 const SizedBox(height: 16),
-                _PayButton(order: order),
+                OrderPayButton(order: order),
                 _PdfDownloadButton(order: order),
                 const SizedBox(height: 12),
                 _CancelOrderButton(order: order),
@@ -1023,15 +1023,15 @@ class _Row extends StatelessWidget {
       );
 }
 
-class _PayButton extends StatefulWidget {
+class OrderPayButton extends StatefulWidget {
   final OrderModel order;
-  const _PayButton({required this.order});
+  const OrderPayButton({super.key, required this.order});
 
   @override
-  State<_PayButton> createState() => _PayButtonState();
+  State<OrderPayButton> createState() => _OrderPayButtonState();
 }
 
-class _PayButtonState extends State<_PayButton> {
+class _OrderPayButtonState extends State<OrderPayButton> {
   bool _loading = false;
 
   @override
@@ -1041,7 +1041,7 @@ class _PayButtonState extends State<_PayButton> {
   }
 
   @override
-  void didUpdateWidget(covariant _PayButton old) {
+  void didUpdateWidget(covariant OrderPayButton old) {
     super.didUpdateWidget(old);
     // L'écran de suivi est alimenté par un flux Firestore : quand le webhook
     // Stripe passe la commande à « payé », ce widget est reconstruit avec le
@@ -1142,27 +1142,39 @@ class _PayButtonState extends State<_PayButton> {
         ),
       );
     }
+    // Le bouton ne nomme AUCUN moyen de paiement : la page Stripe affiche ceux
+    // que le compte a vraiment le droit d'encaisser (config du dashboard).
+    // « Payer avec TWINT » promettait un TWINT que Stripe n'a pas encore
+    // approuvé — la page ne proposait que la carte (retour du 13.10.26).
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
-      child: SizedBox(
-        width: double.infinity,
-        child: ElevatedButton.icon(
-          onPressed: _loading ? null : _pay,
-          icon: _loading
-              ? const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.account_balance_wallet_outlined),
-          label: const Text('Payer (TWINT ou carte)'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: AppColors.amber,
-            foregroundColor: AppColors.onAccent,
-            padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Column(children: [
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton.icon(
+            onPressed: _loading ? null : _pay,
+            icon: _loading
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.lock_outline),
+            label: const Text('Payer maintenant'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppColors.amber,
+              foregroundColor: AppColors.onAccent,
+              padding: const EdgeInsets.symmetric(vertical: 14),
+            ),
           ),
         ),
-      ),
+        const SizedBox(height: 6),
+        const Text(
+          'Paiement sécurisé par Stripe · la fabrication démarre dès réception',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12, color: AppColors.textMedium),
+        ),
+      ]),
     );
   }
 }
