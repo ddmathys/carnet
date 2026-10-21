@@ -46,6 +46,9 @@ class PdfPreviewViewer extends StatefulWidget {
   final int removedCount;
   final VoidCallback? onRestoreRemoved;
 
+  /// Commentaires déjà posés sur des photos (affichés dans le bandeau).
+  final int commentCount;
+
   const PdfPreviewViewer({
     super.key,
     required this.pdfBytes,
@@ -63,6 +66,7 @@ class PdfPreviewViewer extends StatefulWidget {
     this.updating = false,
     this.removedCount = 0,
     this.onRestoreRemoved,
+    this.commentCount = 0,
   });
 
   @override
@@ -249,15 +253,33 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
             ],
           ),
         ),
-        if (widget.onPhotoTap != null && !_grid)
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 0, 20, 6),
-            child: Text(
-              "Touche une photo : elle s'ouvre en grand pour y écrire un "
-              'commentaire (police, taille, couleur), la mettre en grand ou '
-              'la retirer du livre.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.softGray, fontSize: 12),
+        // Bandeau bien visible (21.10.26) : avant, une ligne gris clair que
+        // personne ne lisait — on ne savait pas qu'on pouvait commenter.
+        if (widget.onPhotoTap != null)
+          Container(
+            margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            decoration: BoxDecoration(
+              color: AppColors.sage.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.edit_note, color: AppColors.sageDark),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _grid
+                        ? 'Ouvre une page, puis touche une photo pour y écrire '
+                            'un commentaire.'
+                        : 'Touche une photo pour y écrire un commentaire, la '
+                            'mettre en grand ou la retirer.'
+                            '${widget.commentCount > 0 ? '\n${widget.commentCount} commentaire${widget.commentCount > 1 ? 's' : ''} · enregistré${widget.commentCount > 1 ? 's' : ''} dans le brouillon' : ''}',
+                    style: const TextStyle(
+                        color: AppColors.textDark, fontSize: 12.5, height: 1.35),
+                  ),
+                ),
+              ],
             ),
           ),
         Expanded(

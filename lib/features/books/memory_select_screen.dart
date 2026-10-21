@@ -13,6 +13,7 @@ import '../../core/services/video_service.dart';
 import '../../core/widgets/media_fullscreen_viewer.dart';
 import '../milestones/widgets/growth_multi_chart.dart';
 import '../tags/tag_picker_sheet.dart';
+import 'book_steps.dart';
 
 /// Choix des souvenirs qui composeront le livre.
 ///
@@ -198,6 +199,10 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
           ? const Center(child: CircularProgressIndicator())
           : Column(
               children: [
+                // Étape 1 du parcours livre (voir book_steps.dart). Masqué
+                // pour la correction d'une commande (admin), hors parcours.
+                if (widget.editOrderId == null)
+                  const BookStepHeader(index: BookStep.memories),
                 _buildFilterBar(),
                 _buildGrowthCards(),
                 if (visible.isNotEmpty)
@@ -273,7 +278,7 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
             ),
             child: Text(_selected.isEmpty
                 ? 'Sélectionne au moins un souvenir'
-                : 'Composer le livre (${_selected.length})'),
+                : 'Continuer · ${_selected.length} souvenir${_selected.length > 1 ? 's' : ''}'),
           ),
         ),
       ),
