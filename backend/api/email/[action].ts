@@ -3,8 +3,8 @@ import { sendOrderEmails } from '../../lib/email_order'
 import { sendShareInvitation } from '../../lib/email_share'
 
 // Les deux envois d'e-mails tiennent dans UNE seule fonction — le plan Vercel
-// Hobby plafonne à 12 fonctions par déploiement, et il en fallait une de libre
-// pour api/ai/[action].ts. Même motif que api/tag/[action].ts.
+// Hobby plafonne à 12 fonctions par déploiement. Même motif que
+// api/tag/[action].ts.
 //
 // Les chemins appelés par l'app sont INCHANGÉS (le segment dynamique les
 // capture), donc rien à modifier côté Flutter :

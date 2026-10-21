@@ -24,7 +24,11 @@ class MemorySelectScreen extends StatefulWidget {
   /// erreur (admin) plutôt qu'à en créer une nouvelle — transmis tel quel à
   /// BookGenerateScreen, qui change le comportement de l'étape finale.
   final String? editOrderId;
-  const MemorySelectScreen({super.key, this.initialTagId, this.editOrderId});
+
+  /// Parcours « Offrir ce livre » — transmis à BookGenerateScreen.
+  final bool gift;
+  const MemorySelectScreen(
+      {super.key, this.initialTagId, this.editOrderId, this.gift = false});
 
   @override
   State<MemorySelectScreen> createState() => _MemorySelectScreenState();
@@ -177,9 +181,9 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
       appBar: AppBar(
         backgroundColor: AppColors.background,
         elevation: 0,
-        title: const Text(
-          'Choisir les souvenirs',
-          style: TextStyle(
+        title: Text(
+          widget.gift ? 'Offrir un livre' : 'Choisir les souvenirs',
+          style: const TextStyle(
             fontFamily: 'Fraunces',
             fontWeight: FontWeight.w600,
             color: AppColors.textDark,
@@ -313,7 +317,8 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
     final tag = sole != null ? '&tag=${sole.id}' : '';
     final editOrder =
         widget.editOrderId != null ? '&editOrder=${widget.editOrderId}' : '';
-    context.push('/book/new?memories=$ids$tag$editOrder');
+    final gift = widget.gift ? '&gift=1' : '';
+    context.push('/book/new?memories=$ids$tag$editOrder$gift');
   }
 
   /// Filtre par tags — même sélecteur (Date / Lieu / Événement) que partout.

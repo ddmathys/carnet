@@ -200,6 +200,9 @@ class BookDraft {
   /// Souvenirs effectivement cochés dans le livre.
   final List<String> selectedMemoryIds;
   final String title;
+
+  /// Mot imprimé en première page (vide = pas de page).
+  final String dedication;
   final String? coverPhotoId;
   final String? backCoverPhotoId;
   final bool excludeCoverPhotoFromBook;
@@ -221,6 +224,7 @@ class BookDraft {
     this.requestedIds = const [],
     this.selectedMemoryIds = const [],
     this.title = '',
+    this.dedication = '',
     this.coverPhotoId,
     this.backCoverPhotoId,
     this.excludeCoverPhotoFromBook = false,
@@ -251,6 +255,7 @@ class BookDraft {
       requestedIds: List<String>.from(d['requestedIds'] ?? const []),
       selectedMemoryIds: List<String>.from(d['selectedMemoryIds'] ?? const []),
       title: d['title'] as String? ?? '',
+      dedication: d['dedication'] as String? ?? '',
       coverPhotoId: d['coverPhotoId'] as String?,
       backCoverPhotoId: d['backCoverPhotoId'] as String?,
       excludeCoverPhotoFromBook:
@@ -271,6 +276,7 @@ class BookDraft {
         'requestedIds': requestedIds,
         'selectedMemoryIds': selectedMemoryIds,
         'title': title,
+        'dedication': dedication,
         'coverPhotoId': coverPhotoId,
         'backCoverPhotoId': backCoverPhotoId,
         'excludeCoverPhotoFromBook': excludeCoverPhotoFromBook,

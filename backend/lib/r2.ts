@@ -3,6 +3,7 @@ import {
   PutObjectCommand,
   GetObjectCommand,
   DeleteObjectCommand,
+  ListObjectsV2Command,
 } from '@aws-sdk/client-s3'
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner'
 import { createHmac, timingSafeEqual } from 'crypto'
@@ -76,6 +77,24 @@ export async function presignGet(
 
 export async function deleteObject(key: string): Promise<void> {
   await s3.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }))
+}
+
+/** Poids total (octets) des objets sous [prefix]. Pagine par 1000. */
+export async function bytesUnderPrefix(prefix: string): Promise<number> {
+  let total = 0
+  let token: string | undefined
+  do {
+    const page = await s3.send(
+      new ListObjectsV2Command({
+        Bucket: bucket,
+        Prefix: prefix,
+        ContinuationToken: token,
+      })
+    )
+    for (const o of page.Contents ?? []) total += o.Size ?? 0
+    token = page.IsTruncated ? page.NextContinuationToken : undefined
+  } while (token)
+  return total
 }
 
 /** Écrit un objet sur R2 depuis le backend (migration des médias Firebase). */

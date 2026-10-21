@@ -401,6 +401,7 @@ async function handleDeleteAccount(req: VercelRequest, res: VercelResponse) {
 
     // 11. Compteurs et verrous techniques nominatifs.
     await db.collection('aiUsage').doc(uid).delete().catch(() => {})
+    await db.collection('storageUsage').doc(uid).delete().catch(() => {})
     if (email) {
       await db
         .collection('passwordResetThrottle')

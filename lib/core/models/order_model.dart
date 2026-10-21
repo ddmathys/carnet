@@ -124,6 +124,10 @@ class OrderModel {
   // 'book' (défaut, rétrocompatible avec toutes les commandes existantes)
   // ou 'poster'. Les champs `poster*` ci-dessous sont null pour un livre.
   final String productType;
+
+  /// Livre offert : l'adresse est celle du destinataire (ne sert pas à
+  /// pré-remplir les commandes suivantes du client).
+  final bool isGift;
   final String? posterSku;
   final String? posterSize; // 'A4' | 'A3' | 'A2' | 'A1' | 'A0'
   final String? posterOrientation; // 'portrait' | 'landscape'
@@ -215,6 +219,7 @@ class OrderModel {
     this.prodigiChargedCurrency,
     this.prodigiRetryCount = 0,
     this.productType = 'book',
+    this.isGift = false,
     this.posterSku,
     this.posterSize,
     this.posterOrientation,
@@ -390,6 +395,7 @@ class OrderModel {
       prodigiChargedCurrency: d['prodigiChargedCurrency'],
       prodigiRetryCount: (d['prodigiRetryCount'] as num?)?.toInt() ?? 0,
       productType: d['productType'] ?? 'book',
+      isGift: d['isGift'] == true,
       posterSku: d['posterSku'],
       posterSize: d['posterSize'],
       posterOrientation: d['posterOrientation'],
@@ -438,6 +444,7 @@ class OrderModel {
     'pageCount': pageCount,
     'pdfUrl': pdfUrl,
     'productType': productType,
+    if (isGift) 'isGift': true,
     'posterSku': posterSku,
     'posterSize': posterSize,
     'posterOrientation': posterOrientation,

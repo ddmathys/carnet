@@ -38,7 +38,7 @@
   <div class="card">
     <div class="brand">carnet.</div>
     <h1>Politique de confidentialité</h1>
-    <p class="updated">Dernière mise à jour : 1er octobre 2026</p>
+    <p class="updated">Dernière mise à jour : 21 octobre 2026</p>
 
     <p>
       Carnet est une application permettant de conserver des souvenirs de famille
@@ -59,7 +59,9 @@
       <li><strong>Compte</strong> : adresse email, et si vous utilisez la connexion Google, votre nom et votre photo de profil Google.</li>
       <li><strong>Contenu que vous ajoutez</strong> : photos, vidéos, mémos vocaux, titres, dates, lieux, tags, et — si vous les renseignez — des mesures de croissance (taille/poids) liées à un enfant.</li>
       <li><strong>Commande d'impression</strong> (livre, tirage ou puzzle) : nom, adresse postale — transmis à notre imprimeur uniquement pour l'expédition de votre commande. Le paiement est traité par Stripe : nous ne voyons ni ne conservons vos données de carte.</li>
-      <li><strong>Données techniques</strong> : l'application n'embarque ni traceur publicitaire ni outil de mesure d'audience. Les adresses IP apparaissent dans les journaux techniques de nos hébergeurs (Vercel, Google, Cloudflare), conservés par eux pour une durée courte et utilisés uniquement pour la sécurité et le diagnostic de pannes.</li>
+      <li><strong>Mesure d'usage</strong> : l'application utilise Google Analytics for Firebase pour compter quelques étapes clés (par exemple : souvenir créé, aperçu de livre ouvert, paiement lancé, commande payée), afin de savoir ce qui fonctionne et ce qui bloque. Ces mesures ne contiennent ni le contenu de vos souvenirs, ni vos photos, et ne servent à aucune publicité. Aucun traceur publicitaire n'est intégré.</li>
+      <li><strong>Rapports de plantage</strong> : en cas de plantage, Firebase Crashlytics nous transmet un rapport technique (modèle d'appareil, version d'Android, endroit du code en cause) pour corriger le problème. Il ne contient pas vos souvenirs.</li>
+      <li><strong>Journaux techniques</strong> : les adresses IP apparaissent dans les journaux de nos hébergeurs (Vercel, Google, Cloudflare), conservés par eux pour une durée courte et utilisés uniquement pour la sécurité et le diagnostic de pannes.</li>
     </ul>
     <p>
       L'écran de connexion affiche une photo d'illustration chargée depuis
@@ -91,6 +93,31 @@
       <li><strong>Prodigi</strong> (impression et expédition des livres, tirages et puzzles commandés — reçoit uniquement les données nécessaires à la fabrication et l'envoi de votre commande)</li>
       <li><strong>Unsplash</strong> (photo d'illustration de l'écran de connexion, voir ci-dessus)</li>
     </ul>
+
+    <h2>Aucune intelligence artificielle sur vos photos</h2>
+    <p>
+      Pour qu'un visage ne soit pas coupé quand une photo est recadrée dans
+      un livre, l'application repère où se trouvent les visages. Cette
+      analyse se fait <strong>uniquement sur votre téléphone</strong> : vos
+      photos ne sont envoyées à aucun service d'intelligence artificielle. Il
+      s'agit de détection (où est un visage), jamais de reconnaissance (qui
+      est cette personne) : aucune donnée biométrique n'est créée ni stockée.
+    </p>
+
+    <h2>Où sont vos données</h2>
+    <p>
+      La base de données (Google Firebase) est hébergée dans l'Union
+      européenne. Les photos, vidéos et mémos vocaux sont stockés chez
+      Cloudflare. Certains de nos prestataires (Google, Cloudflare, Vercel,
+      Resend, Stripe) sont des entreprises américaines, et vos données peuvent
+      donc être traitées aux États-Unis ; Prodigi, notre imprimeur, fabrique
+      vos commandes dans le laboratoire le plus proche de l'adresse de
+      livraison (Europe, Royaume-Uni ou États-Unis). Ces transferts sont
+      encadrés par les garanties contractuelles de ces prestataires (clauses
+      contractuelles types et, le cas échéant, Swiss-U.S. Data Privacy
+      Framework), conformément à la loi fédérale sur la protection des données
+      (nLPD).
+    </p>
     <p>
       Vos souvenirs ne sont visibles que par vous et par les personnes à qui
       vous donnez accès. Nous ne consultons pas le contenu de votre carnet,

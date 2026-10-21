@@ -2,17 +2,23 @@ import 'dart:math' show min;
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 /// Pas d'abonnement dans l'app : les limites ci-dessous sont larges et
-/// s'appliquent à tout le monde. Seule l'impression d'un livre est payante
-/// (voir `book_pricing.dart` / `order_service.dart`).
+/// s'appliquent à tout le monde. Seule l'impression est payante (voir
+/// `book_pricing.dart` / `order_service.dart`).
+///
+/// Relevées le 21.10.26 (15 000 photos / 400 vidéos / 150 vocaux) — l'objectif
+/// est qu'une famille ne les atteigne jamais. Au maximum : 30 000 photos
+/// (~0,6 Mo, soit ~18 Go) + 600 vidéos de 3 min (~27 Mo, soit ~16 Go), environ
+/// 35 Go, sous le plafond SERVEUR de 50 Go par compte
+/// (`backend/lib/storage_usage.ts`), qui ne sert que de filet : ces compteurs
+/// ne tournent que dans l'app.
 class QuotaService {
-  static const int photoLimit = 15000;
-  static const int photoHardLimit = 15000;
+  static const int photoLimit = 30000;
+  static const int photoHardLimit = 30000;
 
-  // Vidéos souvenir : 400 clips de 3 min max chacun.
-  // Estimation stockage : 400 clips × jusqu'à 3 min (~27 Mo) ≈ 11 Go max
-  // par utilisateur — le plafond reste invisible tant qu'il n'est pas atteint
-  // (voir _GaugeRow dans home_screen.dart).
-  static const int videoLimit = 400;
+  // Vidéos souvenir : 600 clips de 3 min max chacun. Le plafond reste
+  // invisible tant qu'il n'est pas atteint (voir _GaugeRow dans
+  // home_screen.dart).
+  static const int videoLimit = 600;
   static const int videoDurationSec = 180; // 3 min
   // Pas de plafond propre par souvenir : borné par le quota global ci-dessus.
   static const int maxVideosPerMemory = videoLimit;
@@ -20,7 +26,7 @@ class QuotaService {
   static Future<int> getMaxVideosPerMemory(String userId) async =>
       maxVideosPerMemory;
 
-  static const int audioLimit = 150;
+  static const int audioLimit = 500;
 
   static Future<int> getPhotoLimit(String userId) async => photoLimit;
 

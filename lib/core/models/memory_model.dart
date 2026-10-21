@@ -59,7 +59,7 @@ class MemoryModel {
   final int bookHorizontalDensity;
   final List<String> bookFeaturedMedia;
 
-  // Point de recadrage par photo, posé par `/api/ai/photo-focus` et jamais
+  // Point de recadrage par photo, posé par `PhotoFocusService` et jamais
   // recalculé pour une photo déjà analysée. Vide = recadrage par défaut
   // (centré, ou haut-centré pour une verticale) : un souvenir sans ce champ
   // rend EXACTEMENT comme avant.

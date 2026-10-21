@@ -164,6 +164,7 @@ final _router = GoRouter(
       builder: (_, state) => MemorySelectScreen(
         initialTagId: state.uri.queryParameters['tag'],
         editOrderId: state.uri.queryParameters['editOrder'],
+        gift: state.uri.queryParameters['gift'] == '1',
       ),
     ),
     GoRoute(
@@ -180,6 +181,7 @@ final _router = GoRouter(
           editOrderId: state.uri.queryParameters['editOrder'],
           queueMode: state.uri.queryParameters['queue'] == '1',
           draftId: state.uri.queryParameters['draft'],
+          gift: state.uri.queryParameters['gift'] == '1',
         );
       },
     ),

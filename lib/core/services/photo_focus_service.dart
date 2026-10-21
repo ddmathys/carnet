@@ -1,7 +1,16 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:http/http.dart' as http;
+import 'package:path_provider/path_provider.dart';
+
 import '../models/memory_model.dart';
 import '../models/photo_focus.dart';
-import 'backend_client.dart';
 import 'book_pdf_service.dart' show rawMediaIdsOf;
+import 'photo_service.dart';
 
 /// Points de recadrage des photos (voir [PhotoFocus]).
 ///
@@ -11,18 +20,26 @@ import 'book_pdf_service.dart' show rawMediaIdsOf;
 /// visage) — et coupait régulièrement un visage décentré, en pleine page, sur
 /// un objet imprimé que le client ne peut plus corriger.
 ///
-/// Le point est demandé UNE fois par photo à `/api/ai/photo-focus`, stocké sur
-/// le souvenir (`mediaFocus`) et relu ensuite : régénérer un livre, ou en faire
-/// un deuxième avec les mêmes photos, ne recoûte rien.
+/// Depuis le 21.10.26, le point est calculé SUR LE TÉLÉPHONE par la détection
+/// de visages de ML Kit — il l'était avant par Gemini, côté serveur. Aucune
+/// photo ne part donc chez un prestataire d'IA, et il ne s'agit que de
+/// DÉTECTION (où sont les visages) : aucune reconnaissance de qui que ce soit.
+///
+/// Le point trouvé est stocké sur le souvenir (`mediaFocus`) et relu ensuite :
+/// régénérer un livre, ou en faire un deuxième, ne refait pas l'analyse. Une
+/// photo sans visage n'est pas stockée — le moteur garde alors son cadrage par
+/// défaut — mais n'est pas réanalysée pendant la session.
 class PhotoFocusService {
-  /// Aligné sur `MAX_IDS_PER_CALL` du backend : au-delà, le téléchargement des
-  /// photos plus l'appel Gemini sortent du `maxDuration` de la fonction.
-  static const int _chunkSize = 8;
+  /// Téléchargements simultanés — même borne que le moteur du livre.
+  static const int _parallelDownloads = 6;
 
-  /// Lots en parallèle. Borné pour la même raison que le téléchargement des
-  /// photos du livre : tout lancer d'un coup fait timeouter une partie des
-  /// requêtes au hasard.
-  static const int _parallelChunks = 3;
+  /// Un visage plus petit que cette fraction du plus grand est un visage
+  /// d'arrière-plan (un passant, un portrait au mur) : il ne doit pas tirer
+  /// le cadrage vers lui.
+  static const double _minFaceRatio = 0.25;
+
+  /// Photos déjà analysées sans visage pendant cette session.
+  static final Set<String> _noSubject = {};
 
   /// Points déjà connus, lus sur les souvenirs — aucun appel réseau.
   static Map<String, PhotoFocus> known(List<MemoryModel> memories) {
@@ -39,69 +56,199 @@ class PhotoFocusService {
   /// indexé par identifiant stable de photo.
   ///
   /// [onlyIds] restreint l'analyse aux photos réellement imprimées (celles que
-  /// l'éditeur d'aperçu n'a pas retirées) : on ne paie pas pour une photo qui
-  /// ne sera pas dans le livre.
+  /// l'éditeur d'aperçu n'a pas retirées).
+  ///
+  /// [bytesCache] est le cache d'octets du livre, indexé par URL signée : les
+  /// photos téléchargées ici y sont déposées, et le moteur du PDF ne les
+  /// retélécharge pas.
   ///
   /// Tolérant à l'échec par construction : ce qui n'a pas pu être analysé
-  /// (réseau coupé, quota IA du jour atteint, photo illisible) est simplement
-  /// absent du résultat, et le moteur retombe sur son cadrage par défaut. Un
-  /// livre part donc toujours, jamais bloqué par l'IA.
+  /// (réseau coupé, photo illisible) est simplement absent du résultat, et le
+  /// moteur retombe sur son cadrage par défaut. Un livre part toujours.
   static Future<Map<String, PhotoFocus>> ensure(
     List<MemoryModel> memories, {
     Set<String>? onlyIds,
+    Map<String, Uint8List>? bytesCache,
     void Function(int done, int total)? onProgress,
   }) async {
     final result = known(memories);
+    final cache = bytesCache ?? <String, Uint8List>{};
 
-    // Lots à demander : (souvenir, jusqu'à _chunkSize photos non analysées).
-    final chunks = <({String memoryId, List<String> ids})>[];
+    // Photos à analyser, avec leur URL signée (même ordre que rawMediaIdsOf).
+    final todo = <({String memoryId, String id, String url})>[];
     for (final m in memories) {
-      final missing = <String>[];
-      for (final id in rawMediaIdsOf(m)) {
-        if (id.isEmpty) continue;
-        if (result.containsKey(id)) continue;
-        if (onlyIds != null && !onlyIds.contains(id)) continue;
-        missing.add(id);
+      final ids = rawMediaIdsOf(m);
+      if (!ids.any((id) => _needsAnalysis(id, result, onlyIds))) continue;
+      List<String> urls;
+      try {
+        urls = await PhotoService.resolvePhotoUrls(m);
+      } catch (_) {
+        continue;
       }
-      for (var i = 0; i < missing.length; i += _chunkSize) {
-        chunks.add((
-          memoryId: m.id,
-          ids: missing.sublist(
-              i,
-              i + _chunkSize > missing.length
-                  ? missing.length
-                  : i + _chunkSize),
-        ));
-      }
-    }
-    if (chunks.isEmpty) return result;
-
-    var done = 0;
-    final total = chunks.length;
-    onProgress?.call(0, total);
-
-    for (var i = 0; i < chunks.length; i += _parallelChunks) {
-      final slice = chunks.sublist(
-          i,
-          i + _parallelChunks > chunks.length
-              ? chunks.length
-              : i + _parallelChunks);
-      final answers = await Future.wait(slice.map(_fetchChunk));
-      for (final found in answers) {
-        for (final f in found) {
-          result[f.id] = f;
+      // URLs non alignées sur les identifiants (repli de resolvePhotoUrls) :
+      // on ne risque pas d'attribuer le point d'une photo à une autre.
+      if (urls.length != ids.length) continue;
+      for (var i = 0; i < ids.length; i++) {
+        if (_needsAnalysis(ids[i], result, onlyIds)) {
+          todo.add((memoryId: m.id, id: ids[i], url: urls[i]));
         }
       }
-      done += slice.length;
-      onProgress?.call(done, total);
+    }
+    if (todo.isEmpty) return result;
+
+    final detector = FaceDetector(
+      options: FaceDetectorOptions(
+        performanceMode: FaceDetectorMode.fast,
+        minFaceSize: 0.05,
+      ),
+    );
+    final tmpDir = await getTemporaryDirectory();
+    final fresh = <String, List<PhotoFocus>>{}; // memoryId -> points
+    var done = 0;
+    onProgress?.call(0, todo.length);
+
+    try {
+      for (var i = 0; i < todo.length; i += _parallelDownloads) {
+        final slice = todo.sublist(
+            i,
+            i + _parallelDownloads > todo.length
+                ? todo.length
+                : i + _parallelDownloads);
+        final bytesList = await Future.wait(
+            slice.map((t) => _bytesFor(t.url, cache)));
+        // ML Kit traite une image à la fois : la détection reste séquentielle.
+        for (var j = 0; j < slice.length; j++) {
+          final bytes = bytesList[j];
+          final t = slice[j];
+          if (bytes != null) {
+            final f = await _detect(detector, tmpDir, t.id, bytes);
+            if (f != null) {
+              result[t.id] = f;
+              (fresh[t.memoryId] ??= []).add(f);
+            } else {
+              _noSubject.add(t.id);
+            }
+          }
+          done++;
+        }
+        onProgress?.call(done, todo.length);
+      }
+    } finally {
+      await detector.close();
     }
 
+    await _persist(fresh);
     return result;
   }
 
-  /// Recopie les points trouvés sur les souvenirs en mémoire : les documents
-  /// chargés par l'écran datent d'AVANT l'écriture faite par le backend, et le
-  /// moteur de mise en page lit le point sur le souvenir (`focusFor`).
+  static bool _needsAnalysis(
+      String id, Map<String, PhotoFocus> known, Set<String>? onlyIds) {
+    if (id.isEmpty) return false;
+    if (known.containsKey(id) || _noSubject.contains(id)) return false;
+    return onlyIds == null || onlyIds.contains(id);
+  }
+
+  static Future<Uint8List?> _bytesFor(
+      String url, Map<String, Uint8List> cache) async {
+    final hit = cache[url];
+    if (hit != null) return hit;
+    try {
+      final resp = await http
+          .get(Uri.parse(url))
+          .timeout(const Duration(seconds: 20));
+      if (resp.statusCode != 200) return null;
+      cache[url] = resp.bodyBytes;
+      return resp.bodyBytes;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Centre du groupe de visages principaux, normalisé 0..1 — null si la
+  /// photo n'a aucun visage exploitable (ou n'a pas pu être lue).
+  static Future<PhotoFocus?> _detect(FaceDetector detector, Directory tmpDir,
+      String id, Uint8List bytes) async {
+    // ML Kit lit un fichier (un JPEG brut n'est pas accepté en mémoire).
+    final file = File(
+        '${tmpDir.path}/focus_${DateTime.now().microsecondsSinceEpoch}.jpg');
+    try {
+      final size = await _imageSize(bytes);
+      if (size == null) return null;
+      await file.writeAsBytes(bytes, flush: true);
+      final faces =
+          await detector.processImage(InputImage.fromFilePath(file.path));
+      return focusFromFaces(
+        [for (final f in faces) f.boundingBox],
+        width: size.width,
+        height: size.height,
+        id: id,
+      );
+    } catch (_) {
+      return null;
+    } finally {
+      try {
+        await file.delete();
+      } catch (_) {}
+    }
+  }
+
+  static Future<({double width, double height})?> _imageSize(
+      Uint8List bytes) async {
+    try {
+      final codec = await ui.instantiateImageCodec(bytes);
+      final frame = await codec.getNextFrame();
+      final size = (
+        width: frame.image.width.toDouble(),
+        height: frame.image.height.toDouble()
+      );
+      frame.image.dispose();
+      codec.dispose();
+      return size;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Point de recadrage à partir des rectangles de visages détectés : le
+  /// centre de l'enveloppe des visages principaux (les petits visages
+  /// d'arrière-plan sont ignorés, cf. [_minFaceRatio]). Public pour les tests.
+  static PhotoFocus? focusFromFaces(
+    List<ui.Rect> faces, {
+    required double width,
+    required double height,
+    required String id,
+  }) {
+    if (faces.isEmpty || width <= 0 || height <= 0) return null;
+    final biggest =
+        faces.map((r) => r.width * r.height).reduce((a, b) => a > b ? a : b);
+    final main =
+        faces.where((r) => r.width * r.height >= biggest * _minFaceRatio);
+    final box = main.reduce((a, b) => a.expandToInclude(b));
+    return PhotoFocus(
+      id: id,
+      x: (box.center.dx / width).clamp(0.0, 1.0),
+      y: (box.center.dy / height).clamp(0.0, 1.0),
+    );
+  }
+
+  /// Écrit les nouveaux points sur leurs souvenirs. Une écriture refusée (droits,
+  /// hors ligne) ne coûte que la réanalyse au prochain livre.
+  static Future<void> _persist(Map<String, List<PhotoFocus>> fresh) async {
+    for (final e in fresh.entries) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('memories')
+            .doc(e.key)
+            .update({
+          'mediaFocus':
+              FieldValue.arrayUnion([for (final f in e.value) f.toMap()]),
+        });
+      } catch (_) {}
+    }
+  }
+
+  /// Recopie les points trouvés sur les souvenirs en mémoire : le moteur de
+  /// mise en page lit le point sur le souvenir (`focusFor`).
   static List<MemoryModel> applied(
       List<MemoryModel> memories, Map<String, PhotoFocus> focus) {
     return [
@@ -114,18 +261,5 @@ class PhotoFocusService {
             if ((focus[id] ?? m.focusFor(id)) case final f?) f
         ])
     ];
-  }
-
-  static Future<List<PhotoFocus>> _fetchChunk(
-      ({String memoryId, List<String> ids}) chunk) async {
-    try {
-      final res = await BackendClient.postJson(
-        '/api/ai/photo-focus',
-        {'memoryId': chunk.memoryId, 'ids': chunk.ids},
-      );
-      return PhotoFocus.listFrom(res?['focus']);
-    } catch (_) {
-      return const [];
-    }
   }
 }

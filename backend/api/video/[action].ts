@@ -22,6 +22,7 @@ import {
   audioKeyOf,
 } from '../../lib/access'
 import { migrateLegacyMedia, migrateLegacyMediaAll } from '../../lib/migrate'
+import { reserveStorage, STORAGE_FULL_MESSAGE } from '../../lib/storage_usage'
 import { ADMIN_EMAIL } from '../../lib/resend'
 
 // La migration des médias travaille par lots : on lui laisse le temps d'un lot.
@@ -346,6 +347,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const size = requireSizeBytes(body.sizeBytes, MAX_VIDEO_BYTES, 'Vidéo')
     if ('error' in size) return res.status(400).json({ error: size.error })
     const sizeBytes = size.bytes
+    if (!(await reserveStorage(user.uid, sizeBytes)).ok) {
+      return res.status(413).json({ error: STORAGE_FULL_MESSAGE })
+    }
     // La clé inclut l'uid → l'utilisateur ne peut écrire/supprimer que ses objets.
     const contentType = 'video/mp4'
     const key = `videos/${user.uid}/${notebookId}/${randomUUID()}.mp4`
@@ -384,6 +388,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const size = requireSizeBytes(body.sizeBytes, MAX_PHOTO_BYTES, 'Photo')
     if ('error' in size) return res.status(400).json({ error: size.error })
     const sizeBytes = size.bytes
+    if (!(await reserveStorage(user.uid, sizeBytes)).ok) {
+      return res.status(413).json({ error: STORAGE_FULL_MESSAGE })
+    }
     const contentType = 'image/jpeg'
     const key = `photos/${user.uid}/${notebookId}/${randomUUID()}.jpg`
     try {
@@ -512,6 +519,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const size = requireSizeBytes(body.sizeBytes, MAX_AUDIO_BYTES, 'Mémo vocal')
     if ('error' in size) return res.status(400).json({ error: size.error })
     const sizeBytes = size.bytes
+    if (!(await reserveStorage(user.uid, sizeBytes)).ok) {
+      return res.status(413).json({ error: STORAGE_FULL_MESSAGE })
+    }
     const contentType = 'audio/mp4'
     const key = `audio/${user.uid}/${notebookId}/${randomUUID()}.m4a`
     try {

@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/book_draft.dart';
 import '../../core/models/puzzle_draft.dart';
@@ -17,6 +18,7 @@ import '../../core/models/memory_activity_model.dart';
 import '../../core/constants/milestone_types.dart';
 import '../../core/services/poster_pricing.dart';
 import '../../core/services/book_draft_service.dart';
+import '../../core/services/book_nudge.dart';
 import '../../core/services/puzzle_draft_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/memory_activity_service.dart';
@@ -223,6 +225,14 @@ class _HomeScreenState extends State<HomeScreen> {
             onAction: () => context.push('/memories'),
           ),
           SliverToBoxAdapter(child: _recentMemoriesGrid(context)),
+          // Suggestion de livre du moment (anniversaire, fin d'année,
+          // souvenirs partagés, palier atteint) — voir BookNudge.
+          SliverToBoxAdapter(
+            child: _BookNudgeCard(
+              memories: _memoriesById.values.toList(),
+              ownTags: _myTags,
+            ),
+          ),
         ],
 
         // Livres + tirages + puzzles, groupés sous UN seul module au lieu de
@@ -1405,6 +1415,186 @@ class _ActiveOrdersCard extends StatelessWidget {
 /// « Livre en cours » : brouillons de livres (sauvegarde automatique de
 /// l'écran « Générer le livre »), à reprendre là où on s'était arrêté.
 /// N'affiche rien s'il n'y en a pas.
+/// Carte « suggestion de livre » (BookNudge). Lit elle-même les tags qu'on me
+/// partage et ma dernière commande de livre ; « Plus tard » met la suggestion
+/// en sourdine sur CE téléphone (SharedPreferences).
+class _BookNudgeCard extends StatefulWidget {
+  final List<MemoryModel> memories;
+  final List<TagModel> ownTags;
+  const _BookNudgeCard({required this.memories, required this.ownTags});
+
+  @override
+  State<_BookNudgeCard> createState() => _BookNudgeCardState();
+}
+
+class _BookNudgeCardState extends State<_BookNudgeCard> {
+  static const _prefsKey = 'bookNudge.dismissed.v1';
+
+  StreamSubscription? _sharedSub;
+  StreamSubscription? _ordersSub;
+  List<TagModel> _sharedTags = const [];
+  DateTime? _lastBookOrderAt;
+  bool _ordersLoaded = false;
+  Set<String> _dismissed = {};
+
+  @override
+  void initState() {
+    super.initState();
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    _sharedSub = TagService.streamSharedWithMe().listen((tags) {
+      if (mounted) setState(() => _sharedTags = tags);
+    }, onError: (_) {});
+    if (uid != null) {
+      _ordersSub = OrderService.userOrdersStream(uid).listen((orders) {
+        final books = orders.where((o) => !o.isPoster && !o.isPuzzle);
+        if (mounted) {
+          setState(() {
+            _lastBookOrderAt = books.isEmpty ? null : books.first.createdAt;
+            _ordersLoaded = true;
+          });
+        }
+      }, onError: (_) {
+        if (mounted) setState(() => _ordersLoaded = true);
+      });
+    }
+    _loadDismissed();
+  }
+
+  Future<void> _loadDismissed() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final ids = prefs.getStringList(_prefsKey) ?? const [];
+      if (mounted) setState(() => _dismissed = ids.toSet());
+    } catch (_) {}
+  }
+
+  Future<void> _dismiss(String id) async {
+    setState(() => _dismissed = {..._dismissed, id});
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_prefsKey, _dismissed.toList());
+    } catch (_) {}
+  }
+
+  @override
+  void dispose() {
+    _sharedSub?.cancel();
+    _ordersSub?.cancel();
+    super.dispose();
+  }
+
+  void _open(BookNudge n, {required bool gift}) {
+    final params = [
+      if (n.tagId != null) 'tag=${n.tagId}',
+      if (gift) 'gift=1',
+    ];
+    context.push(
+        '/book/select${params.isEmpty ? '' : '?${params.join('&')}'}');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final uid = FirebaseAuth.instance.currentUser?.uid;
+    // Sans la dernière commande, le palier « depuis ton dernier livre »
+    // serait faux : on attend qu'elle soit connue.
+    if (uid == null || !_ordersLoaded) return const SizedBox.shrink();
+    final n = BookNudge.pick(
+      uid: uid,
+      memories: widget.memories,
+      ownTags: widget.ownTags,
+      sharedTags: _sharedTags,
+      now: DateTime.now(),
+      lastBookOrderAt: _lastBookOrderAt,
+      dismissed: _dismissed,
+    );
+    if (n == null) return const SizedBox.shrink();
+
+    final create = n.giftFirst
+        ? TextButton(
+            onPressed: () => _open(n, gift: false),
+            child: const Text('Pour moi',
+                style: TextStyle(color: AppColors.sageDark)),
+          )
+        : ElevatedButton(
+            onPressed: () => _open(n, gift: false),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.amber,
+                foregroundColor: AppColors.onAccent),
+            child: const Text('Créer le livre'),
+          );
+    final gift = n.giftFirst
+        ? ElevatedButton(
+            onPressed: () => _open(n, gift: true),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.amber,
+                foregroundColor: AppColors.onAccent),
+            child: const Text('🎁 L\'offrir'),
+          )
+        : TextButton(
+            onPressed: () => _open(n, gift: true),
+            child: const Text('🎁 L\'offrir',
+                style: TextStyle(color: AppColors.sageDark)),
+          );
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(22, 16, 22, 0),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(16, 14, 8, 8),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: AppColors.border, width: 0.5),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(n.emoji, style: const TextStyle(fontSize: 24)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(n.title,
+                          style: const TextStyle(
+                              fontFamily: 'Fraunces',
+                              fontSize: 16.5,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.textDark)),
+                      const SizedBox(height: 4),
+                      Text(n.body,
+                          style: const TextStyle(
+                              fontSize: 13,
+                              height: 1.4,
+                              color: AppColors.textMedium)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              alignment: WrapAlignment.end,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
+              children: [
+                TextButton(
+                  onPressed: () => _dismiss(n.id),
+                  child: const Text('Plus tard',
+                      style: TextStyle(color: AppColors.textMedium)),
+                ),
+                if (n.giftFirst) ...[create, gift] else ...[gift, create],
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _BookDraftsStrip extends StatelessWidget {
   const _BookDraftsStrip();
 

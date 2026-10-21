@@ -186,6 +186,9 @@ class BookPdfService {
     // uniquement à retrouver leur point de recadrage (`mediaFocus`).
     String? coverPhotoId,
     String? backCoverPhotoId,
+    // Mot d'accompagnement (livre offert, ou simple dédicace) : imprimé seul
+    // sur la page qui suit la couverture. Vide = pas de page.
+    String? dedication,
   }) async {
     final playfairR = pw.Font.ttf(
         await rootBundle.load('assets/fonts/PlayfairDisplay-Regular.ttf'));
@@ -563,8 +566,13 @@ class BookPdfService {
     // Couverture avant + contenu — SANS le dos, qui se pose toujours en toute
     // dernière page (voir plus bas) : c'est aussi le dénominateur affiché sur
     // chaque page ("3 / totalPages"), inchangé par l'ajout du dos.
-    final totalPages =
-        1 + photoPages.length + textOnlyMemories.length + growthChapters.length;
+    final dedicationText = dedication?.trim() ?? '';
+    final dedicationPages = dedicationText.isEmpty ? 0 : 1;
+    final totalPages = 1 +
+        dedicationPages +
+        photoPages.length +
+        textOnlyMemories.length +
+        growthChapters.length;
     // + 1 dos : avant ce +1, la dernière page du PDF (donc du DOS imprimé
     // chez Prodigi, cf. generateForNotebook) était soit une page de bourrage
     // crème, soit — pire, quand aucun bourrage n'était nécessaire — une vraie
@@ -605,9 +613,21 @@ class BookPdfService {
         ),
       ));
 
+      // 1b. Dédicace — juste après la couverture, seule sur sa page.
+      if (dedicationPages > 0) {
+        doc.addPage(pw.Page(
+          pageFormat: fmt,
+          build: (_) => _dedicationPage(
+            text: dedicationText,
+            cover: pdfCover,
+            pR: playfairR,
+          ),
+        ));
+      }
+
       // 2. Photo pages (templates V4/V3/V2/V1 verticales, H2/H1 horizontales)
       for (int p = 0; p < photoPages.length; p++) {
-        final pageNum = p + 2;
+        final pageNum = p + 2 + dedicationPages;
         final page = photoPages[p];
         doc.addPage(pw.Page(
           pageFormat: fmt,
@@ -627,7 +647,7 @@ class BookPdfService {
 
       // 3. Text-only pages for memories without photos
       for (int t = 0; t < textOnlyMemories.length; t++) {
-        final pageNum = 1 + photoPages.length + t + 1;
+        final pageNum = 1 + dedicationPages + photoPages.length + t + 1;
         doc.addPage(pw.Page(
           pageFormat: fmt,
           build: (_) => _textOnlyPage(
@@ -654,7 +674,12 @@ class BookPdfService {
             cover: pdfCover,
             pB: playfairB,
             dm: dmSans,
-            pageNum: 1 + photoPages.length + textOnlyMemories.length + g + 1,
+            pageNum: 1 +
+                dedicationPages +
+                photoPages.length +
+                textOnlyMemories.length +
+                g +
+                1,
             total: totalPages,
           ),
         ));
@@ -699,7 +724,8 @@ class BookPdfService {
     // Plan des photos (page, case) — l'éditeur d'aperçu s'en sert pour savoir
     // quelle photo a été touchée sur la page rastérisée. Mêmes rectangles que
     // le rendu (`_cellRects`), donc toujours alignés avec ce qui est affiché.
-    // Page 0 = couverture ; les pages photos suivent dans l'ordre.
+    // Page 0 = couverture, puis la dédicace éventuelle ; les pages photos
+    // suivent dans l'ordre.
     final slots = <BookPhotoSlot>[];
     for (var p = 0; p < photoPages.length; p++) {
       final page = photoPages[p];
@@ -708,7 +734,7 @@ class BookPdfService {
         final e = page.entries[i];
         final r = rects[i];
         slots.add(BookPhotoSlot(
-          pageIndex: p + 1,
+          pageIndex: p + 1 + dedicationPages,
           memoryId: e.memoryId,
           rawId: e.rawId,
           bytes: e.bytes,
@@ -1074,7 +1100,7 @@ class BookPdfService {
   ///
   /// Toutes les photos du livre sont posées en `BoxFit.cover` : l'image déborde
   /// de sa case et l'alignement choisit ce qu'on garde. Avec un point de
-  /// recadrage (`mediaFocus`, posé par /api/ai/photo-focus), on garde le sujet.
+  /// recadrage (`mediaFocus`, posé par PhotoFocusService), on garde le sujet.
   /// Sans, on retombe sur l'ancien pari — haut-centré pour une verticale (le
   /// visage est souvent en haut), centré pour une horizontale — pour qu'un
   /// livre dont les photos n'ont pas été analysées rende EXACTEMENT comme avant.
@@ -1813,6 +1839,39 @@ class BookPdfService {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // ── Dédicace ───────────────────────────────────────────────────────────────
+
+  static pw.Widget _dedicationPage({
+    required String text,
+    required PdfColor cover,
+    required pw.Font pR,
+  }) {
+    return pw.Container(
+      color: _cream,
+      padding: const pw.EdgeInsets.symmetric(horizontal: 90),
+      alignment: pw.Alignment.center,
+      child: pw.Column(
+        mainAxisSize: pw.MainAxisSize.min,
+        children: [
+          pw.Container(width: 28, height: 1, color: cover),
+          pw.SizedBox(height: 26),
+          pw.Text(
+            text,
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(
+              font: pR,
+              fontSize: 15,
+              color: _textDark,
+              lineSpacing: 7,
+            ),
+          ),
+          pw.SizedBox(height: 26),
+          pw.Container(width: 28, height: 1, color: cover),
+        ],
       ),
     );
   }

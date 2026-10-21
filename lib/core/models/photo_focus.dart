@@ -3,8 +3,8 @@
 /// du livre sont posées en `BoxFit.cover`, donc toutes rognées).
 ///
 /// Coordonnées normalisées : x de 0 (bord gauche) à 1 (bord droit), y de 0
-/// (bord haut) à 1 (bord bas). Posé par `/api/ai/photo-focus` (Gemini Flash),
-/// stocké sur le souvenir dans `mediaFocus` et jamais recalculé pour une photo
+/// (bord haut) à 1 (bord bas). Posé sur le téléphone par
+/// `PhotoFocusService` (détection de visages ML Kit), stocké sur le souvenir dans `mediaFocus` et jamais recalculé pour une photo
 /// déjà analysée.
 ///
 /// `id` est l'identifiant STABLE de la photo — clé R2, ou URL Firebase pour

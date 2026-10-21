@@ -67,6 +67,10 @@ class BookGenerateScreen extends StatefulWidget {
   /// l'aperçu (éditeur) s'ouvre directement. `memoryIds`/`tagId` ignorés.
   final String? draftId;
 
+  /// Parcours « Offrir ce livre » : l'option cadeau est cochée d'emblée
+  /// (adresse du destinataire + mot imprimé en première page).
+  final bool gift;
+
   const BookGenerateScreen({
     super.key,
     this.memoryIds = const [],
@@ -75,6 +79,7 @@ class BookGenerateScreen extends StatefulWidget {
     this.editOrderId,
     this.queueMode = false,
     this.draftId,
+    this.gift = false,
   });
 
   @override
@@ -209,6 +214,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   int _previewPhotoCount = 0;
 
   late final TextEditingController _titleCtrl;
+
+  // Mot imprimé seul sur la page qui suit la couverture (BookPdfService,
+  // `dedication`). Facultatif, mais mis en avant quand le livre est offert.
+  late final TextEditingController _dedicationCtrl;
+
+  // Livre offert : l'adresse saisie est celle du destinataire, et elle ne
+  // sert pas à pré-remplir les commandes suivantes (_loadLastAddress).
+  late bool _isGift;
 
   // ── Adresse livraison ──────────────────────────────────────────────────────
   final _addressKey = GlobalKey<FormState>();
@@ -457,6 +470,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   void initState() {
     super.initState();
     _titleCtrl = TextEditingController();
+    _dedicationCtrl = TextEditingController();
+    _isGift = widget.gift;
     _tagId = widget.tagId;
     _requestedIds = widget.memoryIds;
     _firstNameCtrl = TextEditingController();
@@ -479,6 +494,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   @override
   void dispose() {
     _titleCtrl.dispose();
+    _dedicationCtrl.dispose();
     _firstNameCtrl.dispose();
     _lastNameCtrl.dispose();
     _streetCtrl.dispose();
@@ -667,8 +683,11 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       final orders = await OrderService.userOrdersStream(user.uid)
           .first
           .timeout(const Duration(seconds: 10));
-      if (orders.isEmpty || !mounted) return;
-      final last = orders.first; // le plus récent (stream déjà trié)
+      // Une commande offerte porte l'adresse de quelqu'un d'autre : on prend
+      // la dernière commande pour soi (le stream est déjà trié).
+      final own = orders.where((o) => !o.isGift);
+      if (own.isEmpty || !mounted || _isGift) return;
+      final last = own.first;
       setState(() {
         _firstNameCtrl.text = last.firstName;
         _lastNameCtrl.text = last.lastName;
@@ -715,13 +734,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     return _keyByUrl[url] ?? url;
   }
 
-  /// Fait analyser le point de recadrage des photos du livre (le sujet à
-  /// garder quand la photo est rognée pour remplir sa case — toutes le sont).
+  /// Calcule sur le téléphone le point de recadrage des photos du livre (les
+  /// visages à garder quand la photo est rognée pour remplir sa case — toutes
+  /// le sont). Les photos téléchargées pour l'analyse restent dans
+  /// `_photoCache` : le PDF ne les retélécharge pas.
   ///
   /// Une photo n'est analysée QU'UNE fois : le point est stocké sur le
-  /// souvenir, donc l'aperçu retouché, la 2ᵉ génération et la commande ne
-  /// recoûtent rien. En cas d'échec (hors ligne, quota IA du jour atteint), on
-  /// ne bloque rien : le moteur retombe sur son cadrage par défaut.
+  /// souvenir. En cas d'échec (hors ligne, photo illisible), on ne bloque
+  /// rien : le moteur retombe sur son cadrage par défaut.
   Future<void> _ensureFocus() async {
     final ids = <String>{};
     for (final m in _selectedMemories) {
@@ -741,7 +761,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
     try {
       final focus =
-          await PhotoFocusService.ensure(_selectedMemories, onlyIds: ids);
+          await PhotoFocusService.ensure(_selectedMemories,
+              onlyIds: ids, bytesCache: _photoCache);
       if (!mounted) return;
       // `_selectedMemories` est un getter dérivé de `_memories` : c'est là
       // qu'on recopie les points pour que le moteur les voie.
@@ -778,6 +799,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       growthChildren: _includedGrowthChildren,
       coverPhotoId: _stableIdOf(_coverPhotoUrl),
       backCoverPhotoId: _stableIdOf(_backCoverPhotoUrl),
+      dedication: _dedicationCtrl.text,
     ).timeout(const Duration(seconds: 180));
   }
 
@@ -973,8 +995,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
       // 1. Générer le PDF en premier. Le recadrage est déjà connu si l'aperçu
       // est passé par là ; sinon (commande lancée directement depuis « Mes
-      // livres »), on l'analyse ici — et dans tous les cas on ne repaie pas
-      // une photo déjà analysée.
+      // livres »), on l'analyse ici — et une photo déjà analysée ne l'est pas
+      // une seconde fois.
       await _ensureFocus();
       final coverColor = Color(int.parse(
           'FF${_notebook!.coverColor.replaceAll('#', '')}',
@@ -997,6 +1019,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         growthChildren: _includedGrowthChildren,
         coverPhotoId: _stableIdOf(_coverPhotoUrl),
         backCoverPhotoId: _stableIdOf(_backCoverPhotoUrl),
+        dedication: _dedicationCtrl.text,
       );
       final pdfBytes = gen.bytes;
       final pageCount = gen.pageCount;
@@ -1080,6 +1103,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         memoryCount: _selectedMemories.length,
         pageCount: pageCount,
         pdfUrl: pdfUrl,
+        isGift: _isGift,
         additionalBooks: _extraBooks.isEmpty
             ? null
             : _extraBooks.map((b) => b.toMap()).toList(),
@@ -1505,6 +1529,29 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
             onChanged: (_) => setState(() {}),
           ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _dedicationCtrl,
+            textAlign: TextAlign.center,
+            textCapitalization: TextCapitalization.sentences,
+            minLines: 2,
+            maxLines: 5,
+            maxLength: 280,
+            style: const TextStyle(
+              fontFamily: 'PlayfairDisplay',
+              fontSize: 15,
+              color: AppColors.textDark,
+            ),
+            decoration: _bookFieldDecoration(
+              label: _isGift
+                  ? 'Ton mot, imprimé en première page'
+                  : 'Dédicace en première page (facultatif)',
+              icon: Icons.favorite_border,
+            ).copyWith(
+              hintText: 'Pour Mamie Jeanne, avec tout notre amour',
+            ),
+            onChanged: (_) => setState(() {}),
+          ),
 
           // ── Photo preview ──────────────────────────────────────────────
           _buildPhotoPreview(),
@@ -1690,6 +1737,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   String _draftSignature() => jsonEncode({
         'sel': (_selectedMemoryIds.toList()..sort()),
         'title': _titleCtrl.text.trim(),
+        'dedication': _dedicationCtrl.text.trim(),
         'cover': _photoIdOf(_coverPhotoUrl),
         'back': _photoIdOf(_backCoverPhotoUrl),
         'exCover': _excludeCoverPhotoFromBook,
@@ -1723,6 +1771,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         requestedIds: _requestedIds,
         selectedMemoryIds: _selectedMemoryIds.toList(),
         title: _titleCtrl.text.trim(),
+        dedication: _dedicationCtrl.text.trim(),
         coverPhotoId: idOf(_coverPhotoUrl),
         backCoverPhotoId: idOf(_backCoverPhotoUrl),
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
@@ -1800,6 +1849,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _resumedDraft = draft;
     });
     if (draft.title.isNotEmpty) _titleCtrl.text = draft.title;
+    if (draft.dedication.isNotEmpty) _dedicationCtrl.text = draft.dedication;
     // Couverture : clé R2 → URL signée, connue une fois les photos résolues.
     await resolving;
     if (!mounted) return;
@@ -2261,6 +2311,72 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Step 2: Commande ──────────────────────────────────────────────────────
 
+  /// « C'est un cadeau » : le colis part directement chez le destinataire.
+  /// Cocher vide l'adresse pré-remplie (la sienne) ; décocher la remet.
+  Widget _buildGiftToggle() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Text('🎁', style: TextStyle(fontSize: 20)),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Text('C\'est un cadeau',
+                    style: TextStyle(
+                        fontSize: 14.5,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.textDark)),
+              ),
+              Switch(
+                value: _isGift,
+                onChanged: _ordering
+                    ? null
+                    : (v) {
+                        setState(() => _isGift = v);
+                        if (v) {
+                          for (final c in [
+                            _firstNameCtrl,
+                            _lastNameCtrl,
+                            _streetCtrl,
+                            _cityCtrl,
+                            _npaCtrl,
+                          ]) {
+                            c.clear();
+                          }
+                        } else {
+                          _loadLastAddress();
+                        }
+                      },
+              ),
+            ],
+          ),
+          if (_isGift)
+            Padding(
+              padding: const EdgeInsets.only(right: 8, bottom: 8),
+              child: Text(
+                _dedicationCtrl.text.trim().isEmpty
+                    ? 'Le livre part directement chez la personne. Astuce : '
+                        'reviens à l\'aperçu pour ajouter un mot en première '
+                        'page.'
+                    : 'Le livre part directement chez la personne, avec ton '
+                        'mot en première page.',
+                style: const TextStyle(
+                    fontSize: 12.5, color: AppColors.textMedium, height: 1.4),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildOrderStep() {
     // Le panier (autres livres + bouton "en ajouter un") n'a de sens que pour
     // la commande racine — ni en queueMode (un livre en file d'attente ne
@@ -2379,8 +2495,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Adresse de livraison',
-                        style: TextStyle(
+                    if (widget.editOrderId == null) ...[
+                      _buildGiftToggle(),
+                      const SizedBox(height: 16),
+                    ],
+                    Text(
+                        _isGift
+                            ? 'Adresse du destinataire'
+                            : 'Adresse de livraison',
+                        style: const TextStyle(
                             fontFamily: 'PlayfairDisplay',
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
