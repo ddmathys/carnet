@@ -210,6 +210,10 @@ class BookDraft {
 
   /// Photos retirées du livre depuis l'éditeur (le souvenir n'est pas touché).
   final List<String> excludedPhotoIds;
+
+  /// Photos en pleine page dans CE livre (22.10.26). null = brouillon plus
+  /// ancien : on repart des réglages des souvenirs (`bookFeaturedMedia`).
+  final List<String>? featuredPhotoIds;
   final Map<String, BookPhotoText> photoTexts;
   final int pageCount;
   final DateTime updatedAt;
@@ -230,6 +234,7 @@ class BookDraft {
     this.excludeCoverPhotoFromBook = false,
     this.excludedGrowthChildIds = const [],
     this.excludedPhotoIds = const [],
+    this.featuredPhotoIds,
     this.photoTexts = const {},
     this.pageCount = 0,
     required this.updatedAt,
@@ -263,6 +268,9 @@ class BookDraft {
       excludedGrowthChildIds:
           List<String>.from(d['excludedGrowthChildIds'] ?? const []),
       excludedPhotoIds: List<String>.from(d['excludedPhotoIds'] ?? const []),
+      featuredPhotoIds: d['featuredPhotoIds'] == null
+          ? null
+          : List<String>.from(d['featuredPhotoIds'] as List),
       photoTexts: texts,
       pageCount: (d['pageCount'] as num?)?.toInt() ?? 0,
       updatedAt: (d['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
@@ -282,6 +290,7 @@ class BookDraft {
         'excludeCoverPhotoFromBook': excludeCoverPhotoFromBook,
         'excludedGrowthChildIds': excludedGrowthChildIds,
         'excludedPhotoIds': excludedPhotoIds,
+        if (featuredPhotoIds != null) 'featuredPhotoIds': featuredPhotoIds,
         'photoTexts': [
           for (final e in photoTexts.entries) e.value.toMap(e.key),
         ],

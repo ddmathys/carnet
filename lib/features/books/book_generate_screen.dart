@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
+import 'package:http/http.dart' as http;
 import '../../core/theme/app_theme.dart';
 import '../../core/config/app_config.dart';
 import '../../core/models/book_draft.dart';
@@ -25,7 +27,7 @@ import '../../core/services/pdf_service.dart';
 import 'pdf_viewer_screen.dart';
 import 'pdf_preview_viewer.dart';
 import 'memory_selection_sheet.dart';
-import 'featured_photos.dart';
+import 'book_photos_step.dart';
 import 'photo_edit_screen.dart';
 import '../memories/widgets/growth_chart_card.dart';
 import 'book_generate_widgets.dart';
@@ -139,12 +141,19 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   // ── State ──────────────────────────────────────────────────────────────────
   // Étape courante du parcours (indices globaux de BookStep : l'étape
   // « Souvenirs » est l'écran précédent, MemorySelectScreen).
-  int _step = BookStep.featured;
+  int _step = BookStep.photos;
   // Étape la plus avancée déjà atteinte : ses puces sont touchables.
-  int _maxStep = BookStep.featured;
-  // Première étape de CET écran : « Photos en grand », ou « Format » quand
-  // on arrive pour commander un livre déjà prêt (startAtOrder / editOrderId).
-  int _firstStep = BookStep.featured;
+  int _maxStep = BookStep.photos;
+  // Première étape de CET écran : « Photos », ou « Format » quand on arrive
+  // pour commander un livre déjà prêt (startAtOrder / editOrderId).
+  int _firstStep = BookStep.photos;
+  // Étape « Photos » : photos des souvenirs choisis (chargées une fois par
+  // sélection, voir _ensurePhotoGroups) et options déjà validées.
+  List<BookPhotoGroup>? _photoGroups;
+  String? _photoGroupsKey;
+  final Set<BookPhotoOption> _validatedPhotoOptions = {};
+  // Dédicace activée à l'étape « Titre & dédicace » (facultative).
+  bool _dedicationOn = false;
   bool get _isAdmin =>
       FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
 
@@ -277,8 +286,29 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     'Presque prêt…',
   ];
 
-  List<MemoryModel> get _selectedMemories =>
-      _memories.where((m) => _selectedMemoryIds.contains(m.id)).toList();
+  // Photos « en grand » de CE livre (22.10.26) : au départ celles réglées
+  // sur les souvenirs (`bookFeaturedMedia`), ensuite propres au livre — les
+  // changer ici ne touche plus les souvenirs, comme le retrait d'une photo.
+  // null tant que les souvenirs ne sont pas chargés.
+  Set<String>? _featuredPhotoIds;
+
+  /// Le souvenir tel que CE livre le met en page (photos en grand du livre).
+  MemoryModel _withBookFeatured(MemoryModel m) {
+    final f = _featuredPhotoIds;
+    if (f == null) return m;
+    return m.copyWith(
+        bookFeaturedMedia: rawMediaIdsOf(m).where(f.contains).toList());
+  }
+
+  List<MemoryModel> get _selectedMemories => _memories
+      .where((m) => _selectedMemoryIds.contains(m.id))
+      .map(_withBookFeatured)
+      .toList();
+
+  void _toggleFeaturedPhoto(String id) => setState(() {
+        final f = _featuredPhotoIds ??= {};
+        if (!f.remove(id)) f.add(id);
+      });
 
   // ── QR de couverture ───────────────────────────────────────────────────────
   // Un seul code sur la couverture, qui rassemble les vidéos de TOUS les
@@ -405,25 +435,17 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     return result;
   }
 
-  // Applique la suggestion en pré-remplissant bookFeaturedMedia du souvenir
-  // choisi — seulement si ce souvenir n'a ENCORE aucune photo "en grand"
-  // définie, pour ne jamais écraser un réglage déjà fait par l'utilisateur
-  // (ici ou dans un livre précédent). Best-effort, silencieux en cas d'échec.
-  Future<void> _applyMilestoneSuggestions() async {
-    for (final s in _milestoneSuggestions) {
-      if (s.memory.bookFeaturedMedia.isNotEmpty) continue;
-      try {
-        final updated = s.memory.copyWith(bookFeaturedMedia: [s.rawId]);
-        await FirebaseFirestore.instance
-            .collection('memories')
-            .doc(s.memory.id)
-            .update({'bookFeaturedMedia': [s.rawId]});
-        if (mounted) _applyMemoryLayoutUpdate(updated);
-      } catch (_) {
-        // Pas grave : l'utilisateur peut toujours choisir manuellement via
-        // le réglage de mise en page du souvenir.
-      }
-    }
+  // Applique la suggestion en mettant la photo en grand DANS CE LIVRE —
+  // seulement si ce souvenir n'a encore aucune photo en grand, pour ne
+  // jamais écraser un choix déjà fait.
+  void _applyMilestoneSuggestions() {
+    final f = _featuredPhotoIds;
+    if (f == null) return;
+    final add = [
+      for (final s in _milestoneSuggestions)
+        if (!rawMediaIdsOf(s.memory).any(f.contains)) s.rawId,
+    ];
+    if (add.isNotEmpty) setState(() => f.addAll(add));
   }
 
   // Nombre de pages : on privilégie le VRAI compte de l'aperçu (déjà généré
@@ -494,6 +516,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     _titleCtrl = TextEditingController();
     _dedicationCtrl = TextEditingController();
     _isGift = widget.gift;
+    _dedicationOn = widget.gift;
     _tagId = widget.tagId;
     _requestedIds = widget.memoryIds;
     _firstNameCtrl = TextEditingController();
@@ -650,6 +673,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _memories = allMemories;
         _allTags = tags;
         _selectedMemoryIds = allMemories.map((m) => m.id).toSet();
+        _featuredPhotoIds = {
+          for (final m in allMemories) ...m.bookFeaturedMedia,
+        };
         _coverPhotoUrl = defaultCover;
         _loadError = null;
         // Commande depuis « Mes livres », ou renvoi admin après erreur : on
@@ -1408,9 +1434,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
             Expanded(
               child: switch (_step) {
-                BookStep.featured => _buildFeaturedStep(),
+                BookStep.photos => _buildPhotosStep(),
                 BookStep.title => _buildTitleStep(),
-                BookStep.cover => _buildCoverStep(),
+                BookStep.comments => _buildCommentsStep(),
                 BookStep.preview => _buildPreviewStepView(),
                 BookStep.format => _buildFormatStep(),
                 _ => _buildOrderStep(),
@@ -1444,7 +1470,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   /// Étape validée : on avance, et l'aperçu prend de l'avance en arrière-plan.
   void _stepNext() {
-    if (_step == BookStep.cover) {
+    if (_step == BookStep.comments) {
       _goToPreview();
       return;
     }
@@ -1466,44 +1492,32 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     return _draftId != null ? 'Brouillon enregistré automatiquement' : null;
   }
 
-  /// Barre fixe en bas des étapes de composition : l'aperçu est à un geste à
-  /// tout moment, et « Continuer » valide l'étape.
+  /// Barre fixe en bas des étapes de composition : « Continuer » valide
+  /// l'étape. Pas d'aperçu avant l'étape Aperçu (22.10.26) : il se prépare
+  /// en arrière-plan.
   Widget _buildStepActions() {
+    // Étapes facultatives (Photos, Commentaires) : tant que rien n'y est
+    // fait, le bouton dit clairement qu'on peut passer.
     final label = switch (_step) {
-      BookStep.featured => 'Continuer · titre et dédicace',
-      BookStep.title => 'Continuer · couverture',
-      _ => 'Voir l\'aperçu du livre',
+      BookStep.photos => _validatedPhotoOptions.isEmpty
+          ? 'Passer cette étape · titre et dédicace'
+          : 'Continuer · titre et dédicace',
+      BookStep.title => 'Continuer · commentaires',
+      _ => _photoTexts.isEmpty
+          ? 'Passer cette étape · voir l\'aperçu'
+          : 'Voir l\'aperçu du livre',
     };
     final empty = _selectedMemories.isEmpty;
     return SafeArea(
       top: false,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 8, 20, 14),
-        child: Row(
-          children: [
-            if (_step != BookStep.cover) ...[
-              OutlinedButton.icon(
-                onPressed: empty ? null : _goToPreview,
-                icon: const Icon(Icons.menu_book_outlined, size: 18),
-                label: const Text('Aperçu'),
-                style: OutlinedButton.styleFrom(
-                  minimumSize: const Size(0, 50),
-                  side: const BorderSide(color: AppColors.border),
-                  foregroundColor: AppColors.sageDark,
-                ),
-              ),
-              const SizedBox(width: 10),
-            ],
-            Expanded(
-              child: ElevatedButton(
-                onPressed: empty ? null : _stepNext,
-                style: ElevatedButton.styleFrom(
-                  minimumSize: const Size.fromHeight(50),
-                ),
-                child: Text(label, textAlign: TextAlign.center),
-              ),
-            ),
-          ],
+        child: ElevatedButton(
+          onPressed: empty ? null : _stepNext,
+          style: ElevatedButton.styleFrom(
+            minimumSize: const Size.fromHeight(50),
+          ),
+          child: Text(label, textAlign: TextAlign.center),
         ),
       ),
     );
@@ -1563,41 +1577,257 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     );
   }
 
-  // ── Étape 2 : photos en grand ──────────────────────────────────────────────
+  // ── Étape 2 : photos (en grand, à retirer, couverture) ─────────────────────
 
-  Widget _buildFeaturedStep() {
-    final selKey = (_selectedMemoryIds.toList()..sort()).join(',');
-    return FeaturedPhotosPanel(
-      key: ValueKey(selKey),
-      memories: _selectedMemories,
-      onMemoryUpdated: _applyMemoryLayoutUpdate,
-      header: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 6, 20, 8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            if (_resumedDraft != null) _resumedDraftBanner(),
-            _stepIntro('Les photos en grand',
-                'Celles que tu aimes le plus peuvent occuper une page entière.'),
-            const SizedBox(height: 12),
-            _selectionSummaryCard(),
-            for (final s in _milestoneSuggestions)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Row(
-                  children: [
-                    const Icon(Icons.cake_outlined,
-                        size: 18, color: AppColors.sage),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text('Photo « ${s.label} » déjà mise en avant',
-                          style: const TextStyle(
-                              color: AppColors.textDark, fontSize: 13)),
-                    ),
-                  ],
+  /// Charge, une fois par sélection de souvenirs, les photos qu'affichent
+  /// les étapes Photos et Commentaires.
+  void _ensurePhotoGroups() {
+    final key = (_selectedMemoryIds.toList()..sort()).join(',');
+    if (_photoGroupsKey == key) return;
+    _photoGroupsKey = key;
+    _photoGroups = null;
+    loadBookPhotoGroups(_selectedMemories).then((groups) {
+      if (!mounted || _photoGroupsKey != key) return;
+      setState(() => _photoGroups = groups);
+    });
+  }
+
+  /// Groupes chargés, avec la version À JOUR de chaque souvenir (les photos
+  /// en grand changent pendant le parcours).
+  List<BookPhotoGroup> get _currentPhotoGroups => [
+        for (final g in _photoGroups ?? const <BookPhotoGroup>[])
+          BookPhotoGroup(
+              _memories.firstWhere((m) => m.id == g.memory.id,
+                  orElse: () => g.memory),
+              g.photos),
+      ];
+
+  int get _featuredCount {
+    var n = 0;
+    for (final m in _selectedMemories) {
+      n += m.bookFeaturedMedia
+          .where((id) => !_excludedPhotoIds.contains(id))
+          .length;
+    }
+    return n;
+  }
+
+  /// URL d'affichage d'une photo à partir de son identifiant stable — celle
+  /// déjà résolue par _resolvePhotos quand on la connaît.
+  String? _urlOfPhotoId(String? id) {
+    if (id == null) return null;
+    for (final e in _keyByUrl.entries) {
+      if (e.value == id) return e.key;
+    }
+    return _allPhotoUrls.contains(id) ? id : null;
+  }
+
+  /// Couverture (ou dos) choisie dans l'option Couverture, par identifiant.
+  /// Photo pas encore résolue ici : on garde l'URL de l'écran de choix et on
+  /// retient sa clé, pour que le brouillon et la commande stockent la clé.
+  void _setCoverPhoto(String? id, String? url, {required bool back}) {
+    String? resolved;
+    if (id != null) {
+      resolved = _urlOfPhotoId(id);
+      if (resolved == null && url != null) {
+        resolved = url;
+        if (url != id) _keyByUrl[url] = id;
+      }
+    }
+    setState(() {
+      if (back) {
+        _backCoverPhotoUrl = resolved;
+      } else {
+        _coverPhotoUrl = resolved;
+      }
+    });
+  }
+
+  BookPhotoChoices get _photoChoices => BookPhotoChoices(
+        excluded: () => _excludedPhotoIds,
+        featured: () => _featuredPhotoIds ?? const <String>{},
+        onToggleFeatured: _toggleFeaturedPhoto,
+        onToggleExcluded: (id) => setState(() {
+          if (!_excludedPhotoIds.remove(id)) _excludedPhotoIds.add(id);
+        }),
+        coverId: () => _stableIdOf(_coverPhotoUrl),
+        backCoverId: () => _stableIdOf(_backCoverPhotoUrl),
+        onSetCover: (id, url) => _setCoverPhoto(id, url, back: false),
+        onSetBackCover: (id, url) => _setCoverPhoto(id, url, back: true),
+        excludeCoverFromBook: () => _excludeCoverPhotoFromBook,
+        onExcludeCoverFromBook: (v) =>
+            setState(() => _excludeCoverPhotoFromBook = v),
+      );
+
+  /// Ouvre une option en plein écran ; « Valider » la coche sur l'étape.
+  Future<void> _openPhotoOption(BookPhotoOption option) async {
+    final groups = _currentPhotoGroups;
+    if (groups.isEmpty) return;
+    final ok = await BookPhotoPickScreen.open(context,
+        option: option, groups: groups, choices: _photoChoices);
+    if (!mounted) return;
+    setState(() {
+      if (ok) _validatedPhotoOptions.add(option);
+    });
+    _prefetch();
+  }
+
+  Widget _buildPhotosStep() {
+    _ensurePhotoGroups();
+    final groups = _photoGroups;
+    final featured = _featuredCount;
+    final removed = _excludedPhotoIds.length;
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+      children: [
+        if (_resumedDraft != null) _resumedDraftBanner(),
+        _stepIntro(
+            'Les photos',
+            'Trois choix, dans l\'ordre que tu veux : touche une option, '
+                'fais ta sélection, puis valide. Tout est facultatif.'),
+        const SizedBox(height: 12),
+        _selectionSummaryCard(),
+        for (final s in _milestoneSuggestions)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.cake_outlined,
+                    size: 18, color: AppColors.sage),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text('Photo « ${s.label} » déjà mise en grand',
+                      style: const TextStyle(
+                          color: AppColors.textDark, fontSize: 13)),
                 ),
-              ),
-          ],
+              ],
+            ),
+          ),
+        const SizedBox(height: 18),
+        if (groups == null)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(child: CircularProgressIndicator()),
+          )
+        else if (groups.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(32),
+            child: Center(
+              child: Text('Aucune photo dans les souvenirs choisis.',
+                  style: TextStyle(color: AppColors.textMedium)),
+            ),
+          )
+        else ...[
+          _photoOptionCard(
+            option: BookPhotoOption.remove,
+            number: 1,
+            icon: Icons.remove_circle_outline,
+            title: 'Photos à retirer',
+            subtitle: removed == 0
+                ? 'Celles que tu ne veux pas dans le livre'
+                : removed == 1
+                    ? '1 photo retirée'
+                    : '$removed photos retirées',
+          ),
+          _photoOptionCard(
+            option: BookPhotoOption.featured,
+            number: 2,
+            icon: Icons.star_rounded,
+            title: 'Photos en grand',
+            subtitle: featured == 0
+                ? 'Une page entière pour tes préférées'
+                : '$featured photo${featured > 1 ? 's' : ''} en pleine page',
+          ),
+          _photoOptionCard(
+            option: BookPhotoOption.cover,
+            number: 3,
+            icon: Icons.auto_stories_outlined,
+            title: 'Couverture',
+            subtitle: _coverPhotoUrl == null
+                ? 'Choisis la photo de couverture'
+                : _backCoverPhotoUrl != null
+                    ? 'Couverture et dos choisis'
+                    : 'Photo de couverture choisie',
+            thumbUrl: _coverPhotoUrl,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _photoOptionCard({
+    required BookPhotoOption option,
+    required int number,
+    required IconData icon,
+    required String title,
+    required String subtitle,
+    String? thumbUrl,
+  }) {
+    final done = _validatedPhotoOptions.contains(option);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(14),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () => _openPhotoOption(option),
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                  color: done ? AppColors.sage : AppColors.border,
+                  width: done ? 1.5 : 0.5),
+            ),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: thumbUrl != null
+                      ? ClipRRect(
+                          borderRadius: BorderRadius.circular(10),
+                          child: CachedNetworkImage(
+                            imageUrl: thumbUrl,
+                            fit: BoxFit.cover,
+                            errorWidget: (_, __, ___) =>
+                                Icon(icon, color: AppColors.sage),
+                          ),
+                        )
+                      : Container(
+                          decoration: BoxDecoration(
+                            color: AppColors.sageTint,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(icon, color: AppColors.sageDark),
+                        ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('$number · $title',
+                          style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.textDark)),
+                      const SizedBox(height: 3),
+                      Text(subtitle,
+                          style: const TextStyle(
+                              fontSize: 12.5, color: AppColors.textMedium)),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                done
+                    ? const Icon(Icons.check_circle, color: AppColors.sage)
+                    : const Icon(Icons.chevron_right,
+                        color: AppColors.textMedium),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -1616,10 +1846,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               _isGift
                   ? 'Le titre s\'imprime sur la couverture. Ton mot, seul sur '
                       'la première page, accompagnera le cadeau.'
-                  : 'Le titre s\'imprime sur la couverture. La dédicace, '
-                      'facultative, occupe seule la première page.'),
+                  : 'Le titre s\'imprime sur la couverture. Une dédicace, si '
+                      'tu le souhaites, occupe seule la première page.'),
           const SizedBox(height: 18),
-          Center(child: _coverPreview(scale: 0.8)),
+          Center(
+            child: ScaleTransition(
+              scale: _coverScale,
+              child: _coverPreview(scale: 0.8),
+            ),
+          ),
           const SizedBox(height: 18),
           TextField(
             controller: _titleCtrl,
@@ -1637,55 +1872,201 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             ),
             onChanged: (_) => setState(() {}),
           ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _dedicationCtrl,
-            textAlign: TextAlign.center,
-            textCapitalization: TextCapitalization.sentences,
-            minLines: 3,
-            maxLines: 6,
-            maxLength: 280,
-            style: const TextStyle(
-              fontFamily: 'PlayfairDisplay',
-              fontSize: 15,
-              color: AppColors.textDark,
+          const SizedBox(height: 10),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            activeThumbColor: AppColors.sage,
+            value: _dedicationOn,
+            onChanged: (v) => setState(() {
+              _dedicationOn = v;
+              // Désactivée = rien d'imprimé : le texte part avec.
+              if (!v) _dedicationCtrl.clear();
+            }),
+            title: Text(
+              _isGift
+                  ? 'Ajouter un mot en première page'
+                  : 'Ajouter une dédicace',
+              style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textDark),
             ),
-            decoration: _bookFieldDecoration(
-              label: _isGift
-                  ? 'Ton mot, imprimé en première page'
-                  : 'Dédicace en première page (facultatif)',
-              icon: Icons.favorite_border,
-            ).copyWith(
-              hintText: 'Pour Mamie Jeanne, avec tout notre amour',
-            ),
-            onChanged: (_) => setState(() {}),
+            subtitle: const Text('Imprimée seule, juste après la couverture',
+                style: TextStyle(fontSize: 12.5, color: AppColors.textMedium)),
           ),
+          if (_dedicationOn) ...[
+            const SizedBox(height: 6),
+            TextField(
+              controller: _dedicationCtrl,
+              autofocus: _dedicationCtrl.text.isEmpty,
+              textAlign: TextAlign.center,
+              textCapitalization: TextCapitalization.sentences,
+              minLines: 3,
+              maxLines: 6,
+              maxLength: 280,
+              style: const TextStyle(
+                fontFamily: 'PlayfairDisplay',
+                fontSize: 15,
+                color: AppColors.textDark,
+              ),
+              decoration: _bookFieldDecoration(
+                label: _isGift
+                    ? 'Ton mot, imprimé en première page'
+                    : 'Ta dédicace',
+                icon: Icons.favorite_border,
+              ).copyWith(
+                hintText: 'Pour Mamie Jeanne, avec tout notre amour',
+              ),
+              onChanged: (_) => setState(() {}),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  // ── Étape 4 : couverture ───────────────────────────────────────────────────
+  // ── Étape 4 : commentaires ─────────────────────────────────────────────────
 
-  Widget _buildCoverStep() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _stepIntro('La couverture',
-              'Choisis la photo de couverture et, si tu veux, celle du dos.'),
-          const SizedBox(height: 18),
-          Center(
-            child: ScaleTransition(
-              scale: _coverScale,
-              child: _coverPreview(scale: 1),
+  Widget _buildCommentsStep() {
+    _ensurePhotoGroups();
+    final n = _photoTexts.length;
+    return CustomScrollView(
+      slivers: [
+        SliverPadding(
+          padding: const EdgeInsets.fromLTRB(20, 6, 20, 4),
+          sliver: SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _stepIntro(
+                    'Les commentaires',
+                    'Un prénom, une date, une anecdote : écris-le directement '
+                        'sur la photo, il sera imprimé dans le livre.'),
+                const SizedBox(height: 12),
+                _commentsHowTo(),
+                const SizedBox(height: 10),
+                Text(
+                  n == 0
+                      ? 'Facultatif — touche une photo pour commencer.'
+                      : '$n commentaire${n > 1 ? 's' : ''} · enregistré'
+                          '${n > 1 ? 's' : ''} dans ton brouillon',
+                  style: const TextStyle(
+                      fontSize: 13, color: AppColors.textMedium),
+                ),
+              ],
             ),
           ),
-          _buildPhotoPreview(),
+        ),
+        if (_photoGroups == null)
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.all(40),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          )
+        else
+          BookCommentsGrid(
+            groups: _currentPhotoGroups,
+            excluded: _excludedPhotoIds,
+            texts: _photoTexts,
+            onEdit: _editPhotoFromGrid,
+          ),
+        const SliverToBoxAdapter(child: SizedBox(height: 24)),
+      ],
+    );
+  }
+
+  /// Mode d'emploi de l'éditeur de commentaires, en quatre gestes.
+  Widget _commentsHowTo() {
+    Widget line(IconData icon, String text) => Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(icon, size: 18, color: AppColors.sageDark),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(text,
+                    style: const TextStyle(
+                        fontSize: 13, color: AppColors.textDark, height: 1.35)),
+              ),
+            ],
+          ),
+        );
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: AppColors.border, width: 0.5),
+      ),
+      child: Column(
+        children: [
+          line(Icons.touch_app_outlined, 'Touche une photo pour l\'ouvrir.'),
+          line(Icons.edit_outlined,
+              'Écris ton texte, puis choisis la police, la taille et la couleur.'),
+          line(Icons.open_with,
+              'Déplace l\'encadré au doigt, là où il ne cache rien d\'important.'),
+          line(Icons.menu_book_outlined,
+              'L\'aperçu, juste après, montre le rendu exact — tu pourras '
+                  'encore y retoucher un texte.'),
         ],
       ),
     );
+  }
+
+  /// Photo touchée dans la grille des commentaires : même éditeur que dans
+  /// l'aperçu, sur la case du livre si l'aperçu préparé la connaît déjà.
+  Future<void> _editPhotoFromGrid(
+      String memoryId, String id, String url) async {
+    final slot =
+        _slots.where((s) => s.rawId == id && s.bytes != null).firstOrNull ??
+            await _standaloneSlot(memoryId, id, url);
+    if (!mounted) return;
+    if (slot == null) {
+      _showSnack('Photo indisponible pour l\'instant — vérifie ta connexion.');
+      return;
+    }
+    await _onPhotoTap(slot);
+  }
+
+  /// Case « hors livre » pour l'éditeur, quand l'aperçu préparé n'a pas
+  /// encore cette photo : la photo entière, à la largeur d'une demi-page. La
+  /// position du texte est relative (x/y 0..1) : l'aperçu la reporte ensuite
+  /// dans la vraie case.
+  Future<BookPhotoSlot?> _standaloneSlot(
+      String memoryId, String id, String url) async {
+    try {
+      var bytes = _photoCache[url];
+      if (bytes == null) {
+        final res = await http
+            .get(Uri.parse(url))
+            .timeout(const Duration(seconds: 20));
+        if (res.statusCode != 200) return null;
+        bytes = res.bodyBytes;
+      }
+      final codec = await ui.instantiateImageCodec(bytes, targetWidth: 64);
+      final frame = await codec.getNextFrame();
+      final w = frame.image.width, h = frame.image.height;
+      frame.image.dispose();
+      if (w == 0 || h == 0) return null;
+      const cellW = 297.6; // demi-largeur d'une page A4, en points
+      return BookPhotoSlot(
+        pageIndex: -1,
+        memoryId: memoryId,
+        rawId: id,
+        bytes: bytes,
+        isPortrait: h > w,
+        widthPt: cellW,
+        heightPt: cellW * h / w,
+        left: 0,
+        top: 0,
+        width: 0,
+        height: 0,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Couverture dessinée en direct (titre et photo choisis).
@@ -1855,17 +2236,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
 
   // ── Éditeur d'aperçu ──────────────────────────────────────────────────────
 
-  /// Photo touchée dans l'aperçu : texte, retrait ou mise en grand, puis
-  /// régénération du PDF (en arrière-plan, l'ancien reste affiché).
+  /// Photo touchée dans l'aperçu (ou dans la grille des commentaires) :
+  /// texte, retrait ou mise en grand, puis régénération du PDF (en
+  /// arrière-plan, l'ancien reste affiché).
   Future<void> _onPhotoTap(BookPhotoSlot slot) async {
     final id = slot.rawId;
     if (id == null) {
       _showSnack('Cette photo ne peut pas être modifiée depuis l\'aperçu.');
       return;
     }
-    final i = _memories.indexWhere((m) => m.id == slot.memoryId);
-    final memory = i == -1 ? null : _memories[i];
-    final featured = memory?.bookFeaturedMedia.contains(id) ?? false;
+    final featured = _featuredPhotoIds?.contains(id) ?? false;
     final res = await PhotoEditScreen.open(context,
         slot: slot,
         defaultColor: _lastTextColor,
@@ -1892,25 +2272,16 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       case PhotoRemoved():
         setState(() => _excludedPhotoIds.add(id));
       case PhotoFeaturedToggled():
-        // « En grand » reste un réglage du SOUVENIR (bookFeaturedMedia),
-        // comme dans l'écran « Photos en grand » — pas propre à ce livre.
-        if (memory == null) return;
-        final list = [...memory.bookFeaturedMedia];
-        featured ? list.remove(id) : list.add(id);
-        try {
-          await FirebaseFirestore.instance
-              .collection('memories')
-              .doc(memory.id)
-              .update({'bookFeaturedMedia': list});
-        } catch (_) {
-          _showSnack('Impossible de modifier cette photo pour l\'instant.');
-          return;
-        }
-        if (!mounted) return;
-        _applyMemoryLayoutUpdate(memory.copyWith(bookFeaturedMedia: list));
-        _memoriesChangedInSheet = false;
+        // Propre à CE livre (22.10.26) : le souvenir n'est pas touché.
+        _toggleFeaturedPhoto(id);
     }
-    await _refreshPreview();
+    // Sur l'aperçu : mis à jour sous les yeux. À l'étape Commentaires : il
+    // se prépare en arrière-plan.
+    if (_step == BookStep.preview) {
+      await _refreshPreview();
+    } else {
+      _prefetch();
+    }
   }
 
   /// Régénère l'aperçu après une retouche, sans l'écran de progression : le
@@ -1965,6 +2336,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         'exCover': _excludeCoverPhotoFromBook,
         'growth': (_excludedGrowthChildIds.toList()..sort()),
         'ex': (_excludedPhotoIds.toList()..sort()),
+        'feat': ((_featuredPhotoIds ?? const <String>{}).toList()..sort()),
         'texts': [
           for (final k in (_photoTexts.keys.toList()..sort()))
             _photoTexts[k]!.toMap(k),
@@ -1998,6 +2370,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         excludeCoverPhotoFromBook: _excludeCoverPhotoFromBook,
         excludedGrowthChildIds: _excludedGrowthChildIds.toList(),
         excludedPhotoIds: _excludedPhotoIds.toList(),
+        featuredPhotoIds: _featuredPhotoIds?.toList(),
         photoTexts: Map.of(_photoTexts),
         pageCount: _previewPageCount,
         updatedAt: DateTime.now(),
@@ -2058,6 +2431,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _excludedPhotoIds
         ..clear()
         ..addAll(draft.excludedPhotoIds);
+      if (draft.featuredPhotoIds != null) {
+        _featuredPhotoIds = {...draft.featuredPhotoIds!};
+      }
       _photoTexts
         ..clear()
         ..addAll(draft.photoTexts);
@@ -2070,17 +2446,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
       _resumedDraft = draft;
     });
     if (draft.title.isNotEmpty) _titleCtrl.text = draft.title;
-    if (draft.dedication.isNotEmpty) _dedicationCtrl.text = draft.dedication;
+    if (draft.dedication.isNotEmpty) {
+      _dedicationCtrl.text = draft.dedication;
+      _dedicationOn = true;
+    }
     // Couverture : clé R2 → URL signée, connue une fois les photos résolues.
     await resolving;
     if (!mounted) return;
-    String? urlOf(String? photoId) {
-      if (photoId == null) return null;
-      for (final e in _keyByUrl.entries) {
-        if (e.value == photoId) return e.key;
-      }
-      return _allPhotoUrls.contains(photoId) ? photoId : null;
-    }
+    final urlOf = _urlOfPhotoId;
     setState(() {
       final cover = urlOf(draft.coverPhotoId);
       if (cover != null) _coverPhotoUrl = cover;
@@ -2121,192 +2494,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               style: const TextStyle(color: AppColors.textDark, fontSize: 13),
             ),
           ),
-          TextButton(
-            onPressed: _generating ? null : _goToPreview,
-            child: const Text('Aperçu'),
-          ),
         ],
-      ),
-    );
-  }
-
-  Widget _buildPhotoPreview() {
-    final allUrls = _allPhotoUrls;
-    if (allUrls.isEmpty) return const SizedBox.shrink();
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 20),
-        Row(
-          children: [
-            const Icon(Icons.photo_library_outlined,
-                size: 16, color: AppColors.textMedium),
-            const SizedBox(width: 6),
-            Text(
-              '${allUrls.length} photo${allUrls.length > 1 ? 's' : ''} · Tape pour choisir la couverture',
-              style: const TextStyle(
-                  color: AppColors.textMedium,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        _photoStrip(
-          urls: allUrls,
-          selectedUrl: _coverPhotoUrl,
-          onTapUrl: (url) => setState(() {
-            _coverPhotoUrl = _coverPhotoUrl == url ? null : url;
-          }),
-        ),
-        if (_coverPhotoUrl != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            'Photo de couverture sélectionnée · Tape à nouveau pour annuler',
-            style: TextStyle(
-                color: AppColors.sage.withOpacity(0.8),
-                fontSize: 11,
-                fontStyle: FontStyle.italic),
-          ),
-          // Option : ne pas répéter la photo de couverture dans les pages.
-          InkWell(
-            onTap: () => setState(
-                () => _excludeCoverPhotoFromBook = !_excludeCoverPhotoFromBook),
-            borderRadius: BorderRadius.circular(8),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 6),
-              child: Row(
-                children: [
-                  Icon(
-                    _excludeCoverPhotoFromBook
-                        ? Icons.check_box
-                        : Icons.check_box_outline_blank,
-                    size: 18,
-                    color: AppColors.sage,
-                  ),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Ne pas répéter cette photo dans le livre',
-                      style: TextStyle(color: AppColors.textDark, fontSize: 13),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-
-        // ── Photo de dos (4ᵉ de couverture, optionnelle) ──────────────────
-        // Sans choix ici, le dos reste un aplat de la couleur du livre —
-        // jamais blanc, mais pas obligé de porter une photo non plus.
-        const SizedBox(height: 18),
-        Row(
-          children: [
-            const Icon(Icons.crop_portrait_outlined,
-                size: 16, color: AppColors.textMedium),
-            const SizedBox(width: 6),
-            const Text(
-              'Photo au dos du livre (facultatif)',
-              style: TextStyle(
-                  color: AppColors.textMedium,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w500),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        _photoStrip(
-          urls: allUrls,
-          selectedUrl: _backCoverPhotoUrl,
-          onTapUrl: (url) => setState(() {
-            _backCoverPhotoUrl = _backCoverPhotoUrl == url ? null : url;
-          }),
-        ),
-        if (_backCoverPhotoUrl != null) ...[
-          const SizedBox(height: 6),
-          Text(
-            'Photo de dos sélectionnée · Tape à nouveau pour annuler',
-            style: TextStyle(
-                color: AppColors.sage.withOpacity(0.8),
-                fontSize: 11,
-                fontStyle: FontStyle.italic),
-          ),
-        ],
-      ],
-    );
-  }
-
-  /// Bandeau horizontal de vignettes photo, avec coche sur celle sélectionnée
-  /// — partagé entre le sélecteur de couverture et celui du dos.
-  Widget _photoStrip({
-    required List<String> urls,
-    required String? selectedUrl,
-    required ValueChanged<String> onTapUrl,
-  }) {
-    return SizedBox(
-      height: 78,
-      child: ListView.builder(
-        scrollDirection: Axis.horizontal,
-        itemCount: urls.length,
-        itemBuilder: (_, i) {
-          final url = urls[i];
-          final isSelected = selectedUrl == url;
-          return GestureDetector(
-            onTap: () => onTapUrl(url),
-            child: Container(
-              margin: const EdgeInsets.only(right: 8),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(8),
-                border: isSelected
-                    ? Border.all(color: AppColors.sage, width: 2.5)
-                    : null,
-              ),
-              child: Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(isSelected ? 6 : 8),
-                    child: CachedNetworkImage(
-                      imageUrl: url,
-                      width: 70,
-                      height: 70,
-                      fit: BoxFit.cover,
-                      placeholder: (_, __) => Container(
-                        width: 70,
-                        height: 70,
-                        color: AppColors.background,
-                        child: const Center(
-                            child: CircularProgressIndicator(strokeWidth: 2)),
-                      ),
-                      errorWidget: (_, __, ___) => Container(
-                        width: 70,
-                        height: 70,
-                        color: AppColors.background,
-                        child: const Icon(Icons.broken_image_outlined,
-                            color: AppColors.softGray, size: 20),
-                      ),
-                    ),
-                  ),
-                  if (isSelected)
-                    Positioned(
-                      right: 3,
-                      top: 3,
-                      child: Container(
-                        decoration: const BoxDecoration(
-                          color: AppColors.sage,
-                          shape: BoxShape.circle,
-                        ),
-                        padding: const EdgeInsets.all(2),
-                        child: const Icon(Icons.check,
-                            color: Colors.white, size: 12),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          );
-        },
       ),
     );
   }
@@ -2585,8 +2773,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
               child: Text(
                 _dedicationCtrl.text.trim().isEmpty
                     ? 'Le livre part directement chez la personne. Astuce : '
-                        'reviens à l\'aperçu pour ajouter un mot en première '
-                        'page.'
+                        'reviens à l\'étape « Titre & dédicace » pour ajouter '
+                        'un mot en première page.'
                     : 'Le livre part directement chez la personne, avec ton '
                         'mot en première page.',
                 style: const TextStyle(
@@ -2891,7 +3079,20 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     _memoriesChangedInSheet = true;
     setState(() {
       final i = _memories.indexWhere((m) => m.id == updated.id);
-      if (i != -1) _memories[i] = updated;
+      if (i == -1) return;
+      // Photos en grand changées dans la feuille du souvenir : le livre
+      // reprend ce nouveau choix pour ce souvenir.
+      final before = _memories[i].bookFeaturedMedia;
+      final f = _featuredPhotoIds;
+      if (f != null &&
+          (before.length != updated.bookFeaturedMedia.length ||
+              !before.every(updated.bookFeaturedMedia.contains))) {
+        f
+          ..removeAll(rawMediaIdsOf(updated))
+          ..removeAll(before)
+          ..addAll(updated.bookFeaturedMedia);
+      }
+      _memories[i] = updated;
     });
   }
 

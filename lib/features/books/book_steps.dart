@@ -5,11 +5,14 @@ import '../../core/theme/app_theme.dart';
 /// Parcours de création d'un livre, étape par étape (21.10.26) — même
 /// principe que l'enregistrement d'un souvenir. L'étape 1 (souvenirs) vit
 /// dans MemorySelectScreen, les suivantes dans BookGenerateScreen.
+///
+/// 22.10.26 : tout ce qui touche aux photos (en grand, à retirer, couverture)
+/// est réuni dans « Photos », et les commentaires se posent AVANT l'aperçu.
 const bookStepLabels = [
   'Souvenirs',
-  'Photos en grand',
+  'Photos',
   'Titre & dédicace',
-  'Couverture',
+  'Commentaires',
   'Aperçu',
   'Format',
   'Commande',
@@ -18,9 +21,9 @@ const bookStepLabels = [
 /// Indices globaux des étapes (voir [bookStepLabels]).
 abstract final class BookStep {
   static const memories = 0;
-  static const featured = 1;
+  static const photos = 1;
   static const title = 2;
-  static const cover = 3;
+  static const comments = 3;
   static const preview = 4;
   static const format = 5;
   static const order = 6;

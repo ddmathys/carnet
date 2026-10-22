@@ -1,11 +1,8 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:printing/printing.dart';
 import '../../core/theme/app_theme.dart';
-import '../../core/config/app_config.dart';
 import '../../core/services/book_pdf_service.dart';
-import '../../core/services/order_service.dart';
 
 // ── PDF preview viewer — affiche les pages du VRAI PDF (rastérisées) ──────────
 // L'aperçu est strictement identique au fichier téléchargé / envoyé à
@@ -78,46 +75,6 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
   int _current = 0;
   // Vue d'ensemble (grille de toutes les pages) plutôt que page par page.
   bool _grid = false;
-
-  bool get _isAdmin =>
-      FirebaseAuth.instance.currentUser?.email == AppConfig.adminEmail;
-  bool _checkingProdigi = false;
-  String? _prodigiResultText;
-  String? _prodigiErrorText;
-
-  // Même vérification que dans la console admin (POST /api/prodigi/quote,
-  // gratuit, ne modifie rien) — mais ici pour les DEUX formats d'un coup
-  // (souple et rigide), vu que l'aperçu les affiche déjà côte à côte.
-  Future<void> _verifyProdigi() async {
-    setState(() {
-      _checkingProdigi = true;
-      _prodigiResultText = null;
-      _prodigiErrorText = null;
-    });
-    try {
-      final results = await Future.wait([
-        OrderService.verifyPrintQuote(
-            coverType: 'soft', pageCount: widget.pagesSoft),
-        OrderService.verifyPrintQuote(
-            coverType: 'hard', pageCount: widget.pagesHard),
-      ]);
-      if (!mounted) return;
-      String fmt(Map<String, dynamic> r) {
-        final usd = (r['prodigiCostUsd'] as num?)?.toStringAsFixed(2);
-        return usd != null ? '\$$usd' : 'non lisible';
-      }
-      setState(() {
-        _prodigiResultText =
-            'Coût Prodigi réel — Souple ${fmt(results[0])} · Rigide ${fmt(results[1])}';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() =>
-          _prodigiErrorText = e.toString().replaceFirst('Exception: ', ''));
-    } finally {
-      if (mounted) setState(() => _checkingProdigi = false);
-    }
-  }
 
   // Cache des pages déjà rastérisées (index → PNG).
   final Map<int, Uint8List> _cache = {};
@@ -247,8 +204,8 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
                     size: 18),
                 label: Text(_grid ? 'Page par page' : 'Vue d\'ensemble',
                     style: const TextStyle(fontSize: 13)),
-                style: TextButton.styleFrom(
-                    foregroundColor: AppColors.textMedium),
+                style:
+                    TextButton.styleFrom(foregroundColor: AppColors.textMedium),
               ),
             ],
           ),
@@ -276,7 +233,9 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
                             'mettre en grand ou la retirer.'
                             '${widget.commentCount > 0 ? '\n${widget.commentCount} commentaire${widget.commentCount > 1 ? 's' : ''} · enregistré${widget.commentCount > 1 ? 's' : ''} dans le brouillon' : ''}',
                     style: const TextStyle(
-                        color: AppColors.textDark, fontSize: 12.5, height: 1.35),
+                        color: AppColors.textDark,
+                        fontSize: 12.5,
+                        height: 1.35),
                   ),
                 ),
               ],
@@ -286,8 +245,7 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
           child: _grid
               ? GridView.builder(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
                     childAspectRatio: _pageAspect,
                     mainAxisSpacing: 6,
@@ -341,52 +299,9 @@ class _PdfPreviewViewerState extends State<PdfPreviewViewer> {
                   'Rigide · ${widget.pagesHard} pages · ${widget.priceHard}',
                   textAlign: TextAlign.center,
                   style: const TextStyle(
-                      color: AppColors.textMedium,
-                      fontSize: 12.5,
-                      height: 1.5),
+                      color: AppColors.textMedium, fontSize: 12.5, height: 1.5),
                 ),
         ),
-        // Vérification du prix/pages contre un vrai devis Prodigi (admin
-        // uniquement — le backend refuse l'appel sinon).
-        if (_isAdmin && !widget.exceedsLimit) ...[
-          const SizedBox(height: 10),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            child: Column(
-              children: [
-                OutlinedButton.icon(
-                  onPressed: _checkingProdigi ? null : _verifyProdigi,
-                  icon: _checkingProdigi
-                      ? const SizedBox(
-                          width: 14, height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2))
-                      : const Icon(Icons.fact_check_outlined, size: 16),
-                  label: const Text('Vérifier chez Prodigi',
-                      style: TextStyle(fontSize: 12.5)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppColors.amber,
-                    side: const BorderSide(color: AppColors.amber),
-                    minimumSize: const Size(0, 34),
-                  ),
-                ),
-                if (_prodigiResultText != null) ...[
-                  const SizedBox(height: 6),
-                  Text(_prodigiResultText!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          fontSize: 11.5, color: AppColors.textMedium)),
-                ],
-                if (_prodigiErrorText != null) ...[
-                  const SizedBox(height: 6),
-                  Text(_prodigiErrorText!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                          fontSize: 11.5, color: AppColors.error)),
-                ],
-              ],
-            ),
-          ),
-        ],
         // CTA
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 14, 20, 28),
