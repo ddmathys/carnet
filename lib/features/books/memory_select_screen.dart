@@ -39,6 +39,11 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
   /// Filtre par tags (multi-sélection, même sélecteur que le dashboard).
   final Set<String> _filterLabels = {};
   final Set<String> _selected = {};
+  // Brouillon du livre en cours (22.10.26) : renvoyé par l'écran du livre
+  // quand on revient ici, puis repassé au prochain « Continuer » — revenir
+  // changer la sélection ne crée plus un deuxième brouillon.
+  String? _draftId;
+  bool _opening = false; // double appui sur « Continuer » = un seul livre
   // Enfants dont la carte "Courbe de croissance" a été décochée — par défaut
   // (absent d'ici) toute courbe disponible est incluse. Voir _growthGroups.
   final Set<String> _excludedGrowthChildIds = {};
@@ -306,7 +311,8 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
     MediaFullscreenViewer.open(context, items: items);
   }
 
-  void _continue() {
+  Future<void> _continue() async {
+    if (_opening) return;
     // Les mesures taille/poids ne sont jamais cochées une par une (invisibles
     // dans la liste), mais accompagnent le livre par groupe entier (carte
     // "Courbe de croissance" par enfant, cf. _growthGroups) pour alimenter
@@ -323,7 +329,15 @@ class _MemorySelectScreenState extends State<MemorySelectScreen> {
     final editOrder =
         widget.editOrderId != null ? '&editOrder=${widget.editOrderId}' : '';
     final gift = widget.gift ? '&gift=1' : '';
-    context.push('/book/new?memories=$ids$tag$editOrder$gift');
+    final draft = _draftId != null ? '&draft=$_draftId' : '';
+    _opening = true;
+    try {
+      final id = await context
+          .push<String>('/book/new?memories=$ids$tag$editOrder$gift$draft');
+      if (id != null) _draftId = id;
+    } finally {
+      _opening = false;
+    }
   }
 
   /// Filtre par tags — même sélecteur (Date / Lieu / Événement) que partout.

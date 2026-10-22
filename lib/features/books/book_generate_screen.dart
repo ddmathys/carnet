@@ -187,6 +187,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   BookDraft? _pendingDraft; // brouillon à réappliquer une fois chargé
   String? _tagId; // widget.tagId, ou celui du brouillon repris
   List<String> _requestedIds = const [];
+  // Brouillon rouvert depuis la sélection (nouveaux souvenirs) : on reprend
+  // ses choix mais la sélection vient de l'écran Souvenirs.
+  bool _reselected = false;
   final Set<String> _excludedPhotoIds = {};
   final Map<String, BookPhotoText> _photoTexts = {};
   // Octets des photos déjà téléchargées (URL → octets) : une retouche ne
@@ -570,7 +573,15 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         }
         _draftId = draft.id;
         _tagId = draft.tagId;
-        _requestedIds = draft.requestedIds;
+        // Retour de la sélection avec de nouveaux souvenirs : le brouillon
+        // garde ses choix mais prend la nouvelle sélection.
+        if (widget.memoryIds.isNotEmpty) {
+          _tagId = widget.tagId ?? draft.tagId;
+          _requestedIds = widget.memoryIds;
+          _reselected = true;
+        } else {
+          _requestedIds = draft.requestedIds;
+        }
         _pendingDraft = draft;
       }
       // Les souvenirs retenus à l'écran de sélection, dans l'ordre chronologique.
@@ -706,7 +717,12 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         _pendingDraft = null;
         await _applyDraft(draft, allMemories, resolving);
         // Brouillon repris : tout le parcours est déjà accessible.
-        if (mounted) setState(() => _maxStep = BookStep.preview);
+        if (mounted && !_reselected) {
+          setState(() => _maxStep = BookStep.preview);
+        }
+        // Nouvelle sélection : à enregistrer tout de suite dans le brouillon.
+        if (_reselected) _lastSavedSig = '';
+        _scheduleDraftSave();
         _prefetch();
       } else if (_draftsEnabled) {
         // Le brouillon naît dès l'entrée dans le parcours (21.10.26) : les
@@ -1383,9 +1399,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
     }
 
     return PopScope(
-      canPop: _step == _firstStep,
+      canPop: false,
       onPopInvokedWithResult: (didPop, _) {
-        if (!didPop) _stepBack();
+        if (didPop) return;
+        if (_step > _firstStep) {
+          _stepBack();
+        } else {
+          _leave();
+        }
       },
       child: Scaffold(
         backgroundColor: AppColors.background,
@@ -1405,10 +1426,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
             onPressed: () {
               if (_step > _firstStep) {
                 _stepBack();
-              } else if (context.canPop()) {
-                context.pop();
               } else {
-                context.go('/home');
+                _leave();
               }
             },
           ),
@@ -1449,6 +1468,18 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   }
 
   // ── Navigation entre étapes ────────────────────────────────────────────────
+
+  /// Quitte le parcours : le brouillon est écrit tout de suite et son id
+  /// renvoyé à l'écran de sélection, qui le réutilise au prochain
+  /// « Continuer » (un seul brouillon par livre).
+  void _leave() {
+    if (_draftSaveTimer?.isActive ?? false) _saveDraftIfChanged();
+    if (context.canPop()) {
+      context.pop(_draftsEnabled ? _draftId : null);
+    } else {
+      context.go('/home');
+    }
+  }
 
   void _stepBack() {
     if (_step <= _firstStep) return;
@@ -2419,8 +2450,9 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   Future<void> _applyDraft(BookDraft draft, List<MemoryModel> loaded,
       Future<void> resolving) async {
     final loadedIds = loaded.map((m) => m.id).toSet();
-    final selected =
-        draft.selectedMemoryIds.where(loadedIds.contains).toSet();
+    final selected = _reselected
+        ? loadedIds
+        : draft.selectedMemoryIds.where(loadedIds.contains).toSet();
     setState(() {
       if (selected.isNotEmpty) _selectedMemoryIds = selected;
       _excludeCoverPhotoFromBook = draft.excludeCoverPhotoFromBook;
@@ -2431,7 +2463,14 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         ..clear()
         ..addAll(draft.excludedPhotoIds);
       if (draft.featuredPhotoIds != null) {
-        _featuredPhotoIds = {...draft.featuredPhotoIds!};
+        _featuredPhotoIds = {
+          ...draft.featuredPhotoIds!,
+          // Souvenirs ajoutés depuis : leurs propres photos en grand.
+          if (_reselected)
+            for (final m in loaded)
+              if (!draft.selectedMemoryIds.contains(m.id))
+                ...m.bookFeaturedMedia,
+        };
       }
       _photoTexts
         ..clear()
