@@ -22,6 +22,7 @@ import '../../core/services/book_nudge.dart';
 import '../../core/services/puzzle_draft_service.dart';
 import '../../core/services/book_history_service.dart';
 import '../../core/services/memory_activity_service.dart';
+import '../books/book_steps.dart';
 import '../books/pdf_viewer_screen.dart';
 import '../../core/services/quota_service.dart';
 import '../../core/services/order_service.dart';
@@ -1646,6 +1647,7 @@ class _BookDraftsStrip extends StatelessWidget {
                                         color: AppColors.textDark,
                                         fontWeight: FontWeight.w600),
                                   ),
+                                  _DraftProgress(step: d.maxStep),
                                   Text(
                                     [
                                       if (d.photoTexts.isNotEmpty)
@@ -1774,6 +1776,61 @@ class _PuzzleDraftsStrip extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// Où en est un livre en cours : « Étape 5/7 · Aperçu » et une barre, puis
+/// « Vous y êtes presque » dès l'étape Format (22.10.26).
+class _DraftProgress extends StatelessWidget {
+  final int step;
+  const _DraftProgress({required this.step});
+
+  @override
+  Widget build(BuildContext context) {
+    final n = bookStepLabels.length;
+    // Un brouillon est au moins à l'étape Photos (les souvenirs sont choisis).
+    final i = step.clamp(BookStep.photos, n - 1);
+    final almost = i >= BookStep.format;
+    return Padding(
+      padding: const EdgeInsets.only(top: 3, bottom: 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(almost ? Icons.flag_rounded : Icons.route_rounded,
+                  size: 14,
+                  color: almost ? AppColors.amber : AppColors.sageDark),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  almost
+                      ? "Vous y êtes presque · plus qu'à commander"
+                      : 'Étape ${i + 1}/$n · ${bookStepLabels[i]}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                      color: almost ? AppColors.amber : AppColors.sageDark),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: (i + 1) / n,
+              minHeight: 4,
+              backgroundColor: AppColors.softGray,
+              valueColor: AlwaysStoppedAnimation(
+                  almost ? AppColors.amber : AppColors.sage),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -1,6 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { requireAuth } from '../../lib/verify'
 import { db } from '../../lib/firebase'
+import { FieldValue } from 'firebase-admin/firestore'
 import {
   computePrice,
   computeAdditionalPrice,
@@ -35,14 +36,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const user = await requireAuth(req, res)
   if (!user) return
 
+  const { orderId, promoCode: rawPromo } = (req.body ?? {}) as {
+    orderId?: string
+    promoCode?: string
+  }
+  // Code promo (22.10.26) : commande offerte, sans passer par Stripe.
+  const promoCode =
+    typeof rawPromo === 'string' && rawPromo.trim()
+      ? rawPromo.trim().toUpperCase()
+      : null
+
   const secret = process.env.STRIPE_SECRET_KEY
-  if (!secret) {
+  if (!secret && !promoCode) {
     return res
       .status(503)
       .json({ error: 'Paiement non configuré (STRIPE_SECRET_KEY manquante)' })
   }
 
-  const { orderId } = (req.body ?? {}) as { orderId?: string }
   if (!orderId || typeof orderId !== 'string') {
     return res.status(400).json({ error: 'Missing orderId' })
   }
@@ -174,6 +184,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       productName = `${extraBooks.length + 1} livres`
     }
   }
+  if (promoCode) return redeemPromo(res, orderId, promoCode, trustedPrice)
+
   const amount = Math.round(trustedPrice * 100) // centimes
 
   // Le prix stocké venait du client à la création — on le corrige ici pour que
@@ -226,3 +238,52 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(502).json({ error: `Appel Stripe échoué : ${e}` })
   }
 }
+
+// Code promo = commande OFFERTE (100 %). Les codes vivent dans
+// `promoCodes/{CODE}` (majuscules) — illisibles par les clients (aucune
+// règle Firestore), créés à la main : { active: true, maxUses: 10, uses: 0,
+// note }. La commande passe à « paid » comme après Stripe : elle attend
+// ensuite la validation admin avant l'envoi à Prodigi, rien ne part seul.
+// Transaction : un code à usage limité ne peut pas servir deux fois en
+// parallèle, et une commande déjà payée n'en consomme pas.
+async function redeemPromo(
+  res: VercelResponse,
+  orderId: string,
+  code: string,
+  trustedPrice: number
+) {
+  const promoRef = db.collection('promoCodes').doc(code)
+  const orderRef = db.collection('orders').doc(orderId)
+  try {
+    await db.runTransaction(async (tx) => {
+      const [p, o] = await Promise.all([tx.get(promoRef), tx.get(orderRef)])
+      const promo = p.data() as Record<string, any> | undefined
+      if (!promo || promo.active !== true) throw new PromoError('Code invalide.')
+      const uses = Number(promo.uses ?? 0)
+      const max = promo.maxUses == null ? Infinity : Number(promo.maxUses)
+      if (uses >= max) throw new PromoError('Ce code a déjà été utilisé.')
+      if (o.data()?.status !== 'received') {
+        throw new PromoError('Cette commande n’est plus en attente de paiement.')
+      }
+      tx.update(promoRef, {
+        uses: uses + 1,
+        lastUsedAt: FieldValue.serverTimestamp(),
+        lastOrderId: orderId,
+      })
+      tx.update(orderRef, {
+        status: 'paid',
+        paidAt: FieldValue.serverTimestamp(),
+        promoCode: code,
+        originalPrice: trustedPrice,
+        price: 0,
+        updatedAt: FieldValue.serverTimestamp(),
+      })
+    })
+  } catch (e) {
+    if (e instanceof PromoError) return res.status(400).json({ error: e.message })
+    return res.status(500).json({ error: `Code promo : ${e}` })
+  }
+  return res.status(200).json({ free: true })
+}
+
+class PromoError extends Error {}

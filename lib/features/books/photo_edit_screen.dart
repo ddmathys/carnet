@@ -1,3 +1,4 @@
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import '../../core/models/book_draft.dart';
 import '../../core/services/book_pdf_service.dart';
@@ -31,8 +32,8 @@ class PhotoFeaturedToggled extends PhotoEditResult {
 /// bien que ce qui est à l'écran est ce qui sort de l'imprimeur : les mêmes
 /// .ttf, la même taille relative, la même zone de sécurité.
 ///
-/// Une pression sur la photo masque les réglages — on voit alors la photo en
-/// entier, sans rien par-dessus.
+/// La photo reste GRANDE (22.10.26) : les réglages sont dessous, on fait
+/// défiler pour les atteindre — la photo ne rapetisse plus quand on écrit.
 class PhotoEditScreen extends StatefulWidget {
   final BookPhotoText? initial;
   final bool featured;
@@ -188,20 +189,35 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
                     child: ConstrainedBox(
                       constraints: BoxConstraints(
                           maxWidth: areaW * BookPdfService.photoTextMaxWidth),
-                      child: GestureDetector(
-                        onPanUpdate: (d) {
-                          final size = _boxKey.currentContext?.size;
-                          if (size == null) return;
-                          final rangeX = areaW - size.width;
-                          final rangeY = areaH - size.height;
-                          setState(() {
-                            if (rangeX > 0) {
-                              _x = (_x + d.delta.dx / rangeX).clamp(0.0, 1.0);
-                            }
-                            if (rangeY > 0) {
-                              _y = (_y + d.delta.dy / rangeY).clamp(0.0, 1.0);
-                            }
-                          });
+                      // Seuil de glissement plus court que celui du
+                      // défilement de la page : un doigt posé sur l'encadré
+                      // le déplace, ailleurs il fait défiler.
+                      child: RawGestureDetector(
+                        gestures: {
+                          PanGestureRecognizer:
+                              GestureRecognizerFactoryWithHandlers<
+                                  PanGestureRecognizer>(
+                            PanGestureRecognizer.new,
+                            (r) => r
+                              ..gestureSettings =
+                                  const DeviceGestureSettings(touchSlop: 3)
+                              ..onUpdate = (d) {
+                                final size = _boxKey.currentContext?.size;
+                                if (size == null) return;
+                                final rangeX = areaW - size.width;
+                                final rangeY = areaH - size.height;
+                                setState(() {
+                                  if (rangeX > 0) {
+                                    _x = (_x + d.delta.dx / rangeX)
+                                        .clamp(0.0, 1.0);
+                                  }
+                                  if (rangeY > 0) {
+                                    _y = (_y + d.delta.dy / rangeY)
+                                        .clamp(0.0, 1.0);
+                                  }
+                                });
+                              },
+                          ),
                         },
                         child: _textBox(scale, text, areaH / scale),
                       ),
@@ -357,23 +373,18 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
       );
 
   Widget _panel() => Container(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
-        // Jamais plus de la moitié de l'écran, et défilable : sur un petit
-        // téléphone, clavier ouvert, la photo garde de la place et les
-        // réglages restent tous atteignables.
-        constraints: BoxConstraints(
-            maxHeight: MediaQuery.of(context).size.height * 0.52),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
         decoration: BoxDecoration(
-          color: Colors.black.withOpacity(0.55),
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(18)),
+          color: Colors.white.withOpacity(0.06),
+          borderRadius: BorderRadius.circular(18),
         ),
-        child: SingleChildScrollView(
-          child: Column(
+        child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               TextField(
                 controller: _textCtrl,
-                autofocus: widget.initial == null,
+                // Pas de clavier d'office : on voit d'abord la photo en
+                // grand, on descend pour écrire.
                 maxLength: BookPhotoText.maxLength,
                 minLines: 1,
                 maxLines: 3,
@@ -439,7 +450,6 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
               ),
             ],
           ),
-        ),
       );
 
   @override
@@ -457,6 +467,12 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
         ),
         title: const Text('Cette photo', style: TextStyle(fontSize: 16)),
         actions: [
+          // Enregistrer sans redescendre jusqu'au bouton du bas.
+          IconButton(
+            icon: const Icon(Icons.check, color: AppColors.sageDark),
+            tooltip: 'Enregistrer',
+            onPressed: _save,
+          ),
           IconButton(
             icon: Icon(_tools ? Icons.visibility : Icons.visibility_off),
             tooltip: _tools ? 'Voir la photo seule' : 'Afficher les réglages',
@@ -465,27 +481,40 @@ class _PhotoEditScreenState extends State<PhotoEditScreen> {
         ],
       ),
       body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.all(8),
-                child: LayoutBuilder(builder: (_, box) => _photo(box)),
-              ),
-            ),
-            if (_tools)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Text(
-                  'Fais glisser l\'encadré sur la photo · appuie sur la photo '
-                  'pour la voir seule',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.55), fontSize: 11.5),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(8, 8, 8, 24),
+          child: Column(
+            children: [
+              // Photo en grand, à taille fixe : le clavier ou les réglages
+              // ne la font plus rapetisser.
+              _photo(BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width - 16,
+                maxHeight: MediaQuery.sizeOf(context).height * 0.66,
+              )),
+              if (_tools) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 10, 8, 12),
+                  child: Row(
+                    children: [
+                      Icon(Icons.keyboard_double_arrow_down,
+                          size: 18, color: Colors.white.withOpacity(0.55)),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Fais glisser l\'encadré sur la photo · descends '
+                          'pour écrire et choisir police, taille et couleur',
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.55),
+                              fontSize: 11.5),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
-            if (_tools) _panel(),
-          ],
+                _panel(),
+              ],
+            ],
+          ),
         ),
       ),
     );

@@ -229,6 +229,32 @@ class BookCoverPreview extends StatelessWidget {
                   ],
                 ],
               ),
+            // Couverture sans photo : même QR, sur un cartouche blanc en
+            // bas (comme le PDF).
+            if (coverPhotoUrl == null && hasVideos)
+              Positioned(
+                bottom: 8,
+                left: 0,
+                right: 0,
+                child: Center(
+                  child: Container(
+                    color: Colors.white,
+                    padding: const EdgeInsets.fromLTRB(4, 4, 4, 2),
+                    child: const Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.qr_code_2,
+                            size: 240 * 22 / 297, color: Color(0xFF2D2416)),
+                        Text('regarder',
+                            style: TextStyle(
+                                fontSize: 4.5,
+                                color: Color(0xFF8C8C8C),
+                                letterSpacing: 1)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

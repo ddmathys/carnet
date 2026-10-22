@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -718,7 +719,8 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         await _applyDraft(draft, allMemories, resolving);
         // Brouillon repris : tout le parcours est déjà accessible.
         if (mounted && !_reselected) {
-          setState(() => _maxStep = BookStep.preview);
+          setState(() =>
+              _maxStep = math.max(BookStep.preview, draft.maxStep));
         }
         // Nouvelle sélection : à enregistrer tout de suite dans le brouillon.
         if (_reselected) _lastSavedSig = '';
@@ -1879,12 +1881,40 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
                   : 'Le titre s\'imprime sur la couverture. Une dédicace, si '
                       'tu le souhaites, occupe seule la première page.'),
           const SizedBox(height: 18),
+          // Couverture en grand (22.10.26) : on juge le titre tel qu'il
+          // sera imprimé.
           Center(
             child: ScaleTransition(
               scale: _coverScale,
-              child: _coverPreview(scale: 0.8),
+              child: LayoutBuilder(builder: (_, box) {
+                final w = math.min(box.maxWidth, 320.0);
+                return SizedBox(
+                  width: w,
+                  height: w * 240 / 180,
+                  child: FittedBox(child: _coverPreview(scale: 1)),
+                );
+              }),
             ),
           ),
+          if (_videoMemories.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                const Icon(Icons.qr_code_2,
+                    size: 20, color: AppColors.sageDark),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Le QR code en bas de la couverture ouvre les vidéos '
+                    '${_videoMemories.length == 1 ? 'du souvenir' : 'des ${_videoMemories.length} souvenirs'} '
+                    'du livre — il suffit de le scanner avec un téléphone.',
+                    style: const TextStyle(
+                        fontSize: 12.5, color: AppColors.textMedium),
+                  ),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 18),
           TextField(
             controller: _titleCtrl,
@@ -2353,6 +2383,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
   String _draftSignature() => jsonEncode({
         ..._contentMap(),
         'pages': _previewPageCount,
+        'step': _maxStep,
       });
 
   /// Ce que l'utilisateur a composé (sans le nombre de pages, qui est un
@@ -2403,6 +2434,7 @@ class _BookGenerateScreenState extends State<BookGenerateScreen>
         featuredPhotoIds: _featuredPhotoIds?.toList(),
         photoTexts: Map.of(_photoTexts),
         pageCount: _previewPageCount,
+        maxStep: _maxStep,
         updatedAt: DateTime.now(),
       ));
       _lastSavedSig = sig;

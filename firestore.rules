@@ -213,7 +213,8 @@ service cloud.firestore {
              'prodigiStageDetails', 'prodigiShipments', 'prodigiError',
              'prodigiRetryCount', 'trackingNumber', 'trackingUrl',
              'carrierName', 'shippedAt', 'shippedFromCountry',
-             'shippedNotifiedAt', 'accountDeleted'
+             'shippedNotifiedAt', 'accountDeleted',
+             'promoCode', 'originalPrice'
            ]);
       allow read: if isAuth()
         && (resource.data.userId == request.auth.uid || isAdmin());

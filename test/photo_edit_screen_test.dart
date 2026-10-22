@@ -57,13 +57,20 @@ void main() {
     await tester.enterText(find.byType(TextField), 'Premier bain de mer');
     await tester.pump();
     // Police manuscrite
+    await tester.ensureVisible(
+        find.text(BookPhotoText.labelOf(BookPhotoText.fontScript)));
+    await tester.pumpAndSettle();
     await tester
         .tap(find.text(BookPhotoText.labelOf(BookPhotoText.fontScript)));
     await tester.pump();
     // Taille au maximum du curseur
+    await tester.ensureVisible(find.byType(Slider));
+    await tester.pumpAndSettle();
     await tester.drag(find.byType(Slider), const Offset(500, 0));
     await tester.pump();
 
+    await tester.ensureVisible(find.text('Enregistrer'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Enregistrer'));
     await tester.pumpAndSettle();
 
@@ -108,6 +115,8 @@ void main() {
     await tester.drag(
         find.text('Déjà écrit').first, const Offset(-4000, -4000));
     await tester.pump();
+    await tester.ensureVisible(find.text('Enregistrer'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Enregistrer'));
     await tester.pumpAndSettle();
 
@@ -143,6 +152,8 @@ void main() {
 
     await tester.enterText(find.byType(TextField), '   ');
     await tester.pump();
+    await tester.ensureVisible(find.text('Supprimer le commentaire'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Supprimer le commentaire'));
     await tester.pumpAndSettle();
 

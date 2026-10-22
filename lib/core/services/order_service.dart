@@ -75,6 +75,18 @@ class OrderService {
     return data?['url'] as String?;
   }
 
+  /// Code promo : la commande devient offerte (payée sans Stripe), puis
+  /// attend la validation admin comme toute commande payée. Renvoie null si
+  /// le code est accepté, sinon le message à afficher.
+  static Future<String?> redeemPromo(String orderId, String code) async {
+    final r = await BackendClient.postJsonOrError(
+      '/api/payment/checkout',
+      {'orderId': orderId, 'promoCode': code.trim()},
+      timeout: const Duration(seconds: 30),
+    );
+    return r.error;
+  }
+
   // ── Mettre à jour le statut (admin) ───────────────────────────────────────
 
   static Future<void> updateStatus(String orderId, String status, {String? adminNote}) async {

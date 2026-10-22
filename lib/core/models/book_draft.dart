@@ -216,6 +216,10 @@ class BookDraft {
   final List<String>? featuredPhotoIds;
   final Map<String, BookPhotoText> photoTexts;
   final int pageCount;
+
+  /// Étape la plus avancée atteinte (BookStep, 0-6) — affichée sur l'accueil
+  /// (22.10.26).
+  final int maxStep;
   final DateTime updatedAt;
 
   /// 'draft' tant que le livre n'est pas commandé, puis 'ordered'.
@@ -237,6 +241,7 @@ class BookDraft {
     this.featuredPhotoIds,
     this.photoTexts = const {},
     this.pageCount = 0,
+    this.maxStep = 0,
     required this.updatedAt,
     this.status = 'draft',
   });
@@ -273,6 +278,7 @@ class BookDraft {
           : List<String>.from(d['featuredPhotoIds'] as List),
       photoTexts: texts,
       pageCount: (d['pageCount'] as num?)?.toInt() ?? 0,
+      maxStep: (d['maxStep'] as num?)?.toInt() ?? 0,
       updatedAt: (d['updatedAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       status: d['status'] as String? ?? 'draft',
     );
@@ -295,6 +301,7 @@ class BookDraft {
           for (final e in photoTexts.entries) e.value.toMap(e.key),
         ],
         'pageCount': pageCount,
+        'maxStep': maxStep,
         'status': status,
         'updatedAt': FieldValue.serverTimestamp(),
       };

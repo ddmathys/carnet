@@ -37,4 +37,37 @@ class BackendClient {
     }
     return jsonDecode(response.body) as Map<String, dynamic>;
   }
+
+  /// Comme [postJson], mais renvoie aussi le message d'erreur du backend
+  /// (`{error}`) pour l'afficher tel quel. `error` null = succès.
+  static Future<({Map<String, dynamic>? data, String? error})> postJsonOrError(
+    String path,
+    Map<String, dynamic> body, {
+    Duration timeout = const Duration(seconds: 45),
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return (data: null, error: 'Non connecté.');
+    final token = await user.getIdToken().timeout(timeout);
+    final response = await http
+        .post(
+          Uri.parse('${AppConfig.backendUrl}$path'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+          body: jsonEncode(body),
+        )
+        .timeout(timeout);
+    Map<String, dynamic>? json;
+    try {
+      json = jsonDecode(response.body) as Map<String, dynamic>;
+    } catch (_) {}
+    if (response.statusCode != 200) {
+      return (
+        data: null,
+        error: json?['error'] as String? ?? 'Erreur ${response.statusCode}',
+      );
+    }
+    return (data: json, error: null);
+  }
 }

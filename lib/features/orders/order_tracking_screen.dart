@@ -71,8 +71,7 @@ class OrdersListScreen extends StatelessWidget {
             builder: (context, bookSnap) {
               final coverByOrderId = <String, GeneratedBookModel>{
                 for (final b in bookSnap.data ?? const <GeneratedBookModel>[])
-                  if (b.orderId != null && b.orderId!.isNotEmpty)
-                    b.orderId!: b,
+                  if (b.orderId != null && b.orderId!.isNotEmpty) b.orderId!: b,
               };
               return ListView.builder(
                 padding: const EdgeInsets.all(20),
@@ -178,6 +177,7 @@ class OrderDetailScreen extends StatelessWidget {
 
 class _OrderCard extends StatelessWidget {
   final OrderModel order;
+
   /// Entrée `generatedBooks` correspondante (livre uniquement) — pour la
   /// vignette photo, voir `_OrderThumb`. Null pour un tirage (qui porte sa
   /// propre photo directement sur la commande) ou si rien n'a été retrouvé.
@@ -437,7 +437,8 @@ class _TimelineStep extends StatelessWidget {
                 Text(label,
                     style: TextStyle(
                       fontSize: 13,
-                      fontWeight: isCurrent ? FontWeight.w700 : FontWeight.normal,
+                      fontWeight:
+                          isCurrent ? FontWeight.w700 : FontWeight.normal,
                       color: isDone ? AppColors.textDark : AppColors.softGray,
                     )),
                 if (hint != null)
@@ -533,7 +534,9 @@ class _PrintStatusBannerState extends State<_PrintStatusBanner> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Erreur : ${e.toString().replaceFirst('Exception: ', '')}')),
+          SnackBar(
+              content: Text(
+                  'Erreur : ${e.toString().replaceFirst('Exception: ', '')}')),
         );
       }
     } finally {
@@ -765,7 +768,8 @@ class _PrintStatusBannerState extends State<_PrintStatusBanner> {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.support_agent_outlined, size: 18, color: AppColors.error),
+          const Icon(Icons.support_agent_outlined,
+              size: 18, color: AppColors.error),
           const SizedBox(width: 10),
           Expanded(
             child: Text(message,
@@ -833,6 +837,7 @@ class _PrintSteps extends StatelessWidget {
 /// et bouton vers le site du transporteur.
 class _ShipmentTile extends StatelessWidget {
   final OrderShipment shipment;
+
   /// Rang du colis quand la commande en compte plusieurs (sinon null).
   final int? index;
   final int? total;
@@ -851,7 +856,8 @@ class _ShipmentTile extends StatelessWidget {
   Future<void> _open(BuildContext context) async {
     final url = shipment.trackingUrl;
     if (url == null) return;
-    final ok = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
+    final ok =
+        await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     if (!ok && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Impossible d\'ouvrir le suivi')),
@@ -1091,6 +1097,53 @@ class _OrderPayButtonState extends State<OrderPayButton> {
   void _snack(String m) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
 
+  /// Code promo : commande offerte, sans page de paiement.
+  Future<void> _enterPromo() async {
+    final ctrl = TextEditingController();
+    final code = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Code promo'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(hintText: 'Ton code'),
+          onSubmitted: (v) => Navigator.pop(ctx, v),
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Annuler')),
+          ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text),
+              child: const Text('Valider')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (code == null || code.trim().isEmpty || !mounted) return;
+    setState(() => _loading = true);
+    try {
+      final error = await OrderService.redeemPromo(widget.order.id, code);
+      if (!mounted) return;
+      // Succès : le flux Firestore repasse la commande en « payée ».
+      _snack(error ?? 'Code accepté · ta commande est offerte 🎁');
+    } catch (e) {
+      if (mounted) _snack('Erreur : $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Widget _promoLink() => TextButton.icon(
+        onPressed: _loading ? null : _enterPromo,
+        icon: const Icon(Icons.card_giftcard, size: 18),
+        label: const Text("J'ai un code promo"),
+        style: TextButton.styleFrom(foregroundColor: AppColors.sageDark),
+      );
+
   @override
   Widget build(BuildContext context) {
     if (widget.order.isPaid) {
@@ -1115,32 +1168,35 @@ class _OrderPayButtonState extends State<OrderPayButton> {
     // Paiement en ligne désactivé (MVP) → on n'affiche pas de bouton « Payer »
     // mais une note : règlement par TWINT après réception, détails par e-mail.
     if (!AppConfig.paymentEnabled) {
-      return Container(
-        width: double.infinity,
-        margin: const EdgeInsets.only(bottom: 12),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: AppColors.amber.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppColors.amber.withOpacity(0.4)),
-        ),
-        child: const Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('🧾', style: TextStyle(fontSize: 18)),
-            SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Le paiement déclenche la commande de ton livre. L\'équipe '
-                'Carnet te contactera rapidement pour les instructions de '
-                'paiement, puis ton livre sera livré sous quelques jours.',
-                style: TextStyle(
-                    fontSize: 13, color: AppColors.textDark, height: 1.5),
+      return Column(children: [
+        Container(
+          width: double.infinity,
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: AppColors.amber.withOpacity(0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: AppColors.amber.withOpacity(0.4)),
+          ),
+          child: const Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('🧾', style: TextStyle(fontSize: 18)),
+              SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Le paiement déclenche la commande de ton livre. L\'équipe '
+                  'Carnet te contactera rapidement pour les instructions de '
+                  'paiement, puis ton livre sera livré sous quelques jours.',
+                  style: TextStyle(
+                      fontSize: 13, color: AppColors.textDark, height: 1.5),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      );
+        _promoLink(),
+      ]);
     }
     // Le bouton ne nomme AUCUN moyen de paiement : la page Stripe affiche ceux
     // que le compte a vraiment le droit d'encaisser (config du dashboard).
@@ -1174,6 +1230,7 @@ class _OrderPayButtonState extends State<OrderPayButton> {
           textAlign: TextAlign.center,
           style: TextStyle(fontSize: 12, color: AppColors.textMedium),
         ),
+        _promoLink(),
       ]),
     );
   }
@@ -1333,7 +1390,8 @@ class _CancelOrderButtonState extends State<_CancelOrderButton> {
                 height: 16,
                 child: CircularProgressIndicator(
                     strokeWidth: 2, color: AppColors.error))
-            : const Icon(Icons.cancel_outlined, size: 18, color: AppColors.error),
+            : const Icon(Icons.cancel_outlined,
+                size: 18, color: AppColors.error),
         label: const Text('Annuler la commande'),
         style: OutlinedButton.styleFrom(
           foregroundColor: AppColors.error,
