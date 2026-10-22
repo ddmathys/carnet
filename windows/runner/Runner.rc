@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "ch.gravendev" "\0"
+            VALUE "CompanyName", "dev.dmathys" "\0"
             VALUE "FileDescription", "bloom" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "bloom" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 ch.gravendev. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 dev.dmathys. All rights reserved." "\0"
             VALUE "OriginalFilename", "bloom.exe" "\0"
             VALUE "ProductName", "bloom" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

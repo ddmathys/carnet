@@ -8,7 +8,7 @@
 PRODUCT_NAME = bloom
 
 // The application's bundle identifier
-PRODUCT_BUNDLE_IDENTIFIER = ch.gravendev.bloom
+PRODUCT_BUNDLE_IDENTIFIER = dev.dmathys.bloom
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 ch.gravendev. All rights reserved.
+PRODUCT_COPYRIGHT = Copyright © 2026 dev.dmathys. All rights reserved.

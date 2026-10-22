@@ -37,9 +37,9 @@ class SharedMediaItem {
 /// native (Share Extension) qui n'existe pas encore dans le projet.
 class SharedMediaService {
   static const MethodChannel _channel =
-      MethodChannel('ch.gravendev.bloom/shared_media');
+      MethodChannel('dev.dmathys.carnet/shared_media');
   static const EventChannel _events =
-      EventChannel('ch.gravendev.bloom/shared_media_events');
+      EventChannel('dev.dmathys.carnet/shared_media_events');
 
   static final StreamController<List<SharedMediaItem>> _controller =
       StreamController<List<SharedMediaItem>>.broadcast();

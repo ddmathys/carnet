@@ -1,4 +1,4 @@
-package ch.gravendev.bloom
+package dev.dmathys.carnet
 
 import android.content.ClipData
 import android.content.Intent
@@ -37,13 +37,13 @@ import java.util.concurrent.Executors
 class MainActivity : FlutterActivity() {
 
     companion object {
-        private const val METHOD_CHANNEL = "ch.gravendev.bloom/shared_media"
-        private const val EVENT_CHANNEL = "ch.gravendev.bloom/shared_media_events"
+        private const val METHOD_CHANNEL = "dev.dmathys.carnet/shared_media"
+        private const val EVENT_CHANNEL = "dev.dmathys.carnet/shared_media_events"
         private const val CACHE_DIR = "shared_media"
         private const val LOG_TAG = "CarnetSharedMedia"
         // Doit correspondre au <category> de res/xml/shortcuts.xml : c'est ce
         // qui relie un raccourci publié à chaud au share-target du manifeste.
-        private const val SHARE_CATEGORY = "ch.gravendev.bloom.category.SOUVENIR"
+        private const val SHARE_CATEGORY = "dev.dmathys.carnet.category.SOUVENIR"
         private const val SHORTCUT_PREFIX = "tag_"
         // Android n'en affiche qu'une poignée ; au-delà, on encombre pour rien.
         private const val MAX_SHORTCUTS = 4

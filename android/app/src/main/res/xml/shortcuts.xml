@@ -14,9 +14,9 @@
     dans le menu de partage reste le seul moyen sûr de la figer en tête.
 -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
-    <share-target android:targetClass="ch.gravendev.bloom.MainActivity">
+    <share-target android:targetClass="dev.dmathys.carnet.MainActivity">
         <data android:mimeType="image/*" />
         <data android:mimeType="video/*" />
-        <category android:name="ch.gravendev.bloom.category.SOUVENIR" />
+        <category android:name="dev.dmathys.carnet.category.SOUVENIR" />
     </share-target>
 </shortcuts>

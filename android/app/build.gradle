@@ -21,7 +21,7 @@ def flutterVersionName = localProperties.getProperty('flutter.versionName')
 if (flutterVersionName == null) { flutterVersionName = '1.0' }
 
 android {
-    namespace "ch.gravendev.bloom"
+    namespace "dev.dmathys.carnet"
     compileSdkVersion 36
     ndkVersion flutter.ndkVersion
 
@@ -39,7 +39,7 @@ android {
     }
 
     defaultConfig {
-        applicationId "ch.gravendev.bloom"
+        applicationId "dev.dmathys.carnet"
         // flutter_gemma / MediaPipe LLM exige minSdk 24.
         minSdkVersion 24
         // Aligné sur compileSdkVersion — Google Play exige un targetSdk proche
