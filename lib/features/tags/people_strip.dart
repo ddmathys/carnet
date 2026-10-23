@@ -60,6 +60,10 @@ class _PeopleStripState extends State<PeopleStrip> {
   }
 
   Future<void> _onTapPerson(TagModel tag) async {
+    // Seul le propriétaire peut modifier/supprimer (règles Firestore) ; un
+    // tag partagé par quelqu'un d'autre n'a donc pas ces options.
+    final canEdit = !tag.isVirtual &&
+        tag.isOwner(FirebaseAuth.instance.currentUser?.uid ?? '');
     final choice = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: AppColors.background,
@@ -104,10 +108,17 @@ class _PeopleStripState extends State<PeopleStrip> {
             const SizedBox(height: 6),
             if (tag.isChild)
               ListTile(
-                leading: const Icon(Icons.show_chart,
-                    color: AppColors.sageDark),
+                leading:
+                    const Icon(Icons.show_chart, color: AppColors.sageDark),
                 title: const Text('Courbe de croissance'),
                 onTap: () => Navigator.pop(ctx, 'growth'),
+              )
+            else if (canEdit)
+              ListTile(
+                leading: const Icon(Icons.monitor_weight_outlined,
+                    color: AppColors.sageDark),
+                title: const Text('Activer les mesures (taille/poids)'),
+                onTap: () => Navigator.pop(ctx, 'measures'),
               ),
             ListTile(
               leading: const Icon(Icons.auto_stories_outlined,
@@ -124,14 +135,12 @@ class _PeopleStripState extends State<PeopleStrip> {
             ListTile(
               leading: const Icon(Icons.photo_camera_outlined,
                   color: AppColors.sageDark),
-              title: Text(
-                  tag.photoKey == null ? 'Ajouter une photo' : 'Changer la photo'),
+              title: Text(tag.photoKey == null
+                  ? 'Ajouter une photo'
+                  : 'Changer la photo'),
               onTap: () => Navigator.pop(ctx, 'photo'),
             ),
-            // Seul le propriétaire peut supprimer (règles Firestore) ; un tag
-            // partagé par quelqu'un d'autre n'a donc pas cette option.
-            if (!tag.isVirtual &&
-                tag.isOwner(FirebaseAuth.instance.currentUser?.uid ?? ''))
+            if (canEdit)
               ListTile(
                 leading:
                     const Icon(Icons.delete_outline, color: AppColors.error),
@@ -155,7 +164,20 @@ class _PeopleStripState extends State<PeopleStrip> {
       context.push('/growth/${tag.id}');
     } else if (choice == 'delete') {
       await _deletePerson(tag);
+    } else if (choice == 'measures') {
+      await _enableMeasures(tag);
     }
+  }
+
+  /// Transforme une personne existante en enfant (date de naissance + genre)
+  /// — avant le 23.10.26, ça n'était possible qu'à la création.
+  /// createChildTag convertit le tag existant du même prénom, sans doublon.
+  Future<void> _enableMeasures(TagModel tag) async {
+    final result = await showNewPersonSheet(context, measuresFor: tag.label);
+    if (result == null || !mounted) return;
+    final child = await createPersonTag(result);
+    if (child == null || !mounted) return;
+    context.push('/growth/${child.id}?add=1');
   }
 
   /// Personne taguée nulle part → supprimée tout de suite. Sinon on prévient
@@ -215,15 +237,14 @@ class _PeopleStripState extends State<PeopleStrip> {
     if (subject == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-            content:
-                Text('Pas encore de souvenir tagué avec ${tag.label}.')),
+            content: Text('Pas encore de souvenir tagué avec ${tag.label}.')),
       );
       return;
     }
     context.push(
       '/retro/view',
-      extra: RetroViewArgs(
-          subject: subject, memories: _memories, tags: _allTags),
+      extra:
+          RetroViewArgs(subject: subject, memories: _memories, tags: _allTags),
     );
   }
 
@@ -284,8 +305,11 @@ typedef NewPersonResult = ({
 /// souvenir) : David voulait pouvoir dire « c'est un enfant » dès l'ajout,
 /// pas seulement depuis le dashboard. [initialName] pré-remplit le prénom
 /// déjà tapé dans le champ de l'écran appelant.
+///
+/// [measuresFor] : prénom d'une personne EXISTANTE à qui on active les
+/// mesures — pas de champ prénom ni de switch, juste naissance + genre.
 Future<NewPersonResult?> showNewPersonSheet(BuildContext context,
-    {String initialName = ''}) {
+    {String initialName = '', String? measuresFor}) {
   return showModalBottomSheet<NewPersonResult>(
     context: context,
     isScrollControlled: true,
@@ -293,7 +317,9 @@ Future<NewPersonResult?> showNewPersonSheet(BuildContext context,
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (_) => _NewPersonSheet(initialName: initialName),
+    builder: (_) => measuresFor != null
+        ? _NewPersonSheet(initialName: measuresFor, measuresOnly: true)
+        : _NewPersonSheet(initialName: initialName),
   );
 }
 
@@ -312,7 +338,8 @@ Future<TagModel?> createPersonTag(NewPersonResult result) {
 
 class _NewPersonSheet extends StatefulWidget {
   final String initialName;
-  const _NewPersonSheet({this.initialName = ''});
+  final bool measuresOnly;
+  const _NewPersonSheet({this.initialName = '', this.measuresOnly = false});
 
   @override
   State<_NewPersonSheet> createState() => _NewPersonSheetState();
@@ -320,7 +347,7 @@ class _NewPersonSheet extends StatefulWidget {
 
 class _NewPersonSheetState extends State<_NewPersonSheet> {
   late final _nameCtrl = TextEditingController(text: widget.initialName);
-  bool _isChild = false;
+  late bool _isChild = widget.measuresOnly;
   DateTime? _birthdate;
   String _gender = 'boy';
 
@@ -355,46 +382,50 @@ class _NewPersonSheetState extends State<_NewPersonSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Nouvelle personne',
-            style: TextStyle(
+          Text(
+            widget.measuresOnly
+                ? 'Mesures de ${widget.initialName}'
+                : 'Nouvelle personne',
+            style: const TextStyle(
               fontFamily: 'Fraunces',
               fontSize: 18,
               fontWeight: FontWeight.w600,
               color: AppColors.textDark,
             ),
           ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _nameCtrl,
-            autofocus: widget.initialName.isEmpty,
-            textCapitalization: TextCapitalization.words,
-            decoration: const InputDecoration(hintText: 'Prénom'),
-            onChanged: (_) => setState(() {}),
-            onSubmitted: (_) => _submit(),
-          ),
-          const SizedBox(height: 14),
-          Row(
-            children: [
-              const Icon(Icons.monitor_weight_outlined,
-                  size: 18, color: AppColors.sage),
-              const SizedBox(width: 8),
-              const Expanded(
-                child: Text(
-                  'Activer les mesures (taille/poids)',
-                  style: TextStyle(color: AppColors.textDark, fontSize: 13),
+          if (!widget.measuresOnly) ...[
+            const SizedBox(height: 14),
+            TextField(
+              controller: _nameCtrl,
+              autofocus: widget.initialName.isEmpty,
+              textCapitalization: TextCapitalization.words,
+              decoration: const InputDecoration(hintText: 'Prénom'),
+              onChanged: (_) => setState(() {}),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 14),
+            Row(
+              children: [
+                const Icon(Icons.monitor_weight_outlined,
+                    size: 18, color: AppColors.sage),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Activer les mesures (taille/poids)',
+                    style: TextStyle(color: AppColors.textDark, fontSize: 13),
+                  ),
                 ),
-              ),
-              Switch(
-                value: _isChild,
-                activeTrackColor: AppColors.sage,
-                onChanged: (v) => setState(() {
-                  _isChild = v;
-                  if (!v) _birthdate = null;
-                }),
-              ),
-            ],
-          ),
+                Switch(
+                  value: _isChild,
+                  activeTrackColor: AppColors.sage,
+                  onChanged: (v) => setState(() {
+                    _isChild = v;
+                    if (!v) _birthdate = null;
+                  }),
+                ),
+              ],
+            ),
+          ],
           if (_isChild) ...[
             const SizedBox(height: 4),
             const Text(
@@ -432,7 +463,8 @@ class _NewPersonSheetState extends State<_NewPersonSheet> {
           const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _valid ? _submit : null,
-            style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(50)),
+            style: ElevatedButton.styleFrom(
+                minimumSize: const Size.fromHeight(50)),
             child: const Text('Continuer'),
           ),
         ],
@@ -525,8 +557,8 @@ class _PersonPastille extends StatelessWidget {
                           decoration: BoxDecoration(
                             color: AppColors.sageDark,
                             shape: BoxShape.circle,
-                            border:
-                                Border.all(color: AppColors.background, width: 2),
+                            border: Border.all(
+                                color: AppColors.background, width: 2),
                           ),
                           child: const Icon(Icons.straighten,
                               size: 12, color: Colors.white),
