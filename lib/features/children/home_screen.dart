@@ -192,13 +192,34 @@ class _HomeScreenState extends State<HomeScreen> {
       // Remplace l'ancien bandeau "Ajoute un souvenir" (ImportMediaCta),
       // toujours à portée de main sans occuper une section entière — refonte
       // dashboard du 22.09.26 (David : maquette "D", bouton flottant).
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/memory/new?import=1'),
-        backgroundColor: AppColors.sageDark,
-        foregroundColor: AppColors.onAccent,
-        icon: const Icon(Icons.add_a_photo_outlined),
-        label: const Text('Souvenir',
-            style: TextStyle(fontWeight: FontWeight.w600)),
+      // « Créer » (livre, tirage, puzzle) toujours à portée de pouce, à côté
+      // de « Souvenir » — David 23.10.26 : le « + Créer » de la section
+      // Souvenirs imprimés, tout en bas sous les brouillons, ne se voyait pas.
+      floatingActionButton: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'fab-create',
+            onPressed: () => context.push('/product/new'),
+            backgroundColor: AppColors.surface,
+            foregroundColor: AppColors.sageDark,
+            shape: const StadiumBorder(
+                side: BorderSide(color: AppColors.sageDark, width: 1.5)),
+            icon: const Icon(Icons.auto_stories_outlined),
+            label: const Text('Créer',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 10),
+          FloatingActionButton.extended(
+            heroTag: 'fab-memory',
+            onPressed: () => context.push('/memory/new?import=1'),
+            backgroundColor: AppColors.sageDark,
+            foregroundColor: AppColors.onAccent,
+            icon: const Icon(Icons.add_a_photo_outlined),
+            label: const Text('Souvenir',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          ),
+        ],
       ),
     );
   }
