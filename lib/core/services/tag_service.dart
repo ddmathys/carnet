@@ -441,6 +441,11 @@ class TagService {
     await writer.flush();
   }
 
+  /// Nombre de mes souvenirs qui portent ce tag — décide s'il faut prévenir
+  /// avant de supprimer une personne.
+  static Future<int> countMemories(TagModel tag) async =>
+      (await _memoriesWithTag(tag.id)).length;
+
   /// Supprime le tag et le retire des souvenirs (les souvenirs, eux, restent).
   static Future<void> delete(TagModel tag) async {
     final uid = _uid;
@@ -451,14 +456,29 @@ class TagService {
 
     final writer = ChunkedWriter(_db);
     for (final doc in memories) {
-      final ids = List<String>.from(doc.data()['tagIds'] ?? [])
-        ..remove(tag.id);
-      final labels = [
-        for (final id in ids) tagsById[id]?.label ?? '',
-      ]..removeWhere((l) => l.isEmpty);
+      final data = doc.data();
+      final ids = List<String>.from(data['tagIds'] ?? []);
+      final labels = List<String>.from(data['tagLabels'] ?? []);
+      final kinds = List<String>.from(data['tagKinds'] ?? []);
+      // Retrait à la même position dans les trois listes parallèles : les
+      // reconstruire depuis MES tags (comme avant le 23.10.26) faisait
+      // perdre au souvenir les libellés des tags partagés par d'autres, et
+      // désalignait `tagKinds`.
+      final i = ids.indexOf(tag.id);
+      if (i < 0) continue;
+      final aligned = labels.length == ids.length;
+      ids.removeAt(i);
+      if (aligned) {
+        labels.removeAt(i);
+      } else {
+        labels.removeWhere(
+            (l) => l.trim().toLowerCase() == tag.label.trim().toLowerCase());
+      }
+      if (kinds.length == ids.length + 1) kinds.removeAt(i);
       await writer.update(doc.reference, {
         'tagIds': ids,
         'tagLabels': labels,
+        if (data.containsKey('tagKinds')) 'tagKinds': kinds,
         'sharedWith': _sharedUnion(ids, tagsById, uid),
       });
     }

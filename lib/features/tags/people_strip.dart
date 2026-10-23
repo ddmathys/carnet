@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/models/memory_model.dart';
@@ -127,6 +128,17 @@ class _PeopleStripState extends State<PeopleStrip> {
                   tag.photoKey == null ? 'Ajouter une photo' : 'Changer la photo'),
               onTap: () => Navigator.pop(ctx, 'photo'),
             ),
+            // Seul le propriétaire peut supprimer (règles Firestore) ; un tag
+            // partagé par quelqu'un d'autre n'a donc pas cette option.
+            if (!tag.isVirtual &&
+                tag.isOwner(FirebaseAuth.instance.currentUser?.uid ?? ''))
+              ListTile(
+                leading:
+                    const Icon(Icons.delete_outline, color: AppColors.error),
+                title: const Text('Supprimer',
+                    style: TextStyle(color: AppColors.error)),
+                onTap: () => Navigator.pop(ctx, 'delete'),
+              ),
             const SizedBox(height: 6),
           ],
         ),
@@ -141,6 +153,50 @@ class _PeopleStripState extends State<PeopleStrip> {
       context.push('/memories?tag=${tag.id}');
     } else if (choice == 'growth') {
       context.push('/growth/${tag.id}');
+    } else if (choice == 'delete') {
+      await _deletePerson(tag);
+    }
+  }
+
+  /// Personne taguée nulle part → supprimée tout de suite. Sinon on prévient
+  /// d'abord : le tag sera retiré des souvenirs (qui, eux, restent).
+  Future<void> _deletePerson(TagModel tag) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final count = await TagService.countMemories(tag);
+    if (!mounted) return;
+    if (count > 0) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Supprimer ${tag.label} ?'),
+          content: Text(
+            '${tag.label} est taguée sur $count souvenir${count > 1 ? 's' : ''}. '
+            'Le tag sera retiré de ${count > 1 ? 'ces souvenirs' : 'ce souvenir'}, '
+            'les souvenirs eux-mêmes sont conservés.'
+            '${tag.isChild ? '\n\nSes mesures ne seront plus reliées à sa courbe de croissance.' : ''}',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Supprimer',
+                  style: TextStyle(color: AppColors.error)),
+            ),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    try {
+      await TagService.delete(tag);
+      messenger.showSnackBar(
+          SnackBar(content: Text('${tag.label} a été supprimé·e.')));
+    } catch (_) {
+      messenger.showSnackBar(
+          const SnackBar(content: Text('Suppression impossible, réessaie.')));
     }
   }
 
