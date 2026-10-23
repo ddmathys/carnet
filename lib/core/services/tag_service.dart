@@ -297,6 +297,23 @@ class TagService {
     final clean = label.trim();
     if (uid == null || clean.isEmpty) return null;
 
+    // Une personne de ce prénom existe déjà chez moi (créée sans mesures,
+    // ou un instant plus tôt depuis un autre écran) : on la transforme en
+    // enfant plutôt que d'en créer une deuxième — sinon deux pastilles
+    // « Elodie » sur le dashboard (vu le 23.10.26).
+    for (final t in await myTags()) {
+      if (t.label.trim().toLowerCase() != clean.toLowerCase()) continue;
+      if (t.kind != 'personne' && t.kind != 'libre' && t.kind != 'enfant') {
+        continue;
+      }
+      await _col.doc(t.id).update({
+        'kind': 'enfant',
+        'birthdate': Timestamp.fromDate(birthdate),
+        'gender': gender,
+      });
+      return TagModel.fromFirestore(await _col.doc(t.id).get());
+    }
+
     final tag = TagModel(
       id: '',
       userId: uid,
