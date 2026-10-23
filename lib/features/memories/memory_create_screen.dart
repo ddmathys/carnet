@@ -2277,9 +2277,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
         onRemove: () => _removeExistingPhoto(url),
       ));
     }
+    // Vignettes décodées à taille d'affichage (cacheWidth), pas en 1920 px :
+    // la grille construit TOUTES ses cases (shrinkWrap), et 300 photos pleine
+    // taille = plusieurs Go de RAM → l'app était tuée dès la validation d'un
+    // gros import (23.10.26). La 1ʳᵉ case, en pleine largeur, garde plus de
+    // définition.
     for (var j = 0; j < _localPhotos.length; j++) {
+      final isFirstTile = specs.isEmpty;
       specs.add(_MediaSpec(
-        thumb: Image.file(_localPhotos[j], fit: BoxFit.cover),
+        thumb: Image.file(_localPhotos[j],
+            fit: BoxFit.cover, cacheWidth: isFirstTile ? 1080 : 400),
         isVideo: false,
         duration: '',
         onTap: () => _openPhotoViewer(_existingPhotoUrls.length + j),
@@ -3279,6 +3286,16 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
       initialLabels: before,
     );
     if (result == null || !mounted) return;
+    // Le sélecteur peut avoir créé un enfant (mesures activées) : on recharge
+    // les tags pour que son tag 'enfant' — et donc la courbe — soit connu ici.
+    final added = result.difference(before);
+    if (added.isNotEmpty) {
+      try {
+        final tags = await TagService.visibleTags();
+        if (!mounted) return;
+        _allTags = tags;
+      } catch (_) {}
+    }
     setState(() {
       for (final label in before) {
         if (!result.contains(label)) {
@@ -3350,7 +3367,7 @@ class _MemoryCreateScreenState extends State<MemoryCreateScreen> {
                   _PhotoThumb(
                     onTap: () =>
                         _openPhotoViewer(_existingPhotoUrls.length + i),
-                    child: Image.file(_localPhotos[i], width: 90, height: 90, fit: BoxFit.cover),
+                    child: Image.file(_localPhotos[i], width: 90, height: 90, fit: BoxFit.cover, cacheWidth: 270),
                     onRemove: () => _removeLocalPhoto(i),
                   ),
                 GestureDetector(

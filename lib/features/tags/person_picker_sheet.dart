@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../core/theme/app_theme.dart';
 import '../../core/models/tag_model.dart';
 import '../../core/services/tag_service.dart';
+import 'people_strip.dart' show showNewPersonSheet, createPersonTag;
 import 'person_avatar.dart';
 import 'tag_picker_sheet.dart' show categoryOfKind, TagCategory;
 
@@ -99,9 +100,29 @@ class _PersonPickerSheetState extends State<_PersonPickerSheet> {
     return out;
   }
 
-  void _addNew() {
-    final label = _newCtrl.text.trim();
-    if (label.isEmpty) return;
+  /// Une personne déjà connue est simplement cochée. Une nouvelle passe par
+  /// la sheet « Nouvelle personne » (prénom pré-rempli) : c'est là qu'on
+  /// active les mesures d'un enfant. Un enfant est créé en base tout de
+  /// suite (le tag doit porter sa date de naissance) ; une personne simple
+  /// reste, comme avant, créée à l'enregistrement du souvenir.
+  Future<void> _addNew() async {
+    final typed = _newCtrl.text.trim();
+    final known = typed.isEmpty ? null : _tagFor(typed);
+    if (known != null) {
+      setState(() {
+        _selected.add(known.label);
+        _newCtrl.clear();
+      });
+      return;
+    }
+    final result = await showNewPersonSheet(context, initialName: typed);
+    if (result == null || !mounted) return;
+    final label = result.name;
+    if (result.isChild) {
+      final tag = await createPersonTag(result);
+      if (tag == null || !mounted) return;
+      _tagOverrides[label.toLowerCase()] = tag;
+    }
     setState(() {
       if (!_created.contains(label) &&
           !widget.tags.any((t) => _isPersonKind(t.kind) && t.label == label)) {

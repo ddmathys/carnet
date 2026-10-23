@@ -181,13 +181,7 @@ class _PeopleStripState extends State<PeopleStrip> {
   Future<void> _addPerson() async {
     final result = await showNewPersonSheet(context);
     if (result == null || !mounted) return;
-    final tag = result.isChild
-        ? await TagService.createChildTag(
-            label: result.name,
-            birthdate: result.birthdate!,
-            gender: result.gender!,
-          )
-        : await TagService.ensureTag(result.name, kind: 'personne');
+    final tag = await createPersonTag(result);
     if (tag == null || !mounted) return;
     // Enchaîne directement sur le choix de la photo — c'est le geste qu'on
     // est venu faire ici, pas juste créer un nom.
@@ -228,11 +222,14 @@ typedef NewPersonResult = ({
 
 /// Sheet "Nouvelle personne", avec le toggle "Activer les mesures
 /// (taille/poids)" dès le départ — si activé, demande date de naissance +
-/// genre (mêmes champs que _AddChildSheet dans memory_create_screen.dart,
-/// dupliqués ici plutôt que partagés : cette sheet-là est privée à cet
-/// écran, et factoriser à travers deux fichiers pour ~60 lignes n'apportait
-/// rien).
-Future<NewPersonResult?> showNewPersonSheet(BuildContext context) {
+/// genre (mêmes champs que _AddChildSheet dans memory_create_screen.dart).
+/// Partagée depuis le 23.10.26 par les trois endroits où l'on crée une
+/// personne (cette rangée, l'onboarding, le sélecteur de personnes d'un
+/// souvenir) : David voulait pouvoir dire « c'est un enfant » dès l'ajout,
+/// pas seulement depuis le dashboard. [initialName] pré-remplit le prénom
+/// déjà tapé dans le champ de l'écran appelant.
+Future<NewPersonResult?> showNewPersonSheet(BuildContext context,
+    {String initialName = ''}) {
   return showModalBottomSheet<NewPersonResult>(
     context: context,
     isScrollControlled: true,
@@ -240,19 +237,33 @@ Future<NewPersonResult?> showNewPersonSheet(BuildContext context) {
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
     ),
-    builder: (_) => const _NewPersonSheet(),
+    builder: (_) => _NewPersonSheet(initialName: initialName),
   );
 }
 
+/// Crée en base la personne décrite par la sheet : un tag 'enfant' (date de
+/// naissance → courbe de croissance) si les mesures sont activées, sinon un
+/// simple tag 'personne'.
+Future<TagModel?> createPersonTag(NewPersonResult result) {
+  return result.isChild
+      ? TagService.createChildTag(
+          label: result.name,
+          birthdate: result.birthdate!,
+          gender: result.gender!,
+        )
+      : TagService.ensureTag(result.name, kind: 'personne');
+}
+
 class _NewPersonSheet extends StatefulWidget {
-  const _NewPersonSheet();
+  final String initialName;
+  const _NewPersonSheet({this.initialName = ''});
 
   @override
   State<_NewPersonSheet> createState() => _NewPersonSheetState();
 }
 
 class _NewPersonSheetState extends State<_NewPersonSheet> {
-  final _nameCtrl = TextEditingController();
+  late final _nameCtrl = TextEditingController(text: widget.initialName);
   bool _isChild = false;
   DateTime? _birthdate;
   String _gender = 'boy';
@@ -300,7 +311,7 @@ class _NewPersonSheetState extends State<_NewPersonSheet> {
           const SizedBox(height: 14),
           TextField(
             controller: _nameCtrl,
-            autofocus: true,
+            autofocus: widget.initialName.isEmpty,
             textCapitalization: TextCapitalization.words,
             decoration: const InputDecoration(hintText: 'Prénom'),
             onChanged: (_) => setState(() {}),

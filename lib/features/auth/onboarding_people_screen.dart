@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import '../../core/models/tag_model.dart';
-import '../../core/services/tag_service.dart';
 import '../../core/theme/app_theme.dart';
+import '../tags/people_strip.dart' show showNewPersonSheet, createPersonTag;
 import '../tags/person_avatar.dart';
 
 /// Premier écran après la création d'un compte (jamais après une simple
@@ -30,11 +30,15 @@ class _OnboardingPeopleScreenState extends State<OnboardingPeopleScreen> {
     super.dispose();
   }
 
+  /// Passe par la sheet « Nouvelle personne » (prénom pré-rempli) pour
+  /// pouvoir activer les mesures d'un enfant dès l'inscription.
   Future<void> _addPerson() async {
-    final name = _nameCtrl.text.trim();
-    if (name.isEmpty || _adding) return;
+    if (_adding) return;
+    final result = await showNewPersonSheet(context,
+        initialName: _nameCtrl.text.trim());
+    if (result == null || !mounted) return;
     setState(() => _adding = true);
-    final tag = await TagService.ensureTag(name, kind: 'personne');
+    final tag = await createPersonTag(result);
     if (!mounted) return;
     setState(() => _adding = false);
     if (tag == null) return;
