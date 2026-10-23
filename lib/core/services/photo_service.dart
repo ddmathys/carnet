@@ -47,7 +47,47 @@ class PhotoService {
 
   /// Upload une photo vers R2 via une URL PUT signée par le backend. Retourne
   /// la CLÉ d'objet (à stocker dans `mediaKeys`), ou null en cas d'échec.
+  ///
+  /// Au plus [_maxParallelUploads] photos à la fois, app-wide : chaque
+  /// compression décode la photo entière en mémoire native (~30–50 Mo pour un
+  /// 12 MP). Sans plafond, valider 6 mois de photos d'un coup lançait des
+  /// centaines de décodages en parallèle et Android tuait l'app sur-le-champ
+  /// (signalé le 23.10.26).
   static Future<String?> uploadMemoryPhotoToR2({
+    required File photo,
+    required String notebookId,
+  }) async {
+    await _acquireUploadSlot();
+    try {
+      return await _uploadMemoryPhotoToR2(photo: photo, notebookId: notebookId);
+    } finally {
+      _releaseUploadSlot();
+    }
+  }
+
+  static const int _maxParallelUploads = 3;
+  static int _activeUploads = 0;
+  static final _uploadWaiters = <Completer<void>>[];
+
+  static Future<void> _acquireUploadSlot() async {
+    if (_activeUploads < _maxParallelUploads) {
+      _activeUploads++;
+      return;
+    }
+    final waiter = Completer<void>();
+    _uploadWaiters.add(waiter);
+    await waiter.future; // le slot est transmis tel quel par _releaseUploadSlot
+  }
+
+  static void _releaseUploadSlot() {
+    if (_uploadWaiters.isNotEmpty) {
+      _uploadWaiters.removeAt(0).complete();
+    } else {
+      _activeUploads--;
+    }
+  }
+
+  static Future<String?> _uploadMemoryPhotoToR2({
     required File photo,
     required String notebookId,
   }) async {
