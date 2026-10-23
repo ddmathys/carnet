@@ -289,9 +289,15 @@ async function handleDeleteAccount(req: VercelRequest, res: VercelResponse) {
 
     // 6. Tags : ceux possédés sont supprimés ; sur ceux des autres, on retire
     //    juste l'utilisateur de `sharedWith` (ne touche pas aux données d'autrui).
+    // Photo de tête des personnes (`photoKey`, R2) : restait orpheline
+    // jusqu'au 23.10.26.
     const ownedTagsDone = await drainQuery(
       db.collection('tags').where('userId', '==', uid),
-      deadline
+      deadline,
+      async (doc) => {
+        const k = doc.data().photoKey
+        if (typeof k === 'string' && k) await deleteObject(k).catch(() => {})
+      }
     )
     if (!ownedTagsDone) return res.status(200).json({ ok: true, done: false, step: 'tags' })
 
@@ -426,12 +432,146 @@ async function handleDeleteAccount(req: VercelRequest, res: VercelResponse) {
   }
 }
 
+// Efface toutes les DONNÉES de l'utilisateur mais garde son compte — bouton
+// « Supprimer toutes mes données » du Profil (23.10.26). Même parcours que
+// handleDeleteAccount (par tours de 45 s, reprenable) avec trois différences :
+//  - le compte de connexion et le profil `users/{uid}` restent ;
+//  - les commandes ne sont pas touchées (le compte existe toujours, une
+//    commande en cours doit pouvoir aboutir) — et le PDF d'un livre encore
+//    référencé par une commande n'est donc pas effacé de R2 ;
+//  - on ne quitte pas les espaces partagés par d'autres (ce ne sont pas ses
+//    données).
+// Chaque tour renvoie ce qu'il a effacé (`counts`) : l'app additionne et
+// montre le bilan, pour que l'utilisateur VOIE que tout est parti.
+async function handleWipeData(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' })
+  }
+  const user = await requireAuth(req, res)
+  if (!user) return
+  const uid = user.uid
+  const deadline = Date.now() + DELETE_BUDGET_MS
+  const counts = {
+    memories: 0,
+    photos: 0,
+    videos: 0,
+    audios: 0,
+    people: 0,
+    tags: 0,
+    books: 0,
+  }
+  const pending = (step: string) =>
+    res.status(200).json({ ok: true, done: false, step, counts })
+
+  try {
+    const memoriesDone = await drainQuery(
+      db.collection('memories').where('userId', '==', uid),
+      deadline,
+      async (doc) => {
+        const m = doc.data()
+        const photos = photoKeysOf(m)
+        const videos = videoKeysOf(m)
+        const audioKey = audioKeyOf(m)
+        const keys = [...photos, ...videos]
+        if (audioKey) keys.push(audioKey)
+        await Promise.allSettled(keys.map((k) => deleteObject(k)))
+        counts.memories++
+        counts.photos += photos.length
+        counts.videos += videos.length
+        if (audioKey) counts.audios++
+      }
+    )
+    if (!memoriesDone) return pending('memories')
+
+    // PDF encore utilisés par une commande : on les laisse (voir plus haut).
+    const orderPdfKeys = new Set<string>()
+    const ordersSnap = await db.collection('orders').where('userId', '==', uid).get()
+    for (const doc of ordersSnap.docs) {
+      const pdfUrl = doc.data().pdfUrl
+      if (typeof pdfUrl !== 'string' || !pdfUrl) continue
+      try {
+        const key = new URL(pdfUrl).searchParams.get('key')
+        if (key) orderPdfKeys.add(key)
+      } catch {
+        // ancien format, rien à protéger
+      }
+    }
+    const booksDone = await drainQuery(
+      db.collection('generatedBooks').where('userId', '==', uid),
+      deadline,
+      async (doc) => {
+        const b = doc.data() as Record<string, unknown>
+        const keys = [b.storagePath, b.coverPhotoKey].filter(
+          (k): k is string =>
+            typeof k === 'string' && k.length > 0 && !orderPdfKeys.has(k)
+        )
+        await Promise.allSettled(keys.map((k) => deleteObject(k)))
+        counts.books++
+      }
+    )
+    if (!booksDone) return pending('generatedBooks')
+
+    for (const [col, field] of [
+      ['bookDrafts', 'userId'],
+      ['books', 'userId'],
+    ] as const) {
+      const done = await drainQuery(db.collection(col).where(field, '==', uid), deadline)
+      if (!done) return pending(col)
+    }
+
+    const childrenSnap = await db.collection('children').where('parentId', '==', uid).get()
+    for (const child of childrenSnap.docs) {
+      const done = await drainQuery(
+        db.collection('milestones').where('childId', '==', child.id),
+        deadline
+      )
+      if (!done) return pending('milestones')
+      await child.ref.delete()
+    }
+
+    const tagsDone = await drainQuery(
+      db.collection('tags').where('userId', '==', uid),
+      deadline,
+      async (doc) => {
+        const t = doc.data()
+        if (typeof t.photoKey === 'string' && t.photoKey) {
+          await deleteObject(t.photoKey).catch(() => {})
+        }
+        if (t.kind === 'personne' || t.kind === 'enfant') counts.people++
+        else counts.tags++
+      }
+    )
+    if (!tagsDone) return pending('tags')
+
+    for (const [col, field] of [
+      ['notebooks', 'userId'],
+      ['posterReels', 'userId'],
+      ['notebookInvites', 'createdBy'],
+      ['tagInvites', 'createdBy'],
+      ['shares', 'ownerUid'],
+      ['memoryActivities', 'actorUid'],
+    ] as const) {
+      const done = await drainQuery(db.collection(col).where(field, '==', uid), deadline)
+      if (!done) return pending(col)
+    }
+
+    await db.collection('storageUsage').doc(uid).delete().catch(() => {})
+
+    return res.status(200).json({ ok: true, done: true, counts })
+  } catch (e) {
+    return res
+      .status(500)
+      .json({ error: `Suppression interrompue, relance pour continuer : ${e}` })
+  }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = (req.query.action ?? '') as string
 
   if (action === 'invite') return handleInvite(req, res)
   if (action === 'join') return handleJoin(req, res)
   if (action === 'delete-account') return handleDeleteAccount(req, res)
+  if (action === 'wipe-data') return handleWipeData(req, res)
 
   return res.status(404).json({ error: 'Action inconnue' })
 }

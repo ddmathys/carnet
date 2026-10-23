@@ -21,6 +21,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _saving = false;
   String? _error;
   bool _deletingAccount = false;
+  bool _wipingData = false;
 
   @override
   void initState() {
@@ -185,6 +186,182 @@ class _ProfileScreenState extends State<ProfileScreen> {
         content: Text(
             'Suppression très longue — relance-la pour terminer. Tout ce qui '
             'est déjà supprimé l\'est définitivement.'),
+      ),
+    );
+  }
+
+  // ── Effacer toutes mes données (le compte reste) ─────────────────────────
+  // 23.10.26 : David voulait que l'utilisateur puisse tout effacer (photos,
+  // vidéos, souvenirs…) sans fermer son compte, et VOIE que c'est fait —
+  // d'où le bilan chiffré à la fin. Backend : action wipe-data de
+  // backend/api/notebook/[action].ts, reprenable par tours comme
+  // delete-account. Les commandes, elles, sont conservées.
+  Future<void> _confirmWipeData() async {
+    var understood = false;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: const Text('Effacer toutes tes données ?'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Cette action est IRRÉVERSIBLE. Seront supprimés de nos '
+                'serveurs : tous tes souvenirs (photos, vidéos, mémos '
+                'vocaux), les mesures de croissance, les personnes et tags, '
+                'tes livres et brouillons, tes liens de partage.\n\n'
+                'Ton compte reste actif, et tes commandes sont conservées.',
+                style: TextStyle(color: AppColors.textMedium, height: 1.5),
+              ),
+              const SizedBox(height: 16),
+              InkWell(
+                onTap: () => setDialogState(() => understood = !understood),
+                borderRadius: BorderRadius.circular(8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Checkbox(
+                      value: understood,
+                      activeColor: AppColors.error,
+                      onChanged: (v) =>
+                          setDialogState(() => understood = v ?? false),
+                    ),
+                    const Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(top: 12),
+                        child: Text(
+                          'J\'ai compris, mes données seront effacées '
+                          'définitivement.',
+                          style: TextStyle(
+                              fontSize: 13, color: AppColors.textDark),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Annuler',
+                  style: TextStyle(color: AppColors.textMedium)),
+            ),
+            ElevatedButton(
+              onPressed: understood ? () => Navigator.pop(ctx, true) : null,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.error,
+                disabledBackgroundColor: AppColors.error.withOpacity(0.35),
+              ),
+              child: const Text('Tout effacer'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed == true) await _wipeData();
+  }
+
+  Future<void> _wipeData() async {
+    setState(() => _wipingData = true);
+    // Chaque tour renvoie ce qu'IL a effacé : on additionne.
+    final totals = <String, int>{};
+    for (var round = 0; round < _deleteMaxRounds; round++) {
+      final result = await BackendClient.postJson(
+        '/api/notebook/wipe-data',
+        const {},
+        timeout: const Duration(seconds: 55),
+      );
+      if (!mounted) return;
+      if (result == null) {
+        setState(() => _wipingData = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+                'Suppression interrompue — vérifie ta connexion et relance. '
+                'Elle reprendra là où elle s\'est arrêtée.'),
+          ),
+        );
+        return;
+      }
+      final counts = result['counts'];
+      if (counts is Map) {
+        counts.forEach((k, v) {
+          if (v is num) totals['$k'] = (totals['$k'] ?? 0) + v.toInt();
+        });
+      }
+      if (result['done'] == true) {
+        setState(() => _wipingData = false);
+        await _showWipeSummary(totals);
+        if (mounted) context.go('/home');
+        return;
+      }
+    }
+    setState(() => _wipingData = false);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Suppression très longue — relance-la pour terminer.'),
+      ),
+    );
+  }
+
+  Future<void> _showWipeSummary(Map<String, int> t) {
+    String line(String key, String one, String many) {
+      final n = t[key] ?? 0;
+      return '$n ${n > 1 ? many : one}';
+    }
+
+    final lines = [
+      line('memories', 'souvenir', 'souvenirs'),
+      line('photos', 'photo', 'photos'),
+      line('videos', 'vidéo', 'vidéos'),
+      line('audios', 'mémo vocal', 'mémos vocaux'),
+      line('people', 'personne', 'personnes'),
+      line('tags', 'tag', 'tags'),
+      line('books', 'livre', 'livres'),
+    ];
+    return showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle, color: AppColors.sageDark),
+            SizedBox(width: 8),
+            Expanded(child: Text('Tes données sont effacées')),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Supprimé de nos serveurs :',
+                style: TextStyle(color: AppColors.textMedium)),
+            const SizedBox(height: 8),
+            for (final l in lines)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: Text('•  $l',
+                    style: const TextStyle(color: AppColors.textDark)),
+              ),
+            const SizedBox(height: 10),
+            const Text(
+              'Ton compte reste actif : tu peux repartir de zéro.',
+              style: TextStyle(color: AppColors.textMedium, fontSize: 13),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
+          ),
+        ],
       ),
     );
   }
@@ -415,25 +592,41 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
               ),
             ],
-            const SizedBox(height: 12),
-            TextButton.icon(
-              onPressed: _deletingAccount ? null : _confirmDeleteAccount,
-              icon: _deletingAccount
-                  ? const SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.error),
-                    )
-                  : const Icon(Icons.delete_forever_outlined,
-                      size: 18, color: AppColors.error),
-              label: Text(
-                _deletingAccount
-                    ? 'Suppression en cours…'
-                    : 'Supprimer mon compte',
-                style: const TextStyle(color: AppColors.error),
-              ),
+            // Section « Mes données » : avant le 23.10.26, « Supprimer mon
+            // compte » n'était qu'un petit lien tout en bas — David ne le
+            // voyait pas. Deux vrais boutons, avec ce que chacun fait.
+            const SizedBox(height: 28),
+            const Text(
+              'MES DONNÉES',
+              style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textMedium,
+                  letterSpacing: 1.2),
             ),
+            const SizedBox(height: 10),
+            _DangerButton(
+              icon: Icons.cleaning_services_outlined,
+              label: 'Supprimer toutes mes données',
+              hint: 'Photos, vidéos, souvenirs, personnes… Ton compte reste.',
+              busyLabel: 'Effacement en cours…',
+              busy: _wipingData,
+              onPressed: (_wipingData || _deletingAccount)
+                  ? null
+                  : _confirmWipeData,
+            ),
+            const SizedBox(height: 10),
+            _DangerButton(
+              icon: Icons.delete_forever_outlined,
+              label: 'Supprimer mon compte',
+              hint: 'Tout est effacé, compte de connexion compris.',
+              busyLabel: 'Suppression en cours…',
+              busy: _deletingAccount,
+              onPressed: (_wipingData || _deletingAccount)
+                  ? null
+                  : _confirmDeleteAccount,
+            ),
+            const SizedBox(height: 16),
           ],
         ),
       ),
@@ -849,6 +1042,66 @@ class _ShareAppCard extends StatelessWidget {
                 ),
               ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Bouton destructif de la section « Mes données » : bien visible (bordure
+/// rouge, pleine largeur) avec une ligne qui dit ce qu'il efface.
+class _DangerButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String hint;
+  final String busyLabel;
+  final bool busy;
+  final VoidCallback? onPressed;
+  const _DangerButton({
+    required this.icon,
+    required this.label,
+    required this.hint,
+    required this.busyLabel,
+    required this.busy,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor: AppColors.error,
+        side: const BorderSide(color: AppColors.error),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        alignment: Alignment.centerLeft,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      child: Row(
+        children: [
+          busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: AppColors.error),
+                )
+              : Icon(icon, size: 20, color: AppColors.error),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(busy ? busyLabel : label,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600, fontSize: 14)),
+                const SizedBox(height: 2),
+                Text(hint,
+                    style: const TextStyle(
+                        fontSize: 12, color: AppColors.textMedium)),
+              ],
+            ),
           ),
         ],
       ),
