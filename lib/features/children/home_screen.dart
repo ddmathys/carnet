@@ -506,6 +506,9 @@ class _HomeScreenState extends State<HomeScreen> {
   /// « commande(s) en cours » couvre les trois types (déjà générique, basé
   /// sur le statut, pas le type de produit). N'affiche RIEN (pas même le
   /// titre) s'il n'y a ni livre, ni tirage/puzzle, ni commande en cours.
+  /// 23.10.26 : sauf que « + Créer » est la SEULE entrée vers /product/new —
+  /// un compte neuf ne pouvait donc rien créer. Sans rien d'imprimé, on
+  /// garde le titre + le bouton et une ligne d'invitation.
   Widget _printedSection(BuildContext context) {
     final uid = FirebaseAuth.instance.currentUser?.uid;
     return StreamBuilder<List<GeneratedBookModel>>(
@@ -524,9 +527,8 @@ class _HomeScreenState extends State<HomeScreen> {
             final prints = orders.where((o) => o.isPoster || o.isPuzzle).toList()
               ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-            if (books.isEmpty && prints.isEmpty && activeOrders.isEmpty) {
-              return const SizedBox.shrink();
-            }
+            final nothingYet =
+                books.isEmpty && prints.isEmpty && activeOrders.isEmpty;
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -559,6 +561,15 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
+                if (nothingYet)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(22, 0, 22, 8),
+                    child: Text(
+                      'Fais de tes souvenirs un livre, un tirage ou un puzzle.',
+                      style:
+                          TextStyle(fontSize: 13, color: AppColors.textMedium),
+                    ),
+                  ),
                 if (activeOrders.isNotEmpty)
                   _ActiveOrdersCard(orders: activeOrders),
                 if (books.isNotEmpty)
